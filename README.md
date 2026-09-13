@@ -1,7 +1,7 @@
-# rhbyv CPU
+# hgb-aisystem
 
-`rhbyv-cpu-forlinux` 是一个使用 SystemVerilog 编写的单发射、顺序执行 RISC-V
-处理器项目。当前 A5 基线采用六级流水线：
+`hgb-aisystem` 是基于一个使用 SystemVerilog 编写的单发射、顺序执行 RISC-V
+处理器项目，此外还将添加软件栈与ai功能。当前 A5 基线采用六级流水线：
 
 ```text
 IF → D1 → D2 → EX → MEM → WB
