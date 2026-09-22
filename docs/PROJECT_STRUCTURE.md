@@ -2,19 +2,20 @@
 
 ## 当前边界
 
-本项目按“可移植 Core、仿真平台、FPGA 平台”分层。当前 A5 已完成六级
-RV32I/RV64I Core、Zicsr、机器模式同步异常、裸机 C 与 CoreMark 验证闭环；FPGA BRAM、
-UART、中断、Cache、M/C 扩展和操作系统支持仍属于后续阶段。
+本项目按“可移植 Core、仿真平台、FPGA 平台”分层。当前 A5 基线加 B 阶段基础 M，
+已完成六级 RV32IM/RV64IM、Zicsr、机器模式同步异常、裸机 C 与 CoreMark 仿真闭环；
+FPGA BRAM、UART、中断、Cache、C 扩展和操作系统支持仍属于后续阶段。平台目标为
+Zynq-7020 和紫光同创盘古 676-200K Pro，详见 [平台适配](PLATFORM_ADAPTATION.md)。
 
 ```text
-rhbyv-cpu-forlinux/
+hgb-aisystem_riscv/
 ├── vsrc/          # SystemVerilog RTL 与仿真模型
 ├── tb/            # 单元、整核和上游 ISA 测试适配
 ├── scripts/       # 源码清单、Verilator、工具链和 Vivado 脚本
 ├── riscv-tests/   # 可选的只读上游参考 clone，由父仓库忽略
 ├── benchmark/     # 裸机 BSP、C smoke、CoreMark vendor 与 port
-├── ip/            # Vivado IP 配置预留
-├── constr/        # Zynq-7020 XDC 约束预留
+├── ip/            # 厂商 IP 配置预留，后续按平台隔离
+├── constr/        # 引脚与时序约束预留，后续按平台隔离
 ├── docs/          # 项目文档
 ├── build/         # 自动生成的编译结果，不提交
 └── logs/          # 自动生成的日志，不提交
@@ -26,8 +27,8 @@ rhbyv-cpu-forlinux/
 
 | 文件 | 作用 |
 |---|---|
-| `pkg/core_config_pkg.sv` | XLEN、总线宽度、BTB/PHT 等构建参数 |
-| `pkg/riscv_unpriv_pkg.sv` | RV32I/RV64I、Zicsr 非特权编码 |
+| `pkg/core_config_pkg.sv` | XLEN、总线宽度、BTB/PHT、MUL_IMPL/DIV_IMPL 等构建参数 |
+| `pkg/riscv_unpriv_pkg.sv` | RV32I/RV64I/M、Zicsr 非特权编码 |
 | `pkg/riscv_priv_pkg.sv` | MRET、机器 CSR、异常与中断编号 |
 | `pkg/core_types_pkg.sv` | uOp、执行操作和寄存器地址类型 |
 | `pkg/pipeline_pkg.sv` | 流水包、异常、重定向、预测更新、前递和流水动作 |
@@ -41,10 +42,11 @@ rhbyv-cpu-forlinux/
 |---|---|
 | `frontend/` | IF 请求/响应、BTB、GShare、预测器和更新仲裁 |
 | `decode/` | Decoder、立即数、D1/D2 和 D1 异常检测 |
-| `execute/` | ALU、分支、GPR 旁路、EX 和 EX 异常检测 |
+| `execute/` | ALU、分支、GPR 旁路、EX/异常检测；M 模块位于下级 `M_extension/` |
+| `execute/M_extension/` | EX 适配、唯一 MDU 握手层、乘除语义层、三种无符号乘法与两种无符号除法后端 |
 | `lsu/` | Load/Store 字节通道和 MEM 请求发射 |
 | `csr/` | CSR 运算、访问检查、WARL、旁路和状态寄存器 |
-| `control/` | load-use、流水事件仲裁和异常序列化 |
+| `control/` | load-use、MDU 等待、流水事件仲裁和异常序列化 |
 | `writeback/` | Load 响应、GPR/CSR 提交、Trap/MRET 重定向 |
 | `common/` | RegFile 等跨功能域基础模块 |
 
@@ -56,14 +58,16 @@ rhbyv-cpu-forlinux/
 
 ## `tb/`
 
-- `unit/`：一个 `tb_<module>.sv` 对应一个局部白盒测试，当前 31 项。
-- `core/`：短程序整核测试，覆盖基础指令、访存等待、预测、CSR、Trap 和序列化取消。
+- `unit/`：当前 38 项，包含模块测试、六种 MDU 配置、8 位算法穷举与 SRT 组件验证。
+- `core/`：13 项短程序流程，覆盖基础/M 指令、访存等待、预测、CSR、Trap 和序列化取消。
 - `benchmark/`：运行 ELF 镜像的长程序 harness，被动镜像字符 Store 并监视 `tohost`。
 - `common/rv_asm_pkg.sv`：为整核定向测试生成具名 32 位指令编码。
+- `common/muldiv_checker.sv`：乘法、除法和统一 MDU 共用的独立算术/协议参考检查器。
+  三种语义用例均通过唯一 MDU 握手壳，MODE 只筛选指令；原始算法另有穷举测试。
 - `common/store_result_monitor.sv`：被动观察已握手 Store，仅由 TB 解释 PASS/FAIL。
 - `riscv_tests/`：本地环境、链接脚本、仿真 harness，以及固定上游源码快照。
 
-`tb/riscv_tests/vendor/riscv-tests/` 保存正式回归所需的 MI/UI `.S`、宏、编码和
+`tb/riscv_tests/vendor/riscv-tests/` 保存正式回归所需的 MI/UI/UM `.S`、宏、编码和
 许可证；`env/` 保存本 CPU 的覆盖环境。根目录 `riscv-tests/` 仅供阅读对照。
 
 ## `scripts/`
@@ -73,9 +77,10 @@ rhbyv-cpu-forlinux/
 - `cpu_files.f`：在 Core 上加入 FPGA wrapper。
 - `verilator/run_unit.sh`：遍历 `tb/unit/tb_*.sv`。
 - `verilator/run_directed.sh`：遍历 `tb/core/tb_*.sv`。
-- `verilator/run_riscv_tests.sh`：编译 vendored 汇编、生成镜像并运行 MI/UI 回归。
+- `verilator/run_riscv_tests.sh`：编译 vendored 汇编、生成镜像并运行 MI/UI/UM 回归。
+- `verilator/run_mdu_backends.sh`：对六种 MDU 配置运行三个 M 整核测试与全部 UM 镜像。
 - `verilator/build_benchmark_image.sh`：链接裸机 C/汇编并分离 IMem/DMem 镜像。
-- `verilator/run_benchmark_smoke.sh`：验证启动、栈、数据段、软件算术和 64 位计时。
+- `verilator/run_benchmark_smoke.sh`：验证启动、栈、数据段、硬件 M/宽整数辅助算术和计时。
 - `verilator/run_coremark.sh`：校准迭代数并执行 CoreMark performance/validation。
 - `verilator/verilog_hex_to_mem.py`：把 objcopy 字节镜像转换成 `$readmemh` 字宽。
 - `vivado/*.tcl`：工程创建、综合、实现和烧录框架。
@@ -95,6 +100,7 @@ Git submodule，也不作为普通文件提交。父仓库的新 clone 不会自
 
 - `bsp/`：`crt0.S`、链接布局、ECALL/`tohost` 退出、`mcycle` 读取、内存函数和
   不依赖 M 扩展的软件乘除 helper。
+  当前默认用 IM 编译；RV32 的超 XLEN 算术仍可能需要这些 helper，不删除历史基础实现。
 - `smoke/`：在跑分前验证 `.data/.bss`、栈、函数调用、宽整数算术和计数器。
 - `coremark/vendor/coremark/`：固定且不修改的官方 `v1.01`（报告版本 1.0）源码。
 - `coremark/port/`：本 Core 的 seeds、静态内存、计时和字符输出适配。
@@ -119,6 +125,8 @@ C++ 编译缓存。`logs/` 保存每个测试的编译和运行输出。它们�
 - `docs/understand/MEMORY_HANDSHAKE.md`：Core、BRAM 和未来阻塞式 Cache 的握手约束。
 - `docs/understand/SOFTWARE_TEST_STACK_GUIDE.md`：软件测试从源码到硬件执行、Trap、`tohost` 和判定的完整链路。
 - `docs/understand/COREMARK_AND_PERFORMANCE.md`：CoreMark port、计时、分数及 FPGA 性能指标边界。
+- `docs/understand/M_EXTENSION.md`：MDU 算法、六级接入、反压、取消和验证入口。
+- `docs/PLATFORM_ADAPTATION.md`：Zynq-7020 与盘古 676-200K Pro 的共享契约和平台隔离。
 - `.gitignore`：根级白名单，未列出的顶层内容默认忽略。
 - `.gitattributes`：保留官方 CoreMark 快照原有的行尾格式，不影响其他项目文件检查。
 - `LICENSE`：项目许可证。

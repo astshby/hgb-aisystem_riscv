@@ -27,6 +27,11 @@ package core_types_pkg;
         BR_NONE, BR_EQ, BR_NE, BR_LT, BR_GE,
         BR_LTU, BR_GEU, BR_JAL, BR_JALR
     } branch_op_e;
+    // M 运算与 ALU 分类分离；W 形式复用操作枚举，由 op_width 决定有效位宽。
+    typedef enum logic [2:0] {
+        MD_MUL, MD_MULH, MD_MULHSU, MD_MULHU,
+        MD_DIV, MD_DIVU, MD_REM, MD_REMU
+    } muldiv_op_e;
 
     // alu端口，64/32位宽表示，访存长度，写回，csr
     // 以上NONE的普遍涉及必须气泡/中断的
@@ -39,11 +44,20 @@ package core_types_pkg;
     typedef enum logic [1:0] { SYS_NONE, SYS_ECALL, SYS_EBREAK, SYS_MRET } sys_op_e;//涉及特权指令：ecall，ebreak，M级别的reset，none，一般指令是none
                                                                                     //ecall，ebreak，mret都涉及csr的写入/读取，一定注意！
 
+    // 乘除法请求状态寄存器，用于提交乘除法运算（由于乘除法跨周期，便于管理寄存器与连线，alu与branch就没必要的了）
+    typedef struct packed {
+        muldiv_op_e operation;
+        op_width_e  op_width;
+        xlen_t      operand_a;
+        xlen_t      operand_b;
+    } muldiv_req_t;
+
     //上述选择后，提供给整体控制信息，用于传递打包好的整体信息（经过解码）(micro-op)
     typedef struct packed {
-        // 上述必要指令解码
+        // 上述必要指令解码,alu,branch，muldiv并行处理
         fu_sel_e       fu;
         alu_op_e       alu_op;
+        muldiv_op_e    muldiv_op;
         branch_op_e    branch_op;
         op_a_sel_e     op_a_sel;
         op_b_sel_e     op_b_sel;
@@ -64,5 +78,6 @@ package core_types_pkg;
         logic          csr_write;
         logic          illegal;//是否非法指令
     } uop_t; //micro-op
+
 
 endpackage

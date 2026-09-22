@@ -13,18 +13,23 @@ IF → D1 → D2 → EX → MEM → WB
 具体 FPGA BRAM、UART 和板级 IO 解耦，Verilator 与 FPGA wrapper 共享同一套
 ready-valid 存储器协议。
 
-## 当前 A5 架构
+平台目标同时覆盖 Zynq-7020 与紫光同创盘古 676-200K Pro；Core 和 MDU 不依赖
+厂商原语。时钟、BRAM、IO、约束和工程差异在平台层隔离，详见
+[平台适配](PLATFORM_ADAPTATION.md)。两块板目前都尚未完成集成与上板验证。
+
+## 当前六级架构（A5 基线 + B 阶段 M）
 
 - IF 查询一套 BTB + 非推测 GShare，并随指令保存预测 metadata。
 - D1 完成译码、立即数、非法/SYSTEM 分类、早期异常和 JAL 解析。
 - D2 读取双端口 GPR，并准备执行操作数。
-- EX 统一处理 GPR/CSR 前递、ALU、分支、JALR、CSR 读改写和动态异常。
+- EX 统一处理 GPR/CSR 前递、ALU、分支、JALR、CSR 读改写和动态异常；
+  MDU 多周期等待保留当前 EX 包，结果接收后才推进。
 - MEM 发射一次 Load/Store 请求；未 ready 时保持流水。
 - WB 接收 Load 响应，作为 GPR/CSR、计数器和 Trap 的架构提交点。
 - 同步异常在发现时清除年轻指令，携带 metadata 到 WB 后精确提交。
 - JAL 只训练 BTB；JALR 训练 BTB；条件分支训练 BTB、PHT 和 GHR。
 
-当前支持 RV32I/RV64I、六种 Zicsr、ECALL、EBREAK、MRET、机器模式同步异常、
+当前 RTL 支持 RV32IM/RV64IM、六种 Zicsr、ECALL、EBREAK、MRET、机器模式同步异常、
 `mstatus/misa/mtvec/mscratch/mepc/mcause/mtval/mcycle/minstret`；RV32 还可通过
 `mcycleh/minstreth` 原子读取完整 64 位计数。FENCE 在当前
 单核无 Cache 平台中按无副作用指令处理；FENCE.I 尚无真实 I/D 同步结构。
@@ -53,6 +58,9 @@ ready-valid 存储器协议。
 | `d2_stage` | GPR 读取结果与 uOp 打包 |
 | `gpr_bypass`/`csr_bypass` | `MEM > WB > committed/original` 数据选择 |
 | `ex_stage` | ALU/BRU/CSR 执行、分支验证和 EX 输出打包 |
+| `mul_unit` | 16 位无符号分块乘积、寄存器分组求和、signed 高半积修正和 W 扩展 |
+| `div_unit` | 逐位恢复除法、符号恢复、除零/溢出规定结果和 32 位 W 运算 |
+| `muldiv_unit` | 单条在途请求/响应、后端选择、结果反压和取消 |
 | `ex_exception_check` | 继承异常、CSR 权限、访存与控制目标对齐检查 |
 | `mem_stage` | 请求侧握手和 MEM 前递，不等待 Load 返回 |
 | `wb_stage` | 响应侧握手、写回数据和真实 commit 许可 |
@@ -72,7 +80,7 @@ ready-valid 存储器协议。
 | A3 | BTB、GShare、预测 metadata 和更新仲裁 | 已完成 |
 | A4 | 完整 Zicsr、M-mode 同步异常、MRET、riscv-tests | 已完成并回归 |
 | A5 | CoreMark v1.0 仿真、BSP、计时和长程序验证 | 已完成并回归 |
-| A6 | Zynq-7020 BRAM、UART、XDC、综合、实现和上板 | 未开始 |
+| A6 | Zynq-7020 BRAM、UART、XDC、综合、实现和上板 | 暂缓，优先阶段 B |
 
 ### A5：CoreMark 仿真
 
@@ -84,14 +92,14 @@ ready-valid 存储器协议。
 - 仿真存储器按 benchmark 顶层扩至 128 KiB，普通测试仍保留原默认容量。
 - 先运行 C 冒烟，再分别运行 performance 与 validation seeds；脚本自动校准迭代数，
   使计时区间不少于 10 个按 1 MHz 归一化的秒，并检查官方 CRC 文本。
-- 当前成绩为 RV32 `0.986718 CoreMark/MHz`、RV64 `0.833029 CoreMark/MHz`。这是
+- A5 无 M 基线成绩为 RV32 `0.986718 CoreMark/MHz`、RV64 `0.833029 CoreMark/MHz`。这是
   同步仿真存储器下的周期效率；真实 Fmax、CoreMark/s 和 CoreMark/LUT 留待 A6 上板。
 
 CoreMark 长程序暴露并修复了序列化取消缺陷：较老 JALR/分支重定向现在能取消错误
 路径上已登记的异常/MRET 序列化，不会永久关闭取指。加入 M、C、Cache 或修改存储
 时序后必须重新测量，不能沿用当前分数。
 
-### A6：FPGA
+### A6：双 FPGA 平台
 
 - 为固定一拍或可等待 BRAM 建立协议适配器。
 - 加入 Instruction/Data BRAM 和 Clock Wizard 配置。
@@ -99,13 +107,41 @@ CoreMark 长程序暴露并修复了序列化取消缺陷：较老 JALR/分支�
 - 完成 Zynq-7020 XDC、时钟约束和复位同步。
 - Tcl 必须能够重建工程、综合、实现、生成 bitstream 和导出报告。
 - 上板运行 ISA smoke 与 CoreMark，记录 utilization 和 timing。
+- Zynq-7020 保留 Vivado 工作流；盘古 676-200K Pro 增加独立厂商工程、时钟/BRAM
+  adapter 和引脚约束，两者共享 Core、MDU 和软件测试契约，不共享厂商 IP 配置。
 
-## 阶段 B：M 扩展
+## 阶段 B：基础 M 扩展与验证
+
+2026-09-16：从已验证的 A5 `main` 基线创建 `stage/b-rv32-rv64-m`，进入 RV32M/RV64M
+设计评估。已确认 B 阶段保留 `IF → D1 → D2 → EX → MEM → WB` 六级主流水；
+先完成 M 与双位宽 CoreMark，再恢复 A6 上板，之后根据实测关键路径评估加深流水。
+MDU 内部允许多周期运算或寄存器分段，不等于增加主流水级。
 
 实现 RV32M/RV64M，包括 MUL/MULH/MULHSU/MULHU、DIV/DIVU、REM/REMU 和 RV64
-W 形式。正式启用 `FU_MULDIV`，为多周期除法建立 req/busy/done/result 接口，
-由 `pipeline_ctrl` 处理 EX busy。必须验证除零、带符号溢出、全部 M riscv-tests、
-A 阶段回归、CoreMark 变化和 FPGA DSP/LUT/时序。
+W 形式。正式启用 `FU_MULDIV`，为 MDU 建立请求/响应 ready-valid 与取消协议；
+由 `pipeline_ctrl` 处理 EX 等待，较老 MEM/WB 在自身无反压时继续推进。请求握手时
+锁存前递后的操作数，完成结果保持至下游接收，不重复发射；取消仅来自会杀死当前
+指令的较老事件。Verilator 与 FPGA 使用相同可综合运算与时序 RTL，不用仿真专属
+单周期实现，也不以计数等待代替真实数据路径分段。
+
+2026-09-18：M 模块收拢到 `execute/M_extension/`，`ex_mdu` 负责打包与流水适配，
+`muldiv_unit` 唯一管理 ready/valid、在途和结果保持；语义层与算法使用 start/done。
+无符号乘法可选 DSP 推断乘法、Radix-4 Booth-Wallace、普通移位乘法；除法可选
+radix-2 恢复算法、带截断 QDS、carry-save 余数、在线转换和末余数修正的 Radix-4 SRT。
+乘法共用 U×U 后高半积修正；除法先处理 ISA 边界，再 abs、无符号计算和符号恢复。
+默认仍选分块乘法 + 恢复除法；请求 E0 握手后，乘法 E3、普通除法 E(L+1)、
+特殊除法 E1 后响应有效（L=XLEN 或 32）。其余后端与交付反压的准确时序见
+[M 扩展实现解读](understand/M_EXTENSION.md)。DSP/IP 映射与算法优劣留待实测。
+
+厂商 primitive/IP 不是必需项，
+若后续引入，必须隔离后端并验证同一接口的延迟、反压、复位与取消行为。必须验证
+除零、带符号溢出、全部适用 M riscv-tests、A 阶段回归、CoreMark 变化，以及 A6 的
+两种 FPGA 的 DSP/LUT/时序。RISC-V M 除零与有符号溢出返回规定结果，不产生算术 Trap。
+
+当前 M 仿真回归：两种 XLEN 各 38 项 unit PASS，13 项 directed 中各 12 PASS、
+1 非适用位宽 SKIP；riscv-tests 为 RV32 `58/58`、RV64 `78/78`，其中 UM 为 8/13。
+CoreMark performance/validation CRC 均通过，默认配置成绩为 RV32 `2.471246`、RV64
+`2.231733 CoreMark/MHz`；真实 FPGA 映射与时序仍待 A6。
 
 ## 阶段 C：C 扩展
 
@@ -118,9 +154,13 @@ BTB/PHT 索引纳入 PC[1]，IALIGN 从 32 改为 16。必须分别处理 RV32C/
 
 - F：增加浮点寄存器、FPU、浮点 load/store、转换和 `fflags/frm/fcsr`。
 - 深流水：可拆为 IF1/IF2、EX1/EX2 或 MEM1/MEM2；继续让预测与异常 metadata 随指令传播。
+  在 M、CoreMark 与上板闭环后再实施，按指令年龄扩展前递、反压和清除范围，不改变提交语义。
 - Cache：在现有 ready-valid 边界外实现 I/D Cache；miss 通过 ready/valid 反压，不侵入 Core ISA 逻辑。
 - 操作系统硬件基础：机器定时器、`mie/mip`、软件/外部中断和 UART。Linux 还需要
   S/U 特权级、SBI、原子扩展、MMU/TLB、页表 CSR 与平台中断控制器。
+- 机器模式 Trap 与 MMIO 平台：保留精确提交边界，扩展异步中断仲裁和存储器响应错误
+  metadata；为不可取消的访存定义完成边界，禁止错误路径 MMIO 副作用或重复握手。
+  外设、地址译码与总线适配留在平台侧，不绑定 EX 级数；具体实现另行评审。
 
 ## 阶段验收
 

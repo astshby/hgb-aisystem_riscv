@@ -2,18 +2,36 @@
 
 ## 当前结论
 
-A5 已具备可信的“周期级 CoreMark”闭环：RV32/RV64 裸机 C 冒烟通过，CoreMark
+A5 加 B 阶段基础 M 已具备“周期级 CoreMark”闭环：RV32/RV64 裸机 C 冒烟通过，CoreMark
 performance 与 validation 两组 CRC 都通过，计时区间均超过按 1 MHz 归一化的
-10 秒。当前结果是：
+10 秒。当前默认 MDU 为 DSP 推断乘法 + 移位除法；与历史基线比较如下：
 
 | 配置 | Iterations | `mcycle` 差值 | CoreMark/MHz |
 |---|---:|---:|---:|
 | RV32I_Zicsr | 11 | 11,148,066 | 0.986718 |
 | RV64I_Zicsr | 10 | 12,004,387 | 0.833029 |
+| RV32IM_Zicsr，初版 M（历史） | 28 | 11,067,231 | 2.529991 |
+| RV64IM_Zicsr，初版 M（历史） | 26 | 11,406,036 | 2.279495 |
+| RV32IM_Zicsr，统一握手初版（历史） | 28 | 11,330,319 | 2.471246 |
+| RV64IM_Zicsr，统一握手初版（历史） | 25 | 11,202,057 | 2.231733 |
+| RV32IM_Zicsr，完成当拍直通，MUL_IMPL=0 DIV_IMPL=0 | 32 | 11,342,421 | 2.821267 |
+| RV64IM_Zicsr，完成当拍直通，MUL_IMPL=0 DIV_IMPL=0 | 28 | 11,244,705 | 2.490061 |
 
 这证明长 C 程序、栈、数据段、控制流、Load/Store、Zicsr 和精确退出可以协同工作。
 它不是 FPGA Fmax 或最终 SoC 成绩：当前存储器是 Verilator 中的一周期同步模型，且
-没有 Cache、总线竞争和硬件 M 扩展。
+没有 Cache 和总线竞争。IM 使用真实可综合多周期 MDU，未假设单周期乘除；
+I 两行是 A5 历史结果，不能混用编译配置或当作当前 IM 成绩。
+
+2026-09-22 的重构让后端完成当拍直接交付，仅在反压时保存结果，消除了统一包装器
+的额外完成周期。当前全部后端均完成算术与整核/UM 验证。另以
+`MUL_IMPL=0 DIV_IMPL=1` 跑完两种位宽，CRC 和分数与默认配置相同，但 harness
+总周期略少；CoreMark 计分热点不足以区分两个除法器。后续仍可用
+`make coremark XLEN=64 MUL_IMPL=1 DIV_IMPL=1` 等命令比较周期，FPGA 上
+还要结合各算法的实际 Fmax、DSP/LUT/FF；更少迭代不一定带来更高每秒性能。
+
+一次迭代校准日志会报告未达到 10 秒，这只是估计正式迭代数，不作为有效成绩。
+正式 performance/validation 均验证 CRC，当前计时区间分别为 RV32
+11,342,421 / 11,401,762 ticks，RV64 11,244,705 / 11,281,384 ticks。
 
 ## 目录与各部分职责
 
@@ -37,16 +55,21 @@ TB 仅被动显示该地址，因此没有伪造 UART RTL；真正上板时再�
 计时直接读取 CPU 的 `mcycle`，不需要外设计时器。RV32 使用
 `mcycleh → mcycle → mcycleh`，若两次高半不同则重读，以获得不会撕裂的 64 位周期数。
 
-## 为什么没有 M 扩展也能运行
+## A5 无 M 基线与 B 的硬件 M
 
-编译参数严格限制为 `rv32i_zicsr/ilp32` 或 `rv64i_zicsr/lp64`，不会生成 MUL/DIV
+A5 基线的编译参数限制为 `rv32i_zicsr/ilp32` 或 `rv64i_zicsr/lp64`，不会生成 MUL/DIV
 指令。编译器需要的 `__mul*`、`__div*` 和 `__mod*` ABI 函数由 `bsp/softarith.c`
 使用移位、加法、减法与比较实现。这样能先验证 Base-I CPU，但软件乘除本身也计入
 周期，所以结果不是未来 RV32IM/RV64IM 的性能。
 
-RV64 当前分数低于 RV32，主要因为 LP64 的指针和 `long` 运算更宽，CoreMark 与运行时
-会走更昂贵的 64 位软件辅助路径。完成 M 扩展后必须用 `rv32im_zicsr`/
-`rv64im_zicsr` 重新编译并重新测量，不能沿用本页数字。
+RV64 的 A5 分数低于 RV32，LP64 的指针与算术宽度、软件辅助路径都是需要比较的
+因素；不能仅凭分数断定唯一瓶颈。B 已用 `rv32im_zicsr/ilp32` 和
+`rv64im_zicsr/lp64` 重新编译与测量，默认脚本和 port 的编译说明同步切换到 IM。
+官方 CoreMark 源码保持不变，不能沿用 A5 分数。
+
+`softarith.c` 仍保留：RV32 的 64 位 C 乘除等超 XLEN 操作可能需要 ABI helper；
+有硬件 M 不等于所有宽整数运算都能用一条指令完成。当前乘法分块寄存，除法迭代
+32/64 次，EX 阻塞式等待；握手与时序详见 [M 扩展实现](M_EXTENSION.md)。
 
 ## 执行流程
 
@@ -62,7 +85,7 @@ make coremark XLEN=32
 
 CoreMark 使用 2000 bytes 静态工作区、单 context 和 `-O2`。两种正式模式使用同一
 CoreMark 源码、编译选项、内存配置和迭代数。`make benchmark-smoke` 应先通过；它覆盖
-`.data` 初值、`.bss` 清零、局部栈、函数调用、软件乘除、DMem Store 和周期递增。
+`.data` 初值、`.bss` 清零、局部栈、函数调用、硬件 M/宽整数 helper、DMem Store 和周期递增。
 
 ## 分数如何理解
 
@@ -95,7 +118,7 @@ CoreMark/LUT = 实际频率下的 CoreMark/s ÷ 已用 LUT 数
 对“功能正确和周期效率”而言，A5 已经足够；对可发布的上板成绩，还需要：
 
 - A6 将 Core 接到真实双口 BRAM/Cache adapter，并确认其 ready-valid 时序；
-- 用 Vivado 综合和实现报告记录目标器件、约束、WNS、实际频率、LUT/FF/BRAM/DSP；
+- 分别用平台工具记录目标器件、约束、时序裕量、实际频率、LUT/FF/BRAM/DSP；
 - 用板上 UART/JTAG 输出 CRC、周期与迭代数，确认 `mcycle` 按 CPU 时钟计数；
 - 正式运行前关闭调试 trace，固定工具链、源码 commit、编译选项和存储器配置；
 - 分别保存无 M、有 M、有 Cache 等配置的结果，任何架构变化都重新跑 CRC 与计时。
@@ -115,6 +138,9 @@ CoreMark 给出整体整数工作负载指标，但不能定位瓶颈。后续�
 - 接入 Cache 后的 I/D miss rate、miss penalty 和总线等待比例；
 - M 扩展的单指令延迟、吞吐以及 CoreMark 前后变化；
 - FPGA Fmax 与 LUT/FF/BRAM/DSP，最后再计算 CoreMark/LUT。
+
+平台目标同时包含 Zynq-7020 与紫光同创盘古 676-200K Pro，详见
+[平台适配](../PLATFORM_ADAPTATION.md)。当前分数仅来自 Verilator，两块板均未验证。
 
 这些 microbenchmark 与硬件计数器应和 CoreMark 分开报告：前者解释“为什么快或慢”，
 后者验证真实长程序上的综合效果。

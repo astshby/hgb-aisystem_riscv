@@ -57,6 +57,16 @@ package riscv_unpriv_pkg;
     localparam logic [2:0] F3_OP_OR            = 3'b110;
     localparam logic [2:0] F3_OP_AND           = 3'b111;
 
+    // 只有 funct7=F7_OP_MULDIV 时，以下 funct3 才表示 M 扩展运算。
+    localparam logic [2:0] F3_OP_MUL           = 3'b000;
+    localparam logic [2:0] F3_OP_MULH          = 3'b001;
+    localparam logic [2:0] F3_OP_MULHSU        = 3'b010;
+    localparam logic [2:0] F3_OP_MULHU         = 3'b011;
+    localparam logic [2:0] F3_OP_DIV           = 3'b100;
+    localparam logic [2:0] F3_OP_DIVU          = 3'b101;
+    localparam logic [2:0] F3_OP_REM           = 3'b110;
+    localparam logic [2:0] F3_OP_REMU          = 3'b111;
+
     // RV64I 的 W 类指令只计算低 32 位，并将结果符号扩展到 XLEN（和原来的区别仅仅是opcode）
     // 从64角度讲，扩展都是取32的，有：R：addw，subw，sllw，srlw，sraw，
     // I：addiw，slliw，srliw，sraiw，L：lwu，ld，sd
@@ -66,6 +76,11 @@ package riscv_unpriv_pkg;
     localparam logic [2:0] F3_OP_32_ADDW_SUBW      = 3'b000;
     localparam logic [2:0] F3_OP_32_SLLW           = 3'b001;
     localparam logic [2:0] F3_OP_32_SRLW_SRAW      = 3'b101;
+    localparam logic [2:0] F3_OP_32_MULW           = 3'b000;
+    localparam logic [2:0] F3_OP_32_DIVW           = 3'b100;
+    localparam logic [2:0] F3_OP_32_DIVUW          = 3'b101;
+    localparam logic [2:0] F3_OP_32_REMW           = 3'b110;
+    localparam logic [2:0] F3_OP_32_REMUW          = 3'b111;
 
     localparam logic [2:0] F3_MISC_MEM_FENCE   = 3'b000;
     localparam logic [2:0] F3_MISC_MEM_FENCE_I = 3'b001;
@@ -79,7 +94,7 @@ package riscv_unpriv_pkg;
     localparam logic [2:0] F3_SYSTEM_CSRRSI    = 3'b110;
     localparam logic [2:0] F3_SYSTEM_CSRRCI    = 3'b111;
 
-    // funct7 同样带上 OP/OP-IMM 上下文；M 扩展复用 F7_OP_MULDIV
+    // funct7 同样带上 OP/OP-IMM 上下文；M 扩展用 F7_OP_MULDIV
     localparam logic [6:0] F7_OP_BASE          = 7'b0000000;
     localparam logic [6:0] F7_OP_SUB_SRA       = 7'b0100000;
     localparam logic [6:0] F7_OP_MULDIV        = 7'b0000001;

@@ -2,11 +2,14 @@
 set -euo pipefail
 
 xlen="${1:-32}"
+mul_impl="${MUL_IMPL:-0}"
+div_impl="${DIV_IMPL:-0}"
+config="m${mul_impl}d${div_impl}"
 tool_root="${RISCV_TOOL_ROOT:-/opt/riscv/bin}"
 tool_prefix="${tool_root}/riscv64-unknown-elf-"
-build_dir="build/benchmark/smoke-rv${xlen}"
-sim_dir="build/verilator/benchmark-rv${xlen}"
-run_log="logs/benchmark-smoke-rv${xlen}.log"
+build_dir="build/benchmark/smoke-rv${xlen}-${config}"
+sim_dir="build/verilator/benchmark-rv${xlen}-${config}"
+run_log="logs/benchmark-smoke-rv${xlen}-${config}.log"
 
 bash scripts/verilator/build_benchmark_sim.sh "${xlen}"
 bash scripts/verilator/build_benchmark_image.sh "${xlen}" "${build_dir}" \
@@ -14,7 +17,7 @@ bash scripts/verilator/build_benchmark_image.sh "${xlen}" "${build_dir}" \
     benchmark/bsp/runtime.c \
     benchmark/bsp/softarith.c \
     benchmark/smoke/main.c \
-    >"logs/benchmark-smoke-build-rv${xlen}.log" 2>&1
+    >"logs/benchmark-smoke-build-rv${xlen}-${config}.log" 2>&1
 
 tohost_addr="$("${tool_prefix}nm" -n "${build_dir}/program.elf" | awk '$3 == "tohost" { print $1; exit }')"
 console_addr="$("${tool_prefix}nm" -n "${build_dir}/program.elf" | awk '$3 == "sim_console" { print $1; exit }')"
@@ -30,4 +33,8 @@ fi
     +CONSOLE="${console_addr}" \
     +TEST="benchmark-smoke" \
     +MAX_CYCLES=1000000 >"${run_log}" 2>&1
+if grep -Eq '(%Fatal|%Error|Assertion failed)' "${run_log}"; then
+    tail -n 12 "${run_log}"
+    exit 1
+fi
 grep "PASS benchmark-smoke RV${xlen}" "${run_log}" | tail -n 1

@@ -10,9 +10,9 @@
 
 #define COMPILER_VERSION "GCC " __VERSION__
 #if __riscv_xlen == 32
-#define COMPILER_FLAGS "-O2 -march=rv32i_zicsr -mabi=ilp32"
+#define COMPILER_FLAGS "-O2 -march=rv32im_zicsr -mabi=ilp32"
 #else
-#define COMPILER_FLAGS "-O2 -march=rv64i_zicsr -mabi=lp64"
+#define COMPILER_FLAGS "-O2 -march=rv64im_zicsr -mabi=lp64"
 #endif
 #define MEM_LOCATION "Static data in one-cycle simulated DMem"
 

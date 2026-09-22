@@ -58,7 +58,7 @@ module core (
     pred_update_t ex_update;
     pred_update_t predictor_update;
     logic predictor_overflow;
-    logic predictor_flush;
+    logic d1_flush;
 
     // GPR 读写和前递。
     xlen_t rs1_data;
@@ -83,7 +83,9 @@ module core (
     logic load_use_stall;
     logic mem_request_stall;
     logic wb_wait;
+    logic execution_stall;
     logic mem_issue_enable;
+    logic mdu_operands_ready;
     pipeline_actions_t pipeline_actions;
     logic fetch_ready;
     logic d1_stage_advance;
@@ -113,14 +115,13 @@ module core (
         ex_update = ex_update_raw;
         d1_update.valid = d1_update_raw.valid && d1_stage_advance;
         ex_update.valid = ex_update_raw.valid && ex_stage_advance;
-        predictor_flush = (pipeline_actions.d1_d2 == PIPE_CLEAR);
     end
 
     // 预测器裁决
     predictor_update_arbiter u_predictor_update_arbiter (
         .clk,
         .rst,
-        .flush(predictor_flush),
+        .d1_flush,
         .d1_update,
         .ex_update,
         .update(predictor_update),
@@ -200,7 +201,19 @@ module core (
         .out_packet(d2_packet)
     );
 
+    mdu_issue_control u_mdu_issue_control (
+        .ex_packet(d2_ex_q),
+        .wb_packet(mem_wb_q),
+        .wb_wait,
+        .mdu_operands_ready
+    );
+
     ex_stage u_ex_stage (
+        .clk,
+        .rst,
+        .mdu_operands_ready,
+        .advance(ex_stage_advance),
+        .cancel(wb_redirect.valid),
         .in_packet(d2_ex_q),
         .mem_gpr_forward,
         .wb_gpr_forward(wb_gpr_write),
@@ -210,7 +223,8 @@ module core (
         .out_packet(ex_packet),
         .redirect(ex_redirect),
         .pred_update(ex_update_raw),
-        .serialize_req(ex_serialize_req)
+        .serialize_req(ex_serialize_req),
+        .execution_stall
     );
 
     csr_file u_csr_file (
@@ -291,11 +305,13 @@ module core (
         .d1_serialize_req,
         .wb_wait,
         .mem_request_stall,
+        .execution_stall,
         .load_use_stall,
         .redirect(selected_redirect),
         .serialize_start,
         .fetch_ready,
         .mem_issue_enable,
+        .d1_flush,
         .actions(pipeline_actions)
     );
 
@@ -325,6 +341,16 @@ module core (
             d2_ex_q.valid <= 1'b0;
         else if (pipeline_actions.d2_ex == PIPE_ADVANCE)
             d2_ex_q <= d2_packet;
+        else begin
+            // HOLD 时较老 WB 仍可能退休；保存其新值，避免旁路消失后使用过期操作数。
+            // 已启动的 MDU 使用自己的请求快照，不受这里后续更新影响。
+            if (wb_gpr_write.valid && d2_ex_q.uop.rs1_used &&
+                (wb_gpr_write.addr == d2_ex_q.rs1))
+                d2_ex_q.rs1_data <= wb_gpr_write.data;
+            if (wb_gpr_write.valid && d2_ex_q.uop.rs2_used &&
+                (wb_gpr_write.addr == d2_ex_q.rs2))
+                d2_ex_q.rs2_data <= wb_gpr_write.data;
+        end
     end
 
     always_ff @(posedge clk) begin
