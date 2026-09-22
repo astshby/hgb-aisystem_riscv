@@ -13,7 +13,7 @@ package pipeline_pkg;
         xlen_t      tval;
     } exception_t;
 
-    // 流水级向 EX 提供的前递候选，valid 表示该地址和值可以参与旁路。
+    // 向 EX 提供的前递，包括grp与csr
     typedef struct packed {
         logic      valid;
         gpr_addr_t addr;
@@ -63,7 +63,7 @@ package pipeline_pkg;
         PIPE_ADVANCE, PIPE_HOLD, PIPE_CLEAR
     } pipe_action_e;
 
-    // 每个流水级寄存器的动作
+    // 每个流水级寄存器的动作，给pipeline_control使用
     typedef struct packed {
         pipe_action_e if_d1;
         pipe_action_e d1_d2;
@@ -73,8 +73,8 @@ package pipeline_pkg;
     } pipeline_actions_t;
 
     // 流水级寄存器
-    // special：valid 标记真实指令；PIPE_CLEAR 插入无效包，PIPE_HOLD 保持原包。
-    // csr后期出现：wb阶段才写回
+    // special：valid 标记真实指令；PIPE_CLEAR 插入无效包，PIPE_HOLD 保持指令与控制。
+    // csr后期出现：wb阶段才写回,与gpr写回时机一致
     typedef struct packed {
         logic        valid;
         xlen_t       pc;

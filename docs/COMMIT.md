@@ -292,3 +292,173 @@ A4 只实现机器模式同步异常。`mie/mip` 及软件、定时器、外部�
 - C smoke 保持 RV32 3945 周期、RV64 2494 周期。
 - CoreMark performance/validation CRC 均通过，周期和成绩不变：RV32
   `0.986718 CoreMark/MHz`，RV64 `0.833029 CoreMark/MHz`。
+
+## 2026-09-16（Asia/Shanghai）— 阶段 B 启动与设计评估
+
+- 按用户要求暂缓 A6，从 A5 `main` 创建并切换到 `stage/b-rv32-rv64-m`。
+- 同步当前开发目标；用户已确认 B 保留六级主流水，先完成 RV32M/RV64M 与
+  CoreMark，再恢复 A6 上板，之后依据实测时序考虑加深流水。
+- 补充 MDU 请求/响应、操作数锁存、结果反压和按指令年龄取消的设计边界；
+  仿真与综合共享可综合 RTL，算法和具体延迟仍待评审，尚未实现硬件 M。
+- 补充未来机器模式中断、访存错误和 MMIO 不可重复副作用的目标，不扩展本次 RTL 范围。
+- 本次只创建分支和修改目标文档，未修改 RTL、未运行回归、未提交或推送。
+
+## 2026-09-16（Asia/Shanghai）— B 阶段基础 RV32M/RV64M
+
+### 实现与时序边界
+
+- 在 `stage/b-rv32-rv64-m` 保留已审阅的六级主流水与有用注释，新增
+  `execute/mul_unit.sv`、`div_unit.sv`、`muldiv_unit.sv`，不依赖厂商 primitive/IP。
+- `core_types_pkg` 新增 `muldiv_op_e/muldiv_req_t` 和 uOp M 控制；非特权编码与
+  Decoder 启用全部 8 项 XLEN M 指令及 RV64 的 5 项 W 指令，`misa.M` 固定报告为 1。
+- 乘法以 16×16 无符号小块乘积、分组求和和最终结果三组寄存器实现，高半积按
+  MULH/MULHSU/MULHU 作补码修正；除法采用 radix-2 恢复算法，普通操作迭代有效
+  位宽次，W 只迭代 32 次。除零/最小负数除以 -1 返回 ISA 规定值，不产生 Trap。
+- 请求在 E0 握手时锁存实际前递操作数：乘法 E2 后响应有效，普通除法 E(L+1) 后
+  有效，特殊除法 E0 后有效；交付还需响应握手。Verilator 与综合使用同一数据路径。
+- EX 保存单条在途状态，接收请求后撤销 valid，保持完成结果直至 EX/MEM 接收；
+  `pipeline_ctrl` 增加 EX 等待与独立发射许可，较老 MEM/WB 无反压时继续排空。
+  取消来自会杀死当前指令的较老 WB 重定向，不接受年轻 D1 异常取消。
+- Core 在 D2/EX HOLD 时保存 WB 已提交的 GPR 新值，避免较老 WB 排空、旁路消失
+  后读到过期操作数；流水包注释同步说明 HOLD 保持指令身份而允许该操作数刷新。
+
+### 测试与文档
+
+- 新增乘法、除法、统一 MDU 和 EX 四个 unit TB，以及全部 M 指令、延迟访存与
+  精确 Trap/MRET 三个 directed TB。共享检查器采用独立宽算术参考、固定种子和
+  显式求值顺序，覆盖符号、W、输入变化、固定延迟、反压、取消、复位和后端交替。
+- 同步 Package/Decoder/CSR/流水控制单元测试及 RTL 清单；从既有 pinned Git
+  对象复制 21 个 UM `.S` 与 2 个 Makefrag，逐字节保持上游，补充 vendor 清单。
+  根目录 `riscv-tests/` 仅只读访问，不恢复其已有工作树差异，不修改或提交该 clone。
+- 全部仿真显式启用 `--assert`。当前 Verilator 会在部分循环内 `$finish` 后落入
+  超时 `$fatal`，且可能返回 0：12 个旧 directed/ISA/benchmark harness 改为先跳出
+  采样循环，未完成才报超时，最后统一结束；不改变程序或硬件预期。
+- unit/directed/ISA/benchmark runner 拒绝含 `%Fatal/%Error/Assertion failed` 的
+  日志，不能仅靠进程返回码或 PASS 文本判定成功。
+- benchmark 默认改用 `rv32im_zicsr/rv64im_zicsr`，port 编译信息同步；保留
+  RV32 宽整数 ABI helper，官方 CoreMark 源码未改动。
+- 新增 `docs/understand/M_EXTENSION.md` 与 `docs/PLATFORM_ADAPTATION.md`；同步
+  README、项目目录、仿真说明、硬件/软件路线与性能解读。平台目标同时覆盖
+  Zynq-7020 与紫光同创盘古 676-200K Pro；厂商工程、BRAM/时钟/IO 与约束在平台层隔离。
+
+### 最终验证结果
+
+- `make test XLEN=32/64` 均通过：每种位宽 3 个顶层 lint、35 unit PASS；13 项
+  directed 中各 12 PASS、1 非适用位宽 SKIP。新 M 整核程序为 RV32 33 条退休/
+  242 周期、RV64 50 条退休/595 周期；M wait 为 121/185 周期，M trap 为 119/183 周期。
+- 最后对固定种子检查器的求值顺序整理后，重新运行两种位宽全部 35 项 unit，均 PASS。
+  mul/div/统一 MDU 分别为 RV32 516/516/1060 项检查，RV64 644/1028/1700 项检查。
+- `make riscv-tests XLEN=32`：`58/58` PASS（MI 10 + UI 40 + UM 8），FAIL 0；
+  `XLEN=64`：`78/78` PASS（MI 13 + UI 52 + UM 13），FAIL 0。每种位宽显式
+  SKIP 2 项 UI：`fence_i`、`ma_data`；其他超出当前平台的测试族未纳入。
+- `make benchmark-smoke XLEN=32/64` 各 1 PASS：3334/371 周期。
+- `make coremark XLEN=32/64` 各完成校准与 performance/validation；四次正式运行
+  CRC 均 PASS，计时区间均超过 10M 周期。RV32 performance 为 28 次迭代/
+  11,067,231 ticks、`2.529991 CoreMark/MHz`；validation 为 11,094,314 ticks。
+  RV64 performance 为 26 次迭代/11,406,036 ticks、`2.279495 CoreMark/MHz`；
+  validation 为 11,456,652 ticks。
+- `SYNTHESIS` 宏下 RV32/RV64 Core lint 均通过；这不是 FPGA 综合。当前没有新的
+  WIDTH/LATCH/UNOPTFLAT/MULTIDRIVEN 警告，既有未使用信号/参数等告警仍保留。
+- 负向诊断确认故意失败的断言和 1 周期 ISA 超时均非零退出；正向最终日志无致命
+  错误。23 个新增 vendor 文件逐字节匹配 pinned commit；全部 runner `bash -n`
+  与 `git diff --check` 通过。
+- 未执行 Vivado、盘古厂商工具、DSP 映射、实现时序或上板，不能将仿真分数当作
+  FPGA Fmax/板级成绩。本次留在开发分支工作树，未提交、合并或推送。
+
+## 2026-09-18（Asia/Shanghai）— M 扩展可选算法与统一握手
+
+### 范围与接口
+
+- 按本次授权在 `stage/b-rv32-rv64-m` 继续完善，沿用用户已整理的
+  `execute/M_extension/`，保留有用注释与功能分块。未恢复或提交本轮开始已有的
+  无关工作树改动；未修改上游 riscv-tests、CoreMark vendor 或厂商工程。
+- 保留 `core_types_pkg::muldiv_req_t`：它描述跨周期请求快照；组合 ALU/branch
+  继续使用显式端口。新增 `ex_mdu`，集中请求拼接和 EX 发射/等待适配，移除
+  `ex_stage` 中的 MDU pending 寄存器及直接握手组合块。
+- `muldiv_unit` 唯一拥有 IDLE/RUN/RESULT、ready/valid、busy 和最终结果保持。
+  `mul_unit/div_unit` 改为共用 ISA 语义层，算法使用 start/done；下层不再复制
+  外部反压状态机。取消/复位清除全部计算有效状态，优先于接收和交付。
+
+### 算法与时序
+
+- 乘法保留先算 U×U、再按 MULH/MULHSU 修正高半积的方式。新增 `mul_dsp`
+  （16×16 `*` 部分积）、`mul_booth_wallace`（Radix-4 编码与真实 3:2 压缩树）、
+  `mul_shift`（逐位移位加法）；`wallace_tree` 负责压缩到两行。
+  原来的位权分组加法保留在 DSP 后端，明确它不是 Wallace 树。
+- 除法先处理除零/最小负数除以 -1，再 abs、无符号幅值运算、符号恢复和 W
+  扩展。新增 `div_shift` 与 `div_srt4`，数据路径均不使用 `/` 或 `%`。
+  SRT 包含有符号部分余数、完整精度 QDS、Q/Q-1 在线转换及末余数修正；
+  `div_srt4_qds/div_srt4_otf` 独立成模块。采用固定二进制缩放和较宽通路，
+  尚未优化归一化、截断 QDS 或 carry-save 余数，也未推断 FPGA 性能优劣。
+- `MUL_IMPL=0/1/2` 选择 DSP/Booth-Wallace/移位；`DIV_IMPL=0/1` 选择移位/SRT。
+  默认 0/0，Make 和所有 Verilator runner 同步参数，编译时只实例化选中后端。
+  厂商 IP 留待未来评估，平台目标仍为 Zynq-7020 与盘古 676-200K Pro。
+- 请求 E0 握手后，DSP/Booth 乘法 E3、移位乘法 E(XLEN+1)、移位除法 E(L+1)、
+  SRT E(L/2+3)、特殊除法 E1 后 rsp_valid 有效，L 为有效除法位宽；实际交付
+  还需下一个 ready 上升沿。统一结果寄存器使默认乘法/特殊除法各多一拍。
+  六级主流水和原有按指令年龄处理等待/取消的规则不变。
+
+### 验证与测试适配
+
+- `make test XLEN=32/64` 均通过：每种位宽 3 顶层 lint、38 unit PASS、
+  directed 12 PASS / 1 非适用位宽 SKIP。
+- `tb_muldiv_backends` 六种组合各完成 RV32 1576、RV64 2536 项独立算术及
+  协议检查，覆盖全部适用指令、随机大小除数、W、精确延迟、快照、反压、
+  乘法/除法各自的运行中与结果待交付时取消/复位，以及交替后端。
+- `tb_mdu_unsigned` 穷举 65536 对 8 位输入：乘法 196608 次、非零除法
+  130560 次比较，五种 SRT 商位与末余数正负两条路径均覆盖。
+  `tb_div_srt4_components` 另完成 QDS 130815 次、在线转换 5120 次检查。
+- 标准 riscv-tests：RV32 58 PASS（MI 10 + UI 40 + UM 8），RV64 78 PASS
+  （MI 13 + UI 52 + UM 13），各 FAIL 0；各 SKIP `fence_i`、`ma_data` 两项。
+- 新增 `make mdu-backends` 与 runner：先生成正式 ISA 镜像，再对六种组合各跑
+  三个 M 整核 TB 和全部 UM。最终 RV32 66/66、RV64 96/96 PASS。
+  矩阵初次在移位乘法下发现旧 TB 固定九拍 Load 无法覆盖“MDU 结果等待 WB”，
+  因而将该配置 Load 延迟延长为 XLEN+9；没有删除覆盖断言或改变 RTL。
+  修改后完整重跑两个位宽的六组合整核/UM 矩阵，全部通过。
+- C smoke 两种位宽均 PASS，3335/372 周期。默认 CoreMark performance/validation
+  四次 CRC 均通过：RV32 28 迭代、performance 11,330,319 ticks、validation
+  11,357,402 ticks、2.471246 CoreMark/MHz；RV64 25 迭代、performance
+  11,202,057 ticks、validation 11,250,847 ticks、2.231733 CoreMark/MHz。
+  分数变化来自真实延迟，旧分数作为历史结果保留。非默认算法未做正式 CoreMark 跑分。
+- 两种位宽 × 六种配置的 `SYNTHESIS` 宏 Core lint 通过；未执行实际 FPGA
+  综合/实现/上板。修改过的 runner `bash -n` 与 `git diff --check` 通过。
+- 同步 README、硬件路线、目录、仿真/上板、平台适配、M 扩展解读与性能说明。
+  本次未提交、合并或推送，供后续逐模块审核。
+
+## 2026-09-22（Asia/Shanghai）— B 阶段 MDU 完善与双仓库发布分工
+
+### RTL 与接口
+
+- `mul_dsp` 化简为单个完整 `*`，不再手工构造 16 位部分积；Booth 编码、Wallace
+  3:2 压缩树和最终进位传播加法继续保持独立模块边界。
+- `muldiv_unit` 在后端 `done` 当拍直接给出响应，仅在 EX/MEM 反压时进入 RESULT
+  保留结果，消除统一包装器原有的额外完成周期。除零和有符号溢出仍在请求沿保存
+  ISA 规定结果，不启动真正除法器。
+- Radix-4 SRT 改为归一化除数、显式 PD 表、截断 carry-save QDS、3:2 余数压缩、
+  Q/Q-1 在线转换和最终余数修正；RV64 W 形式只迭代 32 位有效宽度。
+- 新增依赖感知的 `mdu_issue_control`。接口命名为 `mdu_operands_ready`，只阻止依赖
+  尚未返回 WB Load 的 MDU；无依赖运算可以与存储器等待重叠，写入 x0 不构成依赖。
+- `pipeline_ctrl` 显式输出 `d1_flush`：WB/EX 重定向和 EX 序列化清除年轻 D1 更新，
+  D1 自身重定向/序列化不会误杀自己的训练；predictor arbiter 同步清除 pending D1，
+  同时保留引发 EX 重定向的老分支训练。
+- M 扩展按 `mul/booth-wallace`、`div/srt4` 重新组织，源码清单按子模块先于顶层排列。
+
+### 验证
+
+- `make test XLEN=32/64` 均通过：每种位宽 39 unit PASS；13 项 directed 中
+  12 PASS、1 个非适用位宽用例 SKIP。SRT 组件完成 QDS 134870、CSA 4096、
+  OTF 5120 项检查；8 位无符号后端穷举 65536 对输入全部通过。
+- 六种乘除后端整机矩阵全部通过：RV32 66 项、RV64 96 项。标准 riscv-tests
+  保持 RV32 58/58、RV64 78/78，各自明确跳过 `fence_i` 与 `ma_data`。
+- benchmark smoke 为 RV32 3318 周期、RV64 365 周期。CoreMark performance 与
+  validation CRC 全部正确；默认 0/0 得分为 RV32 `2.821267 CoreMark/MHz`、RV64
+  `2.490061 CoreMark/MHz`。SRT 配置得分相同，说明该负载不足以区分除法器。
+- `git diff --check` 通过；未执行 Vivado、盘古综合、实现、时序分析或上板。
+
+### 仓库职责
+
+- `rhbyv-cpu-forlinux` 保留硬件 RTL、测试、工具脚本和硬件工作流文档，不再包含
+  `docs/COMMIT.md`、`docs/understand/` 或软件路线图，也不把这些内容并入 README。
+- `hgb-aisystem_riscv` 成为协作发布和未来软件栈仓库，接收硬件快照、修改记录与
+  理解文档。rhbyv 的重大提交先在 hgb 创建对应分支并通过 PR 审阅；hgb 的软件侧
+  修改默认不反向同步到个人硬件仓库。

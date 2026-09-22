@@ -10,8 +10,9 @@ shopt -s nullglob
 for tb_path in tb/core/tb_*.sv; do
     test_name="$(basename "${tb_path}" .sv)"
     out_dir="build/verilator/directed-rv${xlen}/${test_name}"
-    verilator -Wall -Wno-fatal --timing --binary \
+    verilator -Wall -Wno-fatal --assert --timing --binary \
         -DCORE_XLEN="${xlen}" \
+        -DCORE_MUL_IMPL="${MUL_IMPL:-0}" -DCORE_DIV_IMPL="${DIV_IMPL:-0}" \
         -Mdir "${out_dir}" \
         -f scripts/sim_files.f \
         tb/common/rv_asm_pkg.sv \
@@ -20,5 +21,9 @@ for tb_path in tb/core/tb_*.sv; do
         --top-module "${test_name}" \
         >"logs/${test_name}-rv${xlen}.log" 2>&1
     "${out_dir}/V${test_name}" >>"logs/${test_name}-rv${xlen}.log" 2>&1
+    if grep -Eq '(%Fatal|%Error|Assertion failed)' "logs/${test_name}-rv${xlen}.log"; then
+        tail -n 12 "logs/${test_name}-rv${xlen}.log"
+        exit 1
+    fi
     grep "PASS ${test_name}" "logs/${test_name}-rv${xlen}.log" | tail -n 1
 done

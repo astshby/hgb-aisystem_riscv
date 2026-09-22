@@ -11,7 +11,7 @@ export CCACHE_TEMPDIR="${PWD}/build/ccache-tmp"
 export CCACHE_DIR="${PWD}/build/ccache"
 
 if [[ "${xlen}" == "32" ]]; then
-    march="rv32i_zicsr"
+    march="rv32im_zicsr"
     mabi="ilp32"
     mi_tests=(csr illegal scall sbreak mcsr ma_addr lh-misaligned lw-misaligned sh-misaligned sw-misaligned)
     ui_tests=(
@@ -23,8 +23,9 @@ if [[ "${xlen}" == "32" ]]; then
         sll slli slt slti sltiu sltu sra srai srl srli
         st_ld sub sw xor xori
     )
+    um_tests=(mul mulh mulhsu mulhu div divu rem remu)
 else
-    march="rv64i_zicsr"
+    march="rv64im_zicsr"
     mabi="lp64"
     mi_tests=(csr illegal scall sbreak mcsr ma_addr lh-misaligned lw-misaligned ld-misaligned sh-misaligned sw-misaligned sd-misaligned instret_overflow)
     ui_tests=(
@@ -37,12 +38,14 @@ else
         sra srai sraiw sraw srl srli srliw srlw
         st_ld sub subw sw xor xori
     )
+    um_tests=(mul mulh mulhsu mulhu div divu rem remu mulw divw divuw remw remuw)
 fi
 
 mkdir -p "${CCACHE_TEMPDIR}" "${CCACHE_DIR}" "${build_root}" "${sim_dir}" logs
 
-verilator -Wall -Wno-fatal --timing --binary \
+verilator -Wall -Wno-fatal --assert --timing --binary \
     -DCORE_XLEN="${xlen}" \
+    -DCORE_MUL_IMPL="${MUL_IMPL:-0}" -DCORE_DIV_IMPL="${DIV_IMPL:-0}" \
     -Mdir "${sim_dir}" \
     -f scripts/sim_files.f \
     tb/common/store_result_monitor.sv \
@@ -106,7 +109,8 @@ run_test() {
         +IMEM="${test_dir}/imem.hex" \
         +DMEM="${test_dir}/dmem.hex" \
         +TOHOST="${tohost_addr}" \
-        +TEST="${suite}/${test_name}" >"${run_log}" 2>&1; then
+        +TEST="${suite}/${test_name}" >"${run_log}" 2>&1 &&
+        ! grep -Eq '(%Fatal|%Error|Assertion failed)' "${run_log}"; then
         grep "PASS ${suite}/${test_name}" "${run_log}" | tail -n 1
         passes=$((passes + 1))
     else
@@ -121,10 +125,13 @@ done
 for test_name in "${ui_tests[@]}"; do
     run_test ui "${test_name}"
 done
+for test_name in "${um_tests[@]}"; do
+    run_test um "${test_name}"
+done
 
 if ((failures != 0)); then
     echo "FAIL riscv-tests RV${xlen}: pass=${passes} fail=${failures}"
     exit 1
 fi
 echo "SKIP riscv-tests RV${xlen} UI: fence_i (Zifencei/Harvard coherence), ma_data (misaligned completion policy)"
-echo "PASS riscv-tests RV${xlen}: ${passes}/${passes} (MI=${#mi_tests[@]} UI=${#ui_tests[@]})"
+echo "PASS riscv-tests RV${xlen}: ${passes}/${passes} (MI=${#mi_tests[@]} UI=${#ui_tests[@]} UM=${#um_tests[@]})"

@@ -199,28 +199,45 @@ module decoder (
                 uop.rs2_used = 1'b1;
                 uop.gpr_write = 1'b1;
                 uop.wb_sel = WB_ALU;
-                unique case (funct3)
-                    F3_OP_ADD_SUB: begin
-                        if (funct7 == F7_OP_BASE) begin
-                            uop.alu_op = ALU_ADD;
-                            uop.illegal = 1'b0;
-                        end else if (funct7 == F7_OP_SUB_SRA) begin
-                            uop.alu_op = ALU_SUB;
-                            uop.illegal = 1'b0;
+                if (funct7 == F7_OP_MULDIV) begin
+                    uop.fu = FU_MULDIV;
+                    uop.illegal = 1'b0;
+                    unique case (funct3)
+                        F3_OP_MUL:    uop.muldiv_op = MD_MUL;
+                        F3_OP_MULH:   uop.muldiv_op = MD_MULH;
+                        F3_OP_MULHSU: uop.muldiv_op = MD_MULHSU;
+                        F3_OP_MULHU:  uop.muldiv_op = MD_MULHU;
+                        F3_OP_DIV:    uop.muldiv_op = MD_DIV;
+                        F3_OP_DIVU:   uop.muldiv_op = MD_DIVU;
+                        F3_OP_REM:    uop.muldiv_op = MD_REM;
+                        F3_OP_REMU:   uop.muldiv_op = MD_REMU;
+                        default:     uop.illegal = 1'b1;
+                    endcase
+                // 暂时只有M与I
+                end else begin
+                    unique case (funct3)
+                        F3_OP_ADD_SUB: begin
+                            if (funct7 == F7_OP_BASE) begin
+                                uop.alu_op = ALU_ADD;
+                                uop.illegal = 1'b0;
+                            end else if (funct7 == F7_OP_SUB_SRA) begin
+                                uop.alu_op = ALU_SUB;
+                                uop.illegal = 1'b0;
+                            end
                         end
-                    end
-                    F3_OP_SLL:  if (funct7 == F7_OP_BASE) begin uop.alu_op = ALU_SLL;  uop.illegal = 1'b0; end
-                    F3_OP_SLT:  if (funct7 == F7_OP_BASE) begin uop.alu_op = ALU_SLT;  uop.illegal = 1'b0; end
-                    F3_OP_SLTU: if (funct7 == F7_OP_BASE) begin uop.alu_op = ALU_SLTU; uop.illegal = 1'b0; end
-                    F3_OP_XOR:  if (funct7 == F7_OP_BASE) begin uop.alu_op = ALU_XOR;  uop.illegal = 1'b0; end
-                    F3_OP_SRL_SRA: begin
-                        if (funct7 == F7_OP_BASE) begin uop.alu_op = ALU_SRL; uop.illegal = 1'b0; end
-                        else if (funct7 == F7_OP_SUB_SRA) begin uop.alu_op = ALU_SRA; uop.illegal = 1'b0; end
-                    end
-                    F3_OP_OR:  if (funct7 == F7_OP_BASE) begin uop.alu_op = ALU_OR;  uop.illegal = 1'b0; end
-                    F3_OP_AND: if (funct7 == F7_OP_BASE) begin uop.alu_op = ALU_AND; uop.illegal = 1'b0; end
-                    default: ;
-                endcase
+                        F3_OP_SLL:  if (funct7 == F7_OP_BASE) begin uop.alu_op = ALU_SLL;  uop.illegal = 1'b0; end
+                        F3_OP_SLT:  if (funct7 == F7_OP_BASE) begin uop.alu_op = ALU_SLT;  uop.illegal = 1'b0; end
+                        F3_OP_SLTU: if (funct7 == F7_OP_BASE) begin uop.alu_op = ALU_SLTU; uop.illegal = 1'b0; end
+                        F3_OP_XOR:  if (funct7 == F7_OP_BASE) begin uop.alu_op = ALU_XOR;  uop.illegal = 1'b0; end
+                        F3_OP_SRL_SRA: begin
+                            if (funct7 == F7_OP_BASE) begin uop.alu_op = ALU_SRL; uop.illegal = 1'b0; end
+                            else if (funct7 == F7_OP_SUB_SRA) begin uop.alu_op = ALU_SRA; uop.illegal = 1'b0; end
+                        end
+                        F3_OP_OR:  if (funct7 == F7_OP_BASE) begin uop.alu_op = ALU_OR;  uop.illegal = 1'b0; end
+                        F3_OP_AND: if (funct7 == F7_OP_BASE) begin uop.alu_op = ALU_AND; uop.illegal = 1'b0; end
+                        default: ;
+                    endcase
+                end
             end
             OPCODE_OP_32: begin
                 if (XLEN == 64) begin
@@ -232,31 +249,44 @@ module decoder (
                     uop.rs2_used = 1'b1;
                     uop.gpr_write = 1'b1;
                     uop.wb_sel = WB_ALU;
-                    unique case (funct3)
-                        F3_OP_32_ADDW_SUBW: begin
-                            if (funct7 == F7_OP_BASE) begin
-                                uop.alu_op = ALU_ADD;
-                                uop.illegal = 1'b0;
-                            end else if (funct7 == F7_OP_SUB_SRA) begin
-                                uop.alu_op = ALU_SUB;
+                    // RV64M 的W 只有 MULW 和四种除余 W 形式。
+                    if (funct7 == F7_OP_MULDIV) begin
+                        uop.fu = FU_MULDIV;
+                        unique case (funct3)
+                            F3_OP_32_MULW:  begin uop.muldiv_op = MD_MUL;  uop.illegal = 1'b0; end
+                            F3_OP_32_DIVW:  begin uop.muldiv_op = MD_DIV;  uop.illegal = 1'b0; end
+                            F3_OP_32_DIVUW: begin uop.muldiv_op = MD_DIVU; uop.illegal = 1'b0; end
+                            F3_OP_32_REMW:  begin uop.muldiv_op = MD_REM;  uop.illegal = 1'b0; end
+                            F3_OP_32_REMUW: begin uop.muldiv_op = MD_REMU; uop.illegal = 1'b0; end
+                            default: ;
+                        endcase
+                    end else begin
+                        unique case (funct3)
+                            F3_OP_32_ADDW_SUBW: begin
+                                if (funct7 == F7_OP_BASE) begin
+                                    uop.alu_op = ALU_ADD;
+                                    uop.illegal = 1'b0;
+                                end else if (funct7 == F7_OP_SUB_SRA) begin
+                                    uop.alu_op = ALU_SUB;
+                                    uop.illegal = 1'b0;
+                                end
+                            end
+                            F3_OP_32_SLLW: if (funct7 == F7_OP_BASE) begin
+                                uop.alu_op = ALU_SLL;
                                 uop.illegal = 1'b0;
                             end
-                        end
-                        F3_OP_32_SLLW: if (funct7 == F7_OP_BASE) begin
-                            uop.alu_op = ALU_SLL;
-                            uop.illegal = 1'b0;
-                        end
-                        F3_OP_32_SRLW_SRAW: begin
-                            if (funct7 == F7_OP_BASE) begin
-                                uop.alu_op = ALU_SRL;
-                                uop.illegal = 1'b0;
-                            end else if (funct7 == F7_OP_SUB_SRA) begin
-                                uop.alu_op = ALU_SRA;
-                                uop.illegal = 1'b0;
+                            F3_OP_32_SRLW_SRAW: begin
+                                if (funct7 == F7_OP_BASE) begin
+                                    uop.alu_op = ALU_SRL;
+                                    uop.illegal = 1'b0;
+                                end else if (funct7 == F7_OP_SUB_SRA) begin
+                                    uop.alu_op = ALU_SRA;
+                                    uop.illegal = 1'b0;
+                                end
                             end
-                        end
-                        default: ;
-                    endcase
+                            default: ;
+                        endcase
+                    end
                 end
             end
             OPCODE_SYSTEM: begin

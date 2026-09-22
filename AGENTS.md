@@ -58,7 +58,10 @@ changes, architectural or timing effects, affected files, and results in
 Update the matching `docs/` file whenever a target, feature, module responsibility,
 interface, directory, command, tool, or FPGA workflow changes. Keep `README.md`
 current. Separate hardware and software plans into their roadmaps. Maintain only
-this root `AGENTS.md`. Put explanatory learning notes under `docs/understand/`.
+this root `AGENTS.md`. This repository is the canonical home of
+`docs/COMMIT.md`, explanatory notes under `docs/understand/`, and the future
+software stack. Do not copy these publication documents back into the sibling
+`rhbyv-cpu-forlinux` repository.
 
 ## Branches and Pull Requests
 
@@ -70,3 +73,8 @@ merges; contributors do not self-merge. Delete a stage branch only after its
 history is reachable from the reviewed target. Treat `riscv-tests/` as a
 read-only clone: never stage or modify it. Keep local adapters and test lists
 under `tb/riscv_tests/` or `scripts/`.
+
+Hardware snapshots from `../rhbyv-cpu-forlinux` arrive on purpose-specific hgb
+branches and require a PR before entering `main`. Preserve this repository's
+README, license, and software roadmap when synchronizing. Software-focused hgb
+changes remain here and are not copied back to rhbyv unless explicitly requested.

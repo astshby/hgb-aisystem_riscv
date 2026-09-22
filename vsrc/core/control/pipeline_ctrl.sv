@@ -9,11 +9,13 @@ module pipeline_ctrl (
     input  logic                    d1_serialize_req, // D1 阶段发现译码异常或 MRET，内化到流水线中直接处理
     input  logic                    wb_wait,
     input  logic                    mem_request_stall,
+    input  logic                    execution_stall, // MDU 无结果，EX 必须保留当前指令。
     input  logic                    load_use_stall,
     output pipeline_pkg::redirect_t redirect, // 以上选择后都给 IF 阶段
     output logic                    serialize_start, // 给seralize_controller处理exc
     output logic                    fetch_ready,  // 由于imem，dmem是否由于后级阻塞本质也是流水线控制，内化此处处理
-    output logic                    mem_issue_enable,
+    output logic                    mem_issue_enable, // dmem是否由于后级阻塞
+    output logic                    d1_flush, // D1阶段是否清除
     output pipeline_pkg::pipeline_actions_t actions
 );
     import pipeline_pkg::*;
@@ -22,10 +24,11 @@ module pipeline_ctrl (
     typedef enum logic [3:0] {
         CTRL_NONE,
         CTRL_WB_REDIRECT,
-        CTRL_WB_WAIT,
+        CTRL_WB_WAIT,        // WB 阶段由于取不到load的值而阻塞
         CTRL_MEM_REQUEST_WAIT,
         CTRL_EX_REDIRECT,
         CTRL_EX_SERIALIZE,   // 序列化相对最低的：前面好的指令必须处理完
+        CTRL_EX_WAIT,
         CTRL_LOAD_USE,
         CTRL_D1_REDIRECT,
         CTRL_D1_SERIALIZE
@@ -46,6 +49,8 @@ module pipeline_ctrl (
             selected_event = CTRL_EX_REDIRECT;
         else if (ex_serialize_req)
             selected_event = CTRL_EX_SERIALIZE;
+        else if (execution_stall)
+            selected_event = CTRL_EX_WAIT;
         else if (load_use_stall)
             selected_event = CTRL_LOAD_USE;
         else if (d1_redirect.valid)
@@ -58,11 +63,21 @@ module pipeline_ctrl (
     always_comb begin
         redirect = '0;
         serialize_start = 1'b0;
+        d1_flush = 1'b0;
         unique case (selected_event)
-            CTRL_WB_REDIRECT: redirect = wb_redirect;
-            CTRL_EX_REDIRECT: redirect = ex_redirect;
+            CTRL_WB_REDIRECT: begin
+                redirect = wb_redirect;
+                d1_flush = 1'b1;
+            end
+            CTRL_EX_REDIRECT: begin
+                redirect = ex_redirect;
+                d1_flush = 1'b1;
+            end
             CTRL_D1_REDIRECT: redirect = d1_redirect;
-            CTRL_EX_SERIALIZE,
+            CTRL_EX_SERIALIZE: begin
+                serialize_start = 1'b1;
+                d1_flush = 1'b1;
+            end
             CTRL_D1_SERIALIZE: serialize_start = 1'b1;
             default: ;
         endcase
@@ -102,6 +117,12 @@ module pipeline_ctrl (
                 actions.d1_d2 = PIPE_CLEAR;
                 actions.d2_ex = PIPE_CLEAR;
             end
+            CTRL_EX_WAIT: begin
+                actions.if_d1 = PIPE_HOLD;
+                actions.d1_d2 = PIPE_HOLD;
+                actions.d2_ex = PIPE_HOLD;
+                actions.ex_mem = PIPE_CLEAR;
+            end
             CTRL_LOAD_USE: begin
                 actions.if_d1 = PIPE_HOLD;
                 actions.d1_d2 = PIPE_HOLD;
@@ -114,8 +135,7 @@ module pipeline_ctrl (
         endcase
     end
 
-    // IF 只在真正推进时交付响应；MEM 只受更老的 WB 阻塞或重定向约束。
-    // MEM 许可不能依赖完整事件仲裁，否则 MEM 前递、EX 重定向与仲裁之间会形成组合环。
+    // IF 只在真正推进时响应；MEM 只受 WB 阻塞或重定向约束。
     always_comb begin
         fetch_ready = (actions.if_d1 == PIPE_ADVANCE);
         mem_issue_enable = !wb_redirect.valid && !wb_wait;

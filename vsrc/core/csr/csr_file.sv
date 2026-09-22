@@ -38,6 +38,7 @@ module csr_file (
         value = '0;
         value[XLEN-1 -: 2] = (XLEN == 32) ? 2'b01 : 2'b10;
         value[8] = 1'b1;
+        value[12] = 1'b1; // M：两种 XLEN 均实现整数乘除，固定报告，不允许软件关闭。
         return value;
     endfunction
 

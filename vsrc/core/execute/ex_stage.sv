@@ -1,16 +1,22 @@
 // Module: ex_stage
-// Description: Applies forwarding and executes ALU, CSR, address, branch, and JALR operations.
+// Description: Applies forwarding and executes ALU, CSR, branch, and multi-cycle M operations.
 module ex_stage (
+    input  logic                         clk,
+    input  logic                         rst,
+    input  logic                         mdu_operands_ready, // M-use
+    input  logic                         advance, // M-use
+    input  logic                         cancel, // M-use
     input  pipeline_pkg::d2_ex_t         in_packet,
-    input  pipeline_pkg::gpr_forward_t  mem_gpr_forward,
-    input  pipeline_pkg::gpr_forward_t  wb_gpr_forward,
+    input  pipeline_pkg::gpr_forward_t   mem_gpr_forward,
+    input  pipeline_pkg::gpr_forward_t   wb_gpr_forward,
     input  core_types_pkg::xlen_t        csr_committed_data, // csr在ex阶段，不写入流水级寄存器合理
-    input  pipeline_pkg::csr_forward_t  mem_csr_forward,
-    input  pipeline_pkg::csr_forward_t  wb_csr_forward,
+    input  pipeline_pkg::csr_forward_t   mem_csr_forward,
+    input  pipeline_pkg::csr_forward_t   wb_csr_forward,
     output pipeline_pkg::ex_mem_t        out_packet,
     output pipeline_pkg::redirect_t      redirect,
     output pipeline_pkg::pred_update_t   pred_update,
-    output logic                         serialize_req
+    output logic                         serialize_req,
+    output logic                         execution_stall
 );
     import core_types_pkg::*;
     import pipeline_pkg::*;
@@ -29,6 +35,8 @@ module ex_stage (
     xlen_t csr_proposed_data;
     xlen_t csr_new_data;
     exception_t execute_exc;
+    logic mdu_instruction;
+    xlen_t mdu_result;
 
     // GPR 前递：MEM 比 WB 更新，因此 gpr_bypass 内部优先选择 MEM。
     gpr_bypass u_rs1_bypass (
@@ -49,7 +57,16 @@ module ex_stage (
         .forwarded_data(forwarded_rs2)
     );
 
-    // 操作数选择：CSR 立即数使用指令 rs1 字段中的零扩展 zimm。
+    // CSR 旁路在执行阶段选择最新值，与 GPR 操作数旁路类似。
+    csr_bypass u_csr_bypass (
+        .read_addr(in_packet.csr_addr),
+        .committed_data(csr_committed_data),
+        .mem_forward(mem_csr_forward),
+        .wb_forward(wb_csr_forward),
+        .bypass_data(csr_old_data)
+    );
+
+    // 操作数选择。
     always_comb begin
         unique case (in_packet.uop.op_a_sel)
             OP_A_RS1:  operand_a = forwarded_rs1;
@@ -82,15 +99,6 @@ module ex_stage (
         .target(branch_target)
     );
 
-    // CSR 旁路在执行阶段选择最新值，与 GPR 操作数旁路保持相同边界。
-    csr_bypass u_csr_bypass (
-        .read_addr(in_packet.csr_addr),
-        .committed_data(csr_committed_data),
-        .mem_forward(mem_csr_forward),
-        .wb_forward(wb_csr_forward),
-        .bypass_data(csr_old_data)
-    );
-
     // csr的计算放在这个阶段,并行与alu处理
     csr_exec u_csr_exec (
         .command(in_packet.uop.csr_cmd),
@@ -98,7 +106,6 @@ module ex_stage (
         .operand(csr_operand),
         .new_value(csr_proposed_data)
     );
-
     // 先执行，后合法化
     csr_warl u_csr_warl (
         .address(in_packet.csr_addr),
@@ -106,6 +113,15 @@ module ex_stage (
         .legal_value(csr_new_data)
     );
 
+    // M 扩展：功能集中到子模块。
+    ex_mdu u_ex_mdu (
+        .clk, .rst, .cancel, .mdu_operands_ready, .advance,
+        .packet_valid(in_packet.valid), .exception_valid(execute_exc.valid),
+        .uop(in_packet.uop), .forwarded_rs1, .forwarded_rs2,
+        .selected(mdu_instruction), .execution_stall, .result(mdu_result)
+    );
+
+    // 同步异常处理
     // EX 异常检测使用经过前递后的实际地址和控制流结果。
     ex_exception_check u_ex_exception_check (
         .in_packet,
@@ -151,12 +167,12 @@ module ex_stage (
     // 输出打包：Store 使用前递后的 rs2，CSR 同时携带旧值和 WARL 合法新值。
     always_comb begin
         out_packet = '0;
-        out_packet.valid = in_packet.valid;
+        out_packet.valid = in_packet.valid && !execution_stall;
         out_packet.pc = in_packet.pc;
         out_packet.seq_pc = in_packet.seq_pc;
         out_packet.inst = in_packet.inst;
         out_packet.rd = in_packet.rd;
-        out_packet.result = alu_result;
+        out_packet.result = mdu_instruction ? mdu_result : alu_result;
         out_packet.store_data = forwarded_rs2; // 地址由 rs1+imm 计算，写数据来自 rs2。
         out_packet.csr_addr = in_packet.csr_addr;
         out_packet.csr_old = csr_old_data;

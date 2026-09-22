@@ -11,10 +11,10 @@ imem_depth=32768
 dmem_bytes=131072
 
 if [[ "${xlen}" == "32" ]]; then
-    march="rv32i_zicsr"
+    march="rv32im_zicsr"
     mabi="ilp32"
 else
-    march="rv64i_zicsr"
+    march="rv64im_zicsr"
     mabi="lp64"
 fi
 dmem_word_bytes=$((xlen / 8))
