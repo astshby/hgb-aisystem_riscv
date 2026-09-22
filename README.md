@@ -7,23 +7,26 @@
 IF → D1 → D2 → EX → MEM → WB
 ```
 
-构建时可选择 RV32 或 RV64，已实现整数基础指令、六种 Zicsr 指令、
+构建时可选择 RV32 或 RV64，已实现整数基础指令、M 乘除扩展、六种 Zicsr 指令、
 ECALL/EBREAK/MRET、机器模式精确同步异常，以及 BTB + 非推测 GShare。
 Core 使用独立的指令和数据 ready/valid 接口，不直接实例化 FPGA BRAM。
 
 ## 当前状态
 
-- RV32I/RV64I 六级流水、GPR/CSR 前递、load-use 检测和存储器反压。
+- RV32IM/RV64IM 六级流水、GPR/CSR 前递、load-use 检测和存储器反压。
+- 单条在途多周期 MDU：统一握手与取消；三种乘法、两种除法可选，默认 DSP 推断乘法 + 移位除法（most easy）。
 - JAL 在 D1 解析；条件分支与 JALR 在 EX 解析。
 - CSR 在 EX 完成读改写与 WARL，WB 执行架构提交。
 - Verilator 纯 SystemVerilog 测试，不使用 Cocotb。
-- RV32/RV64 各 31 项单元测试和 10 项整核定向流程完成；非适用位宽用例明确 SKIP。
-- 适用的 riscv-tests：RV32 `50/50`，RV64 `65/65`；Zifencei 与未对齐直接完成用例明确 SKIP。
-- CoreMark 1.0 performance/validation CRC 均通过；无 M 扩展时 RV32 为
-  `0.986718 CoreMark/MHz`，RV64 为 `0.833029 CoreMark/MHz`。
+- RV32/RV64 各 38 项单元测试，包含六种 MDU 组合与小位宽穷举；13 项整核定向流程中各 12 PASS、1 非适用位宽 SKIP。
+- 适用的 riscv-tests：RV32 `58/58`，RV64 `78/78`，包括全部 8/13 项 UM；
+  Zifencei 与未对齐直接完成用例明确 SKIP。
+- CoreMark 1.0 performance/validation CRC 均通过；当前默认 MDU 配置的 RV32 为
+  `2.821267 CoreMark/MHz`，RV64 为 `2.490061 CoreMark/MHz`。
 
-当前完成的是 A5 Core、C 运行时与长程序仿真闭环。`cpu_top` 尚未连接 BRAM、时钟 IP 和
-UART；中断、M/C 扩展、Cache、S-mode 与 MMU 也属于后续工作。
+当前完成的 M 扩展。下一步预计接入zynq7020与盘古676，同时添加uart等必要的rtl设计。
+未来目标：异步中断、总线与总线挂载、Cache、C扩展、S-mode 与 MMU。
+很可能干的事情：根据上板时序评估加深流水，修改重复信号。
 
 ## 快速验证
 
@@ -38,6 +41,8 @@ make benchmark-smoke XLEN=32
 make benchmark-smoke XLEN=64
 make coremark XLEN=32
 make coremark XLEN=64
+make mdu-backends XLEN=32
+make mdu-backends XLEN=64
 ```
 
 RISC-V 工具链默认位于 `/opt/riscv/bin`。`make test` 包含 lint、单元测试和
