@@ -62,7 +62,7 @@ make mdu-backends XLEN=32
 make mdu-backends XLEN=64
 ```
 
-当前两种 XLEN 各 38 项 unit PASS，directed 各 12 PASS、1 非适用位宽 SKIP。
+当前两种 XLEN 各 40 项 unit PASS，directed 各 14 PASS、1 非适用位宽 SKIP。
 unit 包含全部六种 MDU 配置的算术/握手测试、8 位穷举和独立 SRT QDS/在线转换测试。
 MDU 整核矩阵另存于 `logs/mdu-matrix-rv<XLEN>/`；构建位于
 `build/verilator/mdu-matrix-rv<XLEN>/m<MUL_IMPL>d<DIV_IMPL>/`。
@@ -182,10 +182,10 @@ build/verilator/riscv-tests-rv32/Vtb_riscv_test \
 CoreMark/MHz = Iterations × 1,000,000 / Total ticks
 ```
 
-当前默认 `MUL_IMPL=0 DIV_IMPL=0` 的结果为 RV32
-`28 × 1,000,000 / 11,330,319 = 2.471246 CoreMark/MHz`，RV64
-`25 × 1,000,000 / 11,202,057 = 2.231733 CoreMark/MHz`。
-统一结果保持使默认乘法比重构前多一拍；旧 M 与无 M 的 A5 分数保留在性能解读中。
+当前默认 `MUL_IMPL=0 DIV_IMPL=0`、固定迭代数的结果为 RV32
+`32 × 1,000,000 / 11,045,355 = 2.897145 CoreMark/MHz`，RV64
+`28 × 1,000,000 / 10,854,767 = 2.579512 CoreMark/MHz`。
+旧基线分数保留在协作仓的性能解读和修改记录中，不能与 TCM/Cache 布局混称。
 非默认后端尚未做正式 CoreMark 跑分，不能借用这些分数。
 运行日志位于
 `logs/coremark-{performance,validation}-rv<XLEN>.log`；ELF、map、dump 与镜像位于
@@ -198,11 +198,19 @@ UART。更多限制和上板指标见 [CoreMark 与性能指标解读](understan
 
 ## 双平台与上板
 
-目标包含 Zynq-7020 和紫光同创盘古 676-200K Pro；平台边界与待确认资料见
-[平台适配](PLATFORM_ADAPTATION.md)。当前仅有 Zynq 脚本框架，现有 Vivado 默认器件
-是 `xc7z020clg400-1`。本次 M 仿真验收不执行 FPGA 工程。
+首个目标是盘古 676-200K Pro，待其 TCM/基础总线/外设完成板级闭环后再适配
+Zynq-7020；两板共享 Core 的 ready/valid 契约，IP、时钟与约束分别实现。平台边界
+见 [平台适配](PLATFORM_ADAPTATION.md)，Cache/TCM/DMA 总线分层见该文档链接的设计草案。
+目前均未完成上板，以下 Vivado 命令只保留历史工作流。
 
-### 保留的 Zynq Vivado 工作流
+### 盘古 676-200K Pro（先实施）
+
+先核实准确板卡资料、器件/封装、厂商工具、时钟、BRAM/DDR IP 接口和引脚；
+然后建立独立厂商工程、TCM/存储器适配、UART/Timer MMIO 与约束。不要复用
+Xilinx IP 配置或 XDC，也不要在核实 IP 前假定 DDR 用户接口就是 AXI4。
+完成可重建工程、综合、实现、时序和 ISA/CoreMark 上板测试后，才称为平台支持。
+
+### 保留的 Zynq-7020 Vivado 工作流（后适配）
 
 ```bash
 make vivado-project XLEN=32
@@ -217,13 +225,7 @@ vivado -mode batch -source scripts/vivado/program.tcl \
   -tclargs /path/to/rhbyv_cpu.bit
 ```
 
-现阶段 `cpu_top` 将存储器 ready/valid 接成零，`create_project.tcl` 也没有加载
-BRAM IP 或 XDC，因此只能创建/检查 RTL 工程，不能得到可运行的板级 CPU。A6 需要
-完成 BRAM adapter、Instruction/Data BRAM、Clock Wizard、UART、地址映射和 XDC，
-并保存综合 utilization、实现 timing 和 bitstream 结果。
-
-### 盘古 676-200K Pro
-
-后续独立建立厂商工程、时钟/BRAM adapter、引脚与时序约束；不要复用 Xilinx IP
-配置或照搬 XDC。共享 `rtl_files.f` 的 RTL 边界和软件测试契约，具体工程导入方式
-待工具与板卡资料确认。本次未安装厂商工具、创建该平台工程或验证 DSP 映射。
+现有 Tcl 默认器件为 `xc7z020clg400-1`，`cpu_top` 把存储器 ready/valid
+接成零，工程尚未加载 BRAM IP 或 XDC；上述命令不能生成可运行的板级 CPU。
+后续需完成存储器适配、时钟、复位、引脚和实现报告。若接入 Zynq 的 PS DDR，
+须另定 PS 初始化与 PS–PL 端口方案；只用 PL 的首版不依赖 PS DDR。

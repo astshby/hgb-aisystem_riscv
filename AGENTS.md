@@ -56,8 +56,11 @@ changes, architectural or timing effects, affected files, and results in
 ## Documentation Synchronization
 
 Update the matching `docs/` file whenever a target, feature, module responsibility,
-interface, directory, command, tool, or FPGA workflow changes. Keep `README.md`
-current. Separate hardware and software plans into their roadmaps. Maintain only
+interface, directory, command, tool, or FPGA workflow changes. Keep this repo's
+`README.md` current with the hardware snapshot and collaboration/software goals;
+maintain it independently rather than copying rhbyv's concise overview. Keep
+complete change records and explanatory notes in `docs/`. Separate hardware and
+software plans into their roadmaps. Maintain only
 this root `AGENTS.md`. This repository is the canonical home of
 `docs/COMMIT.md`, explanatory notes under `docs/understand/`, and the future
 software stack. Do not copy these publication documents back into the sibling
@@ -75,6 +78,7 @@ read-only clone: never stage or modify it. Keep local adapters and test lists
 under `tb/riscv_tests/` or `scripts/`.
 
 Hardware snapshots from `../rhbyv-cpu-forlinux` arrive on purpose-specific hgb
-branches and require a PR before entering `main`. Preserve this repository's
-README, license, and software roadmap when synchronizing. Software-focused hgb
+branches and require a PR before entering `main`. Update this repository's
+README while preserving its distinct purpose, license, and software roadmap
+when synchronizing. Software-focused hgb
 changes remain here and are not copied back to rhbyv unless explicitly requested.
