@@ -6,6 +6,9 @@ module ex_stage (
     input  logic                         mdu_operands_ready, // M-use
     input  logic                         advance, // M-use
     input  logic                         cancel, // M-use
+    input  logic                         mdu_rsp_ready,
+    output logic                         mdu_rsp_valid,
+    output core_types_pkg::xlen_t        mdu_rsp_data,
     input  pipeline_pkg::d2_ex_t         in_packet,
     input  pipeline_pkg::gpr_forward_t   mem_gpr_forward,
     input  pipeline_pkg::gpr_forward_t   wb_gpr_forward,
@@ -37,7 +40,6 @@ module ex_stage (
     xlen_t csr_new_data;
     exception_t execute_exc;
     logic mdu_instruction;
-    xlen_t mdu_result;
 
     // GPR 前递：MEM 比 WB 更新，因此 gpr_bypass 内部优先选择 MEM。
     gpr_bypass u_rs1_bypass (
@@ -119,7 +121,8 @@ module ex_stage (
         .clk, .rst, .cancel, .mdu_operands_ready, .advance,
         .packet_valid(in_packet.valid), .exception_valid(execute_exc.valid),
         .uop(in_packet.uop), .forwarded_rs1, .forwarded_rs2,
-        .selected(mdu_instruction), .execution_stall, .result(mdu_result)
+        .selected(mdu_instruction), .execution_stall,
+        .rsp_ready(mdu_rsp_ready), .rsp_valid(mdu_rsp_valid), .result(mdu_rsp_data)
     );
 
     // 同步异常处理
@@ -172,7 +175,8 @@ module ex_stage (
         out_packet.seq_pc = in_packet.seq_pc;
         out_packet.inst = in_packet.inst;
         out_packet.rd = in_packet.rd;
-        out_packet.result = mdu_instruction ? mdu_result : alu_result;
+        // M 的结果在 MEM 汇合，这里只把对应元数据送入 EX/MEM，不复制算法输出。
+        out_packet.result = mdu_instruction ? '0 : alu_result;
         out_packet.store_data = forwarded_rs2; // 地址由 rs1+imm 计算，写数据来自 rs2。
         out_packet.csr_addr = in_packet.csr_addr;
         out_packet.csr_old = csr_old_data;

@@ -44,6 +44,7 @@ module core (
     d1_d2_t d1_packet;
     d2_ex_t d2_packet;
     ex_mem_t ex_packet;
+    ex_mem_t mem_input_packet;
     mem_wb_t mem_packet;
 
     // 预测、重定向与错误路径清理。
@@ -84,6 +85,10 @@ module core (
     logic mem_request_stall;
     logic wb_wait;
     logic execution_stall;
+    logic mem_result_stall;
+    logic mdu_rsp_valid;
+    logic mdu_rsp_ready;
+    xlen_t mdu_rsp_data;
     logic mem_issue_enable;
     logic mdu_operands_ready;
     pipeline_actions_t pipeline_actions;
@@ -215,6 +220,9 @@ module core (
         .mdu_operands_ready,
         .advance(ex_stage_advance),
         .cancel(wb_redirect.valid),
+        .mdu_rsp_ready,
+        .mdu_rsp_valid,
+        .mdu_rsp_data,
         .in_packet(d2_ex_q),
         .mem_gpr_forward,
         .wb_gpr_forward(wb_gpr_write),
@@ -246,10 +254,21 @@ module core (
         .mepc
     );
 
+    // EX/MEM 后汇合寄存结果与元数据；算法计算中不能前递或重复进入 WB。
+    mem_mdu u_mem_mdu (
+        .in_packet(ex_mem_q),
+        .issue_enable(mem_issue_enable),
+        .rsp_valid(mdu_rsp_valid),
+        .rsp_data(mdu_rsp_data),
+        .rsp_ready(mdu_rsp_ready),
+        .result_stall(mem_result_stall),
+        .out_packet(mem_input_packet)
+    );
+
     mem_stage u_mem_stage (
         .issue_enable(mem_issue_enable),
         .request_stall(mem_request_stall),
-        .in_packet(ex_mem_q),
+        .in_packet(mem_input_packet),
         .dmem_req_valid,
         .dmem_req_write,
         .dmem_req_addr,
@@ -306,6 +325,7 @@ module core (
         .d1_serialize_req,
         .wb_wait,
         .mem_request_stall,
+        .mem_result_stall,
         .execution_stall,
         .load_use_stall,
         .redirect(selected_redirect),

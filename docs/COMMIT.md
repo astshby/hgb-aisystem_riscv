@@ -1,5 +1,21 @@
 # 设计调整记录
 
+## 2026-09-25（Asia/Shanghai）— MDU 结果与 EX/MEM 元数据汇合基线
+
+`ex_mdu` 在请求接收后允许元数据进入 EX/MEM，并用 `issued_q` 处理较老指令反压期间
+已启动但尚未交付的请求。新增 `mem_mdu`，在 EX/MEM 寄存器输出侧拼接 MDU 寄存结果；
+`pipeline_ctrl` 对未完成的 MEM 结果维持年龄优先。更新文件表、模块/整核 TB 和
+六后端矩阵，保留同步异常、取消和 ready/valid 的既有提交顺序。
+
+验证：两种 XLEN 各 40 unit PASS、14 directed PASS、1 非适用位宽 SKIP；
+riscv-tests 为 RV32 58 PASS、RV64 78 PASS，各 2 SKIP（`fence_i`、`ma_data`）。
+六种 MDU 后端矩阵为 RV32 78 PASS、RV64 108 PASS；EX 适配器在两种 XLEN 下各
+6 种后端 PASS。C 冒烟、CoreMark 校准、performance、validation 均通过。
+固定基线相同迭代数，默认 m0d0、BTB 64：RV32 32 次/11045355 ticks，
+`2.897145 CoreMark/MHz`；RV64 28 次/10854767 ticks，
+`2.579512 CoreMark/MHz`。未进行 FPGA 综合或板级验证。
+
+
 ## 2026-09-24（Asia/Shanghai）— fix_M 前递修复与组合条件精简
 
 范围：第一阶段基线，保留六级流水与现有 EX 等待 MDU 的寄存边界；不前移 Load-use。

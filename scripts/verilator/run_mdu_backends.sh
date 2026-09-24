@@ -32,7 +32,7 @@ passes=0
 for mul in 0 1 2; do
     for div in 0 1; do
         config="m${mul}d${div}"
-        for top in tb_core_m tb_core_m_wait tb_core_m_forward tb_core_m_trap tb_riscv_test; do
+        for top in tb_core_m tb_core_m_wait tb_core_m_forward tb_core_m_boundary tb_core_m_trap tb_riscv_test; do
             out_dir="${build_root}/${config}/${top}"
             mkdir -p "${out_dir}"
             tb_path="tb/core/${top}.sv"
@@ -64,7 +64,7 @@ for mul in 0 1 2; do
             check_log "${run_log}" "PASS um/${name}"
             passes=$((passes + 1))
         done
-        echo "PASS MDU configuration RV${xlen} ${config}: directed=4 UM=${#um_tests[@]}"
+        echo "PASS MDU configuration RV${xlen} ${config}: directed=5 UM=${#um_tests[@]}"
     done
 done
 echo "PASS MDU matrix RV${xlen}: configurations=6 checks=${passes}"

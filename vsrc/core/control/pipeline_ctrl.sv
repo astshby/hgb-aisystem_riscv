@@ -9,7 +9,8 @@ module pipeline_ctrl (
     input  logic                    d1_serialize_req, // D1 阶段发现译码异常或 MRET，内化到流水线中直接处理
     input  logic                    wb_wait,
     input  logic                    mem_request_stall,
-    input  logic                    execution_stall, // MDU 无结果，EX 必须保留当前指令。
+    input  logic                    mem_result_stall, // MEM 中的 M 指令已发射但结果未返回。
+    input  logic                    execution_stall, // EX 操作数或 MDU 接收端尚未就绪。
     input  logic                    load_use_stall,
     output pipeline_pkg::redirect_t redirect, // 以上选择后都给 IF 阶段
     output logic                    serialize_start, // 给seralize_controller处理exc
@@ -25,7 +26,7 @@ module pipeline_ctrl (
         CTRL_NONE,
         CTRL_WB_REDIRECT,
         CTRL_WB_WAIT,        // WB 阶段由于取不到load的值而阻塞
-        CTRL_MEM_REQUEST_WAIT,
+        CTRL_MEM_WAIT,       // 请求未被接收，或 M 结果尚未就绪
         CTRL_EX_REDIRECT,
         CTRL_EX_SERIALIZE,   // 序列化相对最低的：前面好的指令必须处理完
         CTRL_EX_WAIT,
@@ -43,8 +44,8 @@ module pipeline_ctrl (
             selected_event = CTRL_WB_REDIRECT;
         else if (wb_wait)
             selected_event = CTRL_WB_WAIT;
-        else if (mem_request_stall)
-            selected_event = CTRL_MEM_REQUEST_WAIT;
+        else if (mem_request_stall || mem_result_stall)
+            selected_event = CTRL_MEM_WAIT;
         else if (ex_redirect.valid)
             selected_event = CTRL_EX_REDIRECT;
         else if (ex_serialize_req)
@@ -106,7 +107,7 @@ module pipeline_ctrl (
                 actions.ex_mem = PIPE_HOLD;
                 actions.mem_wb = PIPE_HOLD;
             end
-            CTRL_MEM_REQUEST_WAIT: begin
+            CTRL_MEM_WAIT: begin
                 actions.if_d1 = PIPE_HOLD;
                 actions.d1_d2 = PIPE_HOLD;
                 actions.d2_ex = PIPE_HOLD;

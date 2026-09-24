@@ -23,8 +23,9 @@ ready-valid 存储器协议。
 - D1 完成译码、立即数、非法/SYSTEM 分类、早期异常和 JAL 解析。
 - D2 读取双端口 GPR，并准备执行操作数。
 - EX 统一处理 GPR/CSR 前递、ALU、分支、JALR、CSR 读改写和动态异常；
-  MDU 多周期等待保留当前 EX 包，结果接收后才推进。
-- MEM 发射一次 Load/Store 请求；未 ready 时保持流水。
+  MDU 请求被接收后将指令元数据送入 EX/MEM。
+- MEM 发射一次 Load/Store 请求，或将寄存的 MDU 结果与元数据汇合；
+  请求未 ready 或运算结果未就绪时保持流水。
 - WB 接收 Load 响应，作为 GPR/CSR、计数器和 Trap 的架构提交点。
 - 同步异常在发现时清除年轻指令，携带 metadata 到 WB 后精确提交。
 - JAL 只训练 BTB；JALR 训练 BTB；条件分支训练 BTB、PHT 和 GHR。
@@ -61,6 +62,8 @@ ready-valid 存储器协议。
 | `mul_unit` | 16 位无符号分块乘积、寄存器分组求和、signed 高半积修正和 W 扩展 |
 | `div_unit` | 逐位恢复除法、符号恢复、除零/溢出规定结果和 32 位 W 运算 |
 | `muldiv_unit` | 单条在途请求/响应、后端选择、结果反压和取消 |
+| `ex_mdu` | EX 请求打包与已发射但尚未交付 MEM 的元数据记录 |
+| `mem_mdu` | 在 EX/MEM 寄存器后拼包 MDU 结果，控制 MEM 结果等待和响应接收 |
 | `ex_exception_check` | 继承异常、CSR 权限、访存与控制目标对齐检查 |
 | `mem_stage` | 请求侧握手和 MEM 前递，不等待 Load 返回 |
 | `wb_stage` | 响应侧握手、写回数据和真实 commit 许可 |
@@ -147,7 +150,17 @@ CoreMark performance/validation CRC 均通过，默认配置成绩为 RV32 `2.47
 清理后级重复非法指令判断与等价组合条件，不改变 EX/MEM 寄存边界。
 回归更新为每种 XLEN 39 unit PASS、13 directed PASS 和 1 非适用位宽 SKIP；
 ISA 覆盖不变。默认 m0d0、BTB 64 的 CoreMark/MHz 为 RV32 `2.820371`、RV64 `2.518471`。
-后续 EX/MEM 结果与元数据汇合实验单独验证，不混入本次正确性基线。
+EX/MEM 结果与元数据汇合另作为后续基线验证。
+
+2026-09-25 EX/MEM 新基线：MDU 请求接受沿，EX/MEM 即保存 M 指令元数据；MEM 在
+结果就绪后拼包并进入 WB。`pipeline_ctrl` 让 MEM 的结果等待优先于年轻 EX 控制事件；
+WB 反压时，MDU 结果由唯一握手状态机保持，Load-use 的位置不变。
+两种 XLEN 各 40 unit PASS、14 directed PASS 和 1 非适用位宽 SKIP；ISA 仍为
+RV32 58/58、RV64 78/78，各明确跳过 `fence_i` 与 `ma_data`。六种 MDU 配置矩阵
+为 RV32 78 PASS、RV64 108 PASS；EX 适配器各六种后端额外检查通过。
+默认 m0d0、BTB 64，固定同一迭代数对比：RV32 32 次迭代/11045355 ticks，
+`2.897145 CoreMark/MHz`；RV64 28 次迭代/10854767 ticks，
+`2.579512 CoreMark/MHz`。这是仿真周期效率，FPGA 时序与板级频率仍待测量。
 
 ## 阶段 C：C 扩展
 
