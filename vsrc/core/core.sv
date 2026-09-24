@@ -107,14 +107,13 @@ module core (
     // D1/EX 已排除本级异常，Core 只在流水级真正推进时放行训练。
     // WB/EX 清除 D1 及其后续时，pending 中的年轻预测更新也必须作废。
     always_comb begin
-        d1_stage_advance = if_d1_q.valid &&
-                           (pipeline_actions.d1_d2 == PIPE_ADVANCE);
+        d1_stage_advance = (pipeline_actions.d1_d2 == PIPE_ADVANCE);
         ex_stage_advance = d2_ex_q.valid &&
                            (pipeline_actions.ex_mem == PIPE_ADVANCE);
         d1_update = d1_update_raw;
         ex_update = ex_update_raw;
         d1_update.valid = d1_update_raw.valid && d1_stage_advance;
-        ex_update.valid = ex_update_raw.valid && ex_stage_advance;
+        ex_update.valid = ex_update_raw.valid && (pipeline_actions.ex_mem == PIPE_ADVANCE);
     end
 
     // 预测器裁决
@@ -203,6 +202,8 @@ module core (
 
     mdu_issue_control u_mdu_issue_control (
         .ex_packet(d2_ex_q),
+        .mem_packet(ex_mem_q),
+        .mem_forward(mem_gpr_forward),
         .wb_packet(mem_wb_q),
         .wb_wait,
         .mdu_operands_ready

@@ -87,6 +87,27 @@ module tb_wb_stage;
         assert (!gpr_write.valid && !csr_write.valid && commit_exception)
             else $fatal(1, "faulting load architectural effects");
 
+        // 穷举有效位、异常、Load 与返回组合，检查精简后的提交/等待互斥关系。
+        for (int bits = 0; bits < 32; bits++) begin
+            in_packet = '0;
+            in_packet.valid = bits[0];
+            in_packet.exc.valid = bits[1];
+            in_packet.uop.illegal = bits[1]; // 后级非法包必须携带 D1 已形成的异常。
+            in_packet.uop.mem_read = bits[2];
+            dmem_rsp_valid = bits[3];
+            in_packet.rd = bits[4] ? gpr_addr_t'(1) : '0;
+            in_packet.uop.gpr_write = 1'b1;
+            in_packet.csr_we = 1'b1;
+            #1;
+            assert (wait_for_response == (bits[0] && !bits[1] && bits[2] && !bits[3]))
+                else $fatal(1, "WB wait truth table %0d", bits);
+            assert (commit_valid == (bits[0] && !wait_for_response) &&
+                    commit_exception == (commit_valid && bits[1]) &&
+                    csr_write.valid == (commit_valid && !bits[1]) &&
+                    gpr_write.valid == (csr_write.valid && bits[4]))
+                else $fatal(1, "WB commit truth table %0d", bits);
+        end
+
         $display("PASS tb_wb_stage RV%0d", XLEN);
         $finish;
     end

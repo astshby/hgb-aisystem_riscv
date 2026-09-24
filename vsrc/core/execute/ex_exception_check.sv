@@ -39,8 +39,7 @@ module ex_exception_check (
 
     // 用于剩余的分支地址对齐检测：JAL 已在 D1 检查；条件分支与 JALR 的实际目标在 EX 才能确定。
     always_comb begin
-        control_op = (in_packet.uop.branch_op != BR_NONE) &&
-                     (in_packet.uop.branch_op != BR_JAL);
+        control_op = is_ex_control_flow(in_packet.uop.branch_op);
     end
 
     // 已有异常优先，后续阶段只能在没有异常时补充新的异常信息。

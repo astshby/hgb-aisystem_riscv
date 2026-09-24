@@ -1,5 +1,25 @@
 # 设计调整记录
 
+## 2026-09-24（Asia/Shanghai）— fix_M 前递修复与组合条件精简
+
+范围：第一阶段基线，保留六级流水与现有 EX 等待 MDU 的寄存边界；不前移 Load-use。
+
+- 修复慢 Load 停在 WB 时，MEM 已完成结果因无法推进而被关闭前递，导致 EX MDU 锁存旧操作数的问题。
+- MEM 的 GPR/CSR 前递有效性与向 WB 推进许可分离；MDU 操作数就绪遵循 MEM 优先于 WB，支持较新同名写入覆盖。
+- D1 负责将非法指令转换为异常；清理后级重复 illegal 检查，合并 WB 完成条件、EX 分支分类、IF 当前路径取消条件及 CSR 冗余只读比较。
+- 保留模块说明、中文功能块与协议注释；没有改变 Load-use 位置、乘除法算法或请求/响应状态机。
+- 新增 `tb_core_m_forward` 七场景；扩展 MEM、MDU 发射和 WB 真值测试，后端矩阵纳入新定向测试。
+- 涉及 `vsrc/core/{control,execute,frontend,lsu,writeback,csr}`、`core.sv`、类型包、上述 TB 与后端矩阵脚本。
+
+验证：两种 XLEN 各 39 项 unit PASS，14 项 directed 中 13 PASS、1 非适用位宽 SKIP；
+三种 top 的 lint 均通过。riscv-tests 为 RV32 58 PASS、RV64 78 PASS，各 2 SKIP
+（`fence_i`、`ma_data`）。C 冒烟各 1 PASS，CoreMark 校准、performance、validation 均通过。
+默认 `MUL_IMPL=0 DIV_IMPL=0 BTB_ENTRIES=64`：RV32 32 次迭代/11346027 ticks，
+`2.820371 CoreMark/MHz`；RV64 28 次迭代/11117855 ticks，`2.518471 CoreMark/MHz`。
+六种 MDU 后端矩阵为 RV32 72 PASS、RV64 102 PASS，均无 FAIL/SKIP。
+未运行 FPGA 综合或上板。
+
+
 ## 2026-09-02（Asia/Shanghai）— SYSTEM uOp 分类
 
 状态：A0 学习分支上的适应性设计调整，尚未替代后续阶段实现。

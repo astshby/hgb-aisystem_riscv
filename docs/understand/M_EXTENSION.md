@@ -36,6 +36,14 @@ EX 中剩余的 ALU/CSR 操作数选择、分支判断和输出包组装仍按�
 实际前递操作数在 `req_valid && req_ready` 的上升沿锁存。MDU 离开 IDLE 后
 busy 为 1，适配器随即撤销 req_valid；不再另存一份 EX pending 状态。
 
+操作数就绪与前递使用相同的最近生产者顺序：先 MEM，再 WB。MEM 已有 ALU/CSR
+结果时，即使较老 Load 在 WB 等待，也仍然可以前递；“结果已经可用”不等于
+“流水包现在能推进”。MEM 的同名新写入覆盖 WB 的旧写入；只有实际选中的
+生产者尚未提供结果才阻止 MDU 启动。x0 和未使用的源不产生依赖。
+
+`tb_core_m_forward` 覆盖慢 Load、MEM 写入、EX 乘除法三者重叠的七种场景，
+同时检查两路操作数、覆盖关系、真实 WB 依赖、Load 写 x0 和不重复启动/退休。
+
 | MDU 状态 | req_ready | rsp_valid | 含义 |
 |---|---|---|---|
 | IDLE | 1 | 0 | 可以接收一个请求 |

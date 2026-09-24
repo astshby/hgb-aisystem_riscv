@@ -29,6 +29,7 @@ module ex_stage (
     logic branch_taken;
     xlen_t branch_target;
     logic control_op;
+    logic branch_valid;
     logic mispredict;
     xlen_t csr_operand;
     xlen_t csr_old_data;
@@ -140,14 +141,13 @@ module ex_stage (
     // 分支控制：判断预测错误，并生成给 BTB/GShare 的实际执行结果。
     // control_op 包含条件分支与 JALR；JAL 已在 D1 处理。
     always_comb begin
-        control_op = (in_packet.uop.branch_op != BR_NONE) &&
-                     (in_packet.uop.branch_op != BR_JAL);
-        mispredict = control_op &&
-                     ((in_packet.pred.taken != branch_taken) ||
-                      (branch_taken && (in_packet.pred.target != branch_target)));
+        control_op = is_ex_control_flow(in_packet.uop.branch_op);
+        branch_valid = in_packet.valid && !execute_exc.valid && control_op;
+        mispredict = (in_packet.pred.taken != branch_taken) ||
+                     (branch_taken && (in_packet.pred.target != branch_target));
 
         pred_update = '0;
-        if (in_packet.valid && !execute_exc.valid && control_op) begin
+        if (branch_valid) begin
             pred_update.valid = 1'b1;
             pred_update.kind = in_packet.uop.branch_op;
             pred_update.pc = in_packet.pc;
@@ -157,7 +157,7 @@ module ex_stage (
         end
 
         redirect = '0;
-        if (in_packet.valid && mispredict && !execute_exc.valid) begin
+        if (branch_valid && mispredict) begin
             redirect.valid = 1'b1;
             redirect.pc = branch_taken ? branch_target : in_packet.seq_pc;
             redirect.reason = REDIR_EX_BRANCH;

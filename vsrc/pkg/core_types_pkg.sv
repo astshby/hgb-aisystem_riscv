@@ -27,6 +27,12 @@ package core_types_pkg;
         BR_NONE, BR_EQ, BR_NE, BR_LT, BR_GE,
         BR_LTU, BR_GEU, BR_JAL, BR_JALR
     } branch_op_e;
+
+    // JAL 已在 D1 处理；EX 只处理条件分支和 JALR。
+    function automatic logic is_ex_control_flow(input branch_op_e operation);
+        return (operation != BR_NONE) && (operation != BR_JAL);
+    endfunction
+
     // M 运算与 ALU 分类分离；W 形式复用操作枚举，由 op_width 决定有效位宽。
     typedef enum logic [2:0] {
         MD_MUL, MD_MULH, MD_MULHSU, MD_MULHU,

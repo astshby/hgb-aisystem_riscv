@@ -23,7 +23,7 @@ module csr_access_check (
             default:
                 implemented = 1'b0;
         endcase
-        read_only = (address == CSR_MISA) || (address == CSR_MHARTID) ||
+        read_only = (address == CSR_MISA) ||
                     (address[11:10] == 2'b11); // 0xFxx 区域只读,0xBxx 不是只读
         illegal = !implemented || (write_intent && read_only);
     end

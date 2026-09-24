@@ -14,7 +14,7 @@ module hazard_unit (
     always_comb begin
         producer_is_load = producer.valid && producer.uop.mem_read &&
                            producer.uop.gpr_write && (producer.rd != '0) &&
-                           !producer.exc.valid && !producer.uop.illegal;
+                           !producer.exc.valid;
         rs1_hazard = consumer.uop.rs1_used && (consumer.rs1 == producer.rd);
         rs2_hazard = consumer.uop.rs2_used && (consumer.rs2 == producer.rd);
         load_use_stall = producer_is_load && consumer.valid &&

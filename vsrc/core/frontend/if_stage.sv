@@ -32,17 +32,25 @@ module if_stage (
     logic response_fire;
     logic response_usable;
     logic request_fire;
+    logic kill_now;
+    xlen_t seq_pc;
+
+    // redirect 与序列化 flush 都杀死当前路径，只有 redirect 会改写 PC。
+    always_comb begin
+        kill_now = redirect.valid || flush;
+        seq_pc = pc_q + xlen_t'(4);
+    end
 
     // 组合部分
     // IMEM 请求与响应接口：req_valid/rsp_ready 由 IF 发出，其余由 IMEM/Cache 返回。
     always_comb begin
         // response_fire 是 response 响应握手，request_fire 是 request 请求握手。
-        imem_req_valid = fetch_request_enable && !redirect.valid && !flush &&
+        imem_req_valid = fetch_request_enable && !kill_now &&
                          (!request_q.valid || response_fire);
         imem_req_addr = pc_q;
         // 空闲：请求被杀死、正在清空，或者返回数据能够交给 D1/Buffer。
         imem_rsp_ready = request_q.valid &&
-                         (request_killed_q || redirect.valid || flush || response_can_buffer);
+                         (request_killed_q || kill_now || response_can_buffer);
     end
 
     // 握手与响应组包：被 kill 或正处于清空周期的响应只能消费，不能进入流水线。
@@ -50,8 +58,7 @@ module if_stage (
         response_can_buffer = !buffer_q.valid || out_ready;
         request_fire = imem_req_valid && imem_req_ready;
         response_fire = imem_rsp_valid && imem_rsp_ready;
-        response_usable = response_fire && !request_killed_q &&
-                          !redirect.valid && !flush;
+        response_usable = response_fire && !request_killed_q && !kill_now;
         response_packet = request_q;
         response_packet.inst = imem_rsp_data;
         response_packet.valid = response_usable;
@@ -62,7 +69,7 @@ module if_stage (
         out_packet = buffer_q;
         if (!buffer_q.valid)
             out_packet = response_packet;
-        if (redirect.valid || flush)
+        if (kill_now)
             out_packet.valid = 1'b0;
     end
 
@@ -74,7 +81,7 @@ module if_stage (
         else if (redirect.valid)
             pc_q <= redirect.pc;
         else if (request_fire)
-            pc_q <= prediction.taken ? prediction.target : pc_q + xlen_t'(4);
+            pc_q <= prediction.taken ? prediction.target : seq_pc;
     end
 
     // Request 状态：清空时若请求尚未返回，必须保留 kill 标志直到旧响应被消费。
@@ -82,7 +89,7 @@ module if_stage (
         if (rst) begin
             request_q <= '0;
             request_killed_q <= 1'b0;
-        end else if (redirect.valid || flush) begin
+        end else if (kill_now) begin
             if (request_q.valid && !response_fire)
                 request_killed_q <= 1'b1;
             else begin
@@ -98,7 +105,7 @@ module if_stage (
             if (request_fire) begin
                 request_q.valid <= 1'b1;
                 request_q.pc <= pc_q;
-                request_q.seq_pc <= pc_q + xlen_t'(4);
+                request_q.seq_pc <= seq_pc;
                 request_q.inst <= '0;
                 request_q.pred <= prediction;
                 request_killed_q <= 1'b0;
@@ -109,7 +116,7 @@ module if_stage (
     // Buffer 状态：覆盖“旧包出队且新响应同拍到达”的连续传输情况。
     // 处理 b1q1 与 b0q0；b1q0 保持，b0q1 在 D1 暂停时保存返回包。
     always_ff @(posedge clk) begin
-        if (rst || redirect.valid || flush)
+        if (rst || kill_now)
             buffer_q <= '0;
         else if (buffer_q.valid && out_ready) begin
             if (response_usable)

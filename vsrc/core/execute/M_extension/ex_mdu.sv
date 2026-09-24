@@ -16,7 +16,7 @@ module ex_mdu (
     muldiv_req_t request;
     logic req_valid, req_ready, rsp_valid, rsp_ready, busy;
 
-    // 前递后的操作数只在请求握手时进入 MDU；较老访存等待时不启动运算。
+    // 前递后的操作数只在请求握手时进入 MDU；依赖的较老结果尚未就绪时不启动运算。
     // 未完成时阻塞 EX，已完成但下游暂停时保留响应，不重新采样旁路线。
     always_comb begin
         selected = packet_valid && !exception_valid && (uop.fu == FU_MULDIV);

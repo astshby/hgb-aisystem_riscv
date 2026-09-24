@@ -58,8 +58,8 @@ hgb-aisystem_riscv/
 
 ## `tb/`
 
-- `unit/`：当前 38 项，包含模块测试、六种 MDU 配置、8 位算法穷举与 SRT 组件验证。
-- `core/`：13 项短程序流程，覆盖基础/M 指令、访存等待、预测、CSR、Trap 和序列化取消。
+- `unit/`：当前 39 项，包含模块测试、六种 MDU 配置、8 位算法穷举与 SRT 组件验证。
+- `core/`：14 项短程序流程，每种 XLEN 为 13 PASS、1 非适用位宽 SKIP；覆盖基础/M 指令、访存等待及 MDU 前递、预测、CSR、Trap 和序列化取消。
 - `benchmark/`：运行 ELF 镜像的长程序 harness，被动镜像字符 Store 并监视 `tohost`。
 - `common/rv_asm_pkg.sv`：为整核定向测试生成具名 32 位指令编码。
 - `common/muldiv_checker.sv`：乘法、除法和统一 MDU 共用的独立算术/协议参考检查器。
@@ -78,7 +78,7 @@ hgb-aisystem_riscv/
 - `verilator/run_unit.sh`：遍历 `tb/unit/tb_*.sv`。
 - `verilator/run_directed.sh`：遍历 `tb/core/tb_*.sv`。
 - `verilator/run_riscv_tests.sh`：编译 vendored 汇编、生成镜像并运行 MI/UI/UM 回归。
-- `verilator/run_mdu_backends.sh`：对六种 MDU 配置运行三个 M 整核测试与全部 UM 镜像。
+- `verilator/run_mdu_backends.sh`：对六种 MDU 配置运行四个 M 整核测试与全部 UM 镜像。
 - `verilator/build_benchmark_image.sh`：链接裸机 C/汇编并分离 IMem/DMem 镜像。
 - `verilator/run_benchmark_smoke.sh`：验证启动、栈、数据段、硬件 M/宽整数辅助算术和计时。
 - `verilator/run_coremark.sh`：校准迭代数并执行 CoreMark performance/validation。

@@ -8,6 +8,8 @@ module tb_mdu_issue_control;
     import pipeline_pkg::*;
 
     d2_ex_t ex_packet;
+    ex_mem_t mem_packet;
+    gpr_forward_t mem_forward;
     mem_wb_t wb_packet;
     logic wb_wait;
     logic mdu_operands_ready;
@@ -16,6 +18,8 @@ module tb_mdu_issue_control;
 
     initial begin
         ex_packet = '0;
+        mem_packet = '0;
+        mem_forward = '0;
         wb_packet = '0;
         wb_wait = 1'b0;
         ex_packet.valid = 1'b1;
@@ -35,9 +39,40 @@ module tb_mdu_issue_control;
         #1;
         assert (!mdu_operands_ready) else $fatal(1, "dependent rs1 must wait for load response");
 
+        // MEM 的较新写入覆盖同名的 WB Load；就绪判断与旁路优先级一致。
+        mem_packet.valid = 1'b1;
+        mem_packet.uop.gpr_write = 1'b1;
+        mem_packet.rd = gpr_addr_t'(5);
+        mem_forward.valid = 1'b1;
+        mem_forward.addr = gpr_addr_t'(5);
+        #1;
+        assert (mdu_operands_ready) else $fatal(1, "newer MEM result must override WB dependency");
+        mem_forward.valid = 1'b0;
+        #1;
+        assert (!mdu_operands_ready) else $fatal(1, "unready MEM producer must block MDU");
+        wb_wait = 1'b0;
+        #1;
+        assert (!mdu_operands_ready) else $fatal(1, "MEM readiness is independent of WB wait");
+        wb_wait = 1'b1;
+        mem_packet = '0;
+        mem_forward = '0;
+
         wb_packet.rd = gpr_addr_t'(7);
         #1;
         assert (!mdu_operands_ready) else $fatal(1, "dependent rs2 must wait for load response");
+
+        mem_packet.valid = 1'b1;
+        mem_packet.uop.gpr_write = 1'b1;
+        mem_packet.rd = gpr_addr_t'(7);
+        mem_forward.valid = 1'b1;
+        mem_forward.addr = gpr_addr_t'(7);
+        #1;
+        assert (mdu_operands_ready) else $fatal(1, "newer MEM rs2 must override WB dependency");
+        mem_packet.exc.valid = 1'b1;
+        mem_forward.valid = 1'b0;
+        #1;
+        assert (!mdu_operands_ready) else $fatal(1, "faulting MEM must not hide WB dependency");
+        mem_packet = '0;
 
         wb_packet.rd = gpr_addr_t'(9);
         #1;

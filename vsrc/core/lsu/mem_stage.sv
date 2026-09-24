@@ -18,7 +18,6 @@ module mem_stage (
     import core_types_pkg::*;
 
     logic memory_request;
-    logic request_fire;
     logic packet_can_advance;
     xlen_t store_wdata;
     logic [core_config_pkg::DBUS_BYTES-1:0] store_wstrb;
@@ -36,16 +35,15 @@ module mem_stage (
     always_comb begin
         memory_request = in_packet.valid &&
                          (in_packet.uop.mem_read || in_packet.uop.mem_write) &&
-                         !in_packet.exc.valid && !in_packet.uop.illegal;
+                         !in_packet.exc.valid;
         dmem_req_valid = issue_enable && memory_request;
         dmem_req_write = in_packet.uop.mem_write;
         dmem_req_addr = in_packet.result;
         dmem_req_wdata = store_wdata;
         dmem_req_wstrb = store_wstrb;
-        request_fire = dmem_req_valid && dmem_req_ready;
 
         // 非访存指令直接前进；访存指令必须等请求握手完成。
-        packet_can_advance = !memory_request || request_fire;
+        packet_can_advance = !memory_request || dmem_req_ready;
         request_stall = dmem_req_valid && !dmem_req_ready;
     end
 
@@ -74,15 +72,16 @@ module mem_stage (
             default:   gpr_forward.data = in_packet.result;
         endcase
         // Store 不写 GPR；Load 的数据此时尚未返回。
-        gpr_forward.valid = out_packet.valid && in_packet.uop.gpr_write &&
+        // 结果可用与能否推进分开：WB 等待时，MEM 中已算好的值仍可供 EX 使用。
+        gpr_forward.valid = in_packet.valid && in_packet.uop.gpr_write &&
                             (in_packet.uop.wb_sel != WB_LOAD) &&
-                            !in_packet.exc.valid && !in_packet.uop.illegal;
+                            !in_packet.exc.valid;
         gpr_forward.addr = in_packet.rd;
     end
 
     // CSR 前递携带 EX 已完成 WARL 合法化的新值。
     always_comb begin
-        csr_forward.valid = out_packet.valid && in_packet.csr_we &&
+        csr_forward.valid = in_packet.valid && in_packet.csr_we &&
                             !in_packet.exc.valid;
         csr_forward.addr = in_packet.csr_addr;
         csr_forward.data = in_packet.csr_new;

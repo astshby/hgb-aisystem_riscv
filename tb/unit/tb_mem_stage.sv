@@ -42,6 +42,13 @@ module tb_mem_stage;
                 gpr_forward.data == xlen_t'(42))
             else $fatal(1, "missing MEM ALU forwarding");
 
+        // WB 反压只禁止推进，不应隐藏 MEM 已经完成的 ALU 结果。
+        issue_enable = 1'b0;
+        #1;
+        assert (!out_packet.valid && gpr_forward.valid && gpr_forward.data == xlen_t'(42))
+            else $fatal(1, "MEM forwarding lost under WB backpressure");
+        issue_enable = 1'b1;
+
         // CSR 新值在 MEM 透明传递，并作为后续 CSR 指令的旁路候选。
         in_packet = '0;
         in_packet.valid = 1'b1;
@@ -52,6 +59,12 @@ module tb_mem_stage;
         assert (csr_forward.valid && csr_forward.addr == CSR_MSCRATCH &&
                 csr_forward.data == xlen_t'(32'h1234))
             else $fatal(1, "missing MEM CSR forwarding");
+
+        issue_enable = 1'b0;
+        #1;
+        assert (!out_packet.valid && csr_forward.valid && csr_forward.data == xlen_t'(32'h1234))
+            else $fatal(1, "MEM CSR forwarding lost under WB backpressure");
+        issue_enable = 1'b1;
 
         // load 命中 ready 时立即进入 MEM/WB，但数据要到 WB 才能前递。
         in_packet = '0;

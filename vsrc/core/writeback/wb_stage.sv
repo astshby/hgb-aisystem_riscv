@@ -19,9 +19,9 @@ module wb_stage (
 );
     import core_types_pkg::*;
 
-    logic response_fire;
     logic load_response_needed; // load是否在wb阶段接收数据
     logic packet_complete;
+    logic normal_commit;
     xlen_t load_data;
     xlen_t writeback_data;
 
@@ -37,12 +37,13 @@ module wb_stage (
     // dmem响应处理与packet完成：当需要但是没返回才暂停，包完成时不需要/握手成功
     always_comb begin
         load_response_needed = in_packet.valid && in_packet.uop.mem_read &&
-                               !in_packet.exc.valid && !in_packet.uop.illegal;
+                               !in_packet.exc.valid;
         dmem_rsp_ready = load_response_needed;
-        response_fire = dmem_rsp_ready && dmem_rsp_valid;
 
-        wait_for_response = load_response_needed && !response_fire;
-        packet_complete = !load_response_needed || response_fire;
+        wait_for_response = load_response_needed && !dmem_rsp_valid;
+        packet_complete = !wait_for_response;
+        // D1 已将非法指令转换为异常；异常提交仍有效，但不能写架构寄存器。
+        normal_commit = in_packet.valid && packet_complete && !in_packet.exc.valid;
     end
 
     // WB写回，GPR 写口同时作为 WB 前递来源；x0 不产生真实写入。
@@ -54,17 +55,14 @@ module wb_stage (
             default:   writeback_data = in_packet.result;
         endcase
 
-        gpr_write.valid = in_packet.valid && packet_complete &&
-                          in_packet.uop.gpr_write && (in_packet.rd != '0) &&
-                          !in_packet.exc.valid && !in_packet.uop.illegal;
+        gpr_write.valid = normal_commit && in_packet.uop.gpr_write && (in_packet.rd != '0);
         gpr_write.addr = in_packet.rd;
         gpr_write.data = writeback_data;
     end
 
     // CSR 只有在 WB 包完整且无异常时提交，地址和值直接来自流水包。
     always_comb begin
-        csr_write.valid = in_packet.valid && packet_complete && in_packet.csr_we &&
-                          !in_packet.exc.valid && !in_packet.uop.illegal;
+        csr_write.valid = normal_commit && in_packet.csr_we;
         csr_write.addr = in_packet.csr_addr;
         csr_write.data = in_packet.csr_new;
     end
@@ -77,8 +75,6 @@ module wb_stage (
         commit_rd = in_packet.rd;
         commit_rd_we = gpr_write.valid;
         commit_rd_data = writeback_data;
-        commit_exception = commit_valid &&
-                           (in_packet.exc.valid || in_packet.uop.illegal);
-                           // 异常/指令非法
+        commit_exception = commit_valid && in_packet.exc.valid; // 包含 D1 检出的非法指令
     end
 endmodule

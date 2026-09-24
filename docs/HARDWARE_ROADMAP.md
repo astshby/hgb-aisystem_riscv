@@ -143,6 +143,12 @@ radix-2 恢复算法、带截断 QDS、carry-save 余数、在线转换和末余
 CoreMark performance/validation CRC 均通过，默认配置成绩为 RV32 `2.471246`、RV64
 `2.231733 CoreMark/MHz`；真实 FPGA 映射与时序仍待 A6。
 
+2026-09-24 修复基线：MEM 前递与推进许可分离，MDU 按 MEM→WB 选择实际依赖；
+清理后级重复非法指令判断与等价组合条件，不改变 EX/MEM 寄存边界。
+回归更新为每种 XLEN 39 unit PASS、13 directed PASS 和 1 非适用位宽 SKIP；
+ISA 覆盖不变。默认 m0d0、BTB 64 的 CoreMark/MHz 为 RV32 `2.820371`、RV64 `2.518471`。
+后续 EX/MEM 结果与元数据汇合实验单独验证，不混入本次正确性基线。
+
 ## 阶段 C：C 扩展
 
 Frontend 增加 16/32 位长度检测、半字对齐缓冲、跨 word 拼接和 decompressor，

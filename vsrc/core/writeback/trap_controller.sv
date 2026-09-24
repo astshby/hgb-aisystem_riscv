@@ -24,9 +24,8 @@ module trap_controller (
         trap_pc = commit_packet.pc;
         trap_cause = commit_packet.exc.cause;
         trap_tval = commit_packet.exc.tval;
-        mret_commit = commit_valid && !commit_packet.exc.valid &&
-                      (commit_packet.uop.sys_op == SYS_MRET);
         retire_valid = commit_valid && !commit_packet.exc.valid;
+        mret_commit = retire_valid && (commit_packet.uop.sys_op == SYS_MRET);
 
         redirect = '0;
         if (trap_enter) begin
