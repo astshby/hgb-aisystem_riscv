@@ -1,5 +1,18 @@
 # 设计调整记录
 
+## 2026-09-27（Asia/Shanghai）— S1 基础设施检查点（尚未完成顶层集成）
+
+- 新增双主端口互连、同步逐字节写 TCM、ROM 复位跳转模块；每主端口最多一笔在途，
+  同 bank 轮询、不同 bank 并行；反压时保持响应和仲裁选择，允许 IF 撤回未接受请求。
+- 修正 ROM RV32 子字读取与类型包导入；保留模块头、中文协议注释和功能分块。
+- 新增 `tb_soc_fabric` 和 `make soc-test`，两仓分别验证 RV32 46 / RV64 55 项检查 PASS。
+- rhbyv 原有回归：每种位宽 41 unit PASS、15 directed PASS / 1 位宽 SKIP；
+  ISA RV32 58 PASS、RV64 78 PASS，各跳过 fence_i、ma_data，FAIL 0。
+  同步后 vsrc、tb、scripts 逐目录一致；hgb 未独立重跑整套 Core 回归。
+- 这是用户要求的可回退检查点，不宣称完整 S1：SoC 顶层、专用镜像、SoC CoreMark 尚未接入。
+  本次未重新跑 CoreMark、厂商综合或 FPGA；README、许可证和软件路线图保持原样。
+- 后续先补齐 SoC 集成，再继续 S2 外设及机器中断；不包含 DMA/DDR 实现。
+
 ## 2026-09-27（Asia/Shanghai）— S0 访存完成、访问错误与排序契约
 
 - Core 新增访问大小和 I/D 响应错误；Store 与 Load 都在 WB 接收一次完成响应。

@@ -54,7 +54,9 @@ hgb-aisystem_riscv/
 
 ### 可移植 SoC
 
-`vsrc/soc/bus/` 提供地址检查和错误从设备。TCM 与外设尚未接入；
+`vsrc/soc/bus/` 提供地址检查、错误从设备和双主端口互连；
+`vsrc/soc/memory/` 提供同步 TCM bank 和复位跳转 ROM，已有独立 TB。
+SoC 顶层、镜像布局和外设尚未接入；
 接口定义见 [SoC 访存契约](SOC_BUS_CONTRACT.md)。
 
 ### 仿真和 FPGA Wrapper
@@ -67,6 +69,7 @@ hgb-aisystem_riscv/
 
 - `unit/`：当前 41 项，包含 MEM 结果拼包、六种 MDU 配置、8 位算法穷举与 SRT 组件验证。
 - `core/`：16 项短程序流程，每种 XLEN 为 15 PASS、1 非适用位宽 SKIP；覆盖基础/M 指令、访存等待、MDU 前递与寄存边界、预测、CSR、Trap 和序列化取消。
+- `soc/`：ROM/TCM 与互连的协议、仲裁、反压、字节通道验证。
 - `benchmark/`：运行 ELF 镜像的长程序 harness，被动镜像字符 Store 并监视 `tohost`。
 - `common/rv_asm_pkg.sv`：为整核定向测试生成具名 32 位指令编码。
 - `common/muldiv_checker.sv`：乘法、除法和统一 MDU 共用的独立算术/协议参考检查器。
@@ -80,6 +83,7 @@ hgb-aisystem_riscv/
 ## `scripts/`
 
 - `rtl_files.f`：可综合 Core 的有序源码清单。
+- `soc_files.f`：Core 清单加可移植 ROM/TCM/互连；`make soc-test XLEN=32/64` 验证基础设施。
 - `sim_files.f`：在 Core 上加入 `sim_cpu`。
 - `cpu_files.f`：在 Core 上加入 FPGA wrapper。
 - `verilator/run_unit.sh`：遍历 `tb/unit/tb_*.sv`。
