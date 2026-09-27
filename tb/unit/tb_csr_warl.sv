@@ -27,6 +27,11 @@ module tb_csr_warl;
         assert (legal_value == xlen_t'(32'h200)) else $fatal(1, "MEPC alignment");
         address = CSR_MSCRATCH; #1;
         assert (legal_value == proposed_value) else $fatal(1, "unrestricted CSR");
+        address = CSR_MIE;
+        proposed_value = '1; #1;
+        assert (legal_value == xlen_t'(32'h888)) else $fatal(1, "MIE WARL mask");
+        address = CSR_MIP; #1;
+        assert (legal_value == 0) else $fatal(1, "MIP ignores writes");
         $display("PASS tb_csr_warl");
         $finish;
     end

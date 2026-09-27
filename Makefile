@@ -6,7 +6,7 @@ export MUL_IMPL DIV_IMPL
 
 VFLAGS := -Wall -Wno-fatal --assert --timing -DCORE_XLEN=$(XLEN) -DCORE_MUL_IMPL=$(MUL_IMPL) -DCORE_DIV_IMPL=$(DIV_IMPL)
 
-.PHONY: lint unit directed riscv-tests benchmark-smoke coremark mdu-backends test clean vivado-project soc-test
+.PHONY: lint unit directed riscv-tests benchmark-smoke coremark mdu-backends test clean vivado-project soc-test soc-smoke soc-coremark soc-lint soc-software soc-riscv-tests
 
 lint:
 	$(VERILATOR) $(VFLAGS) --lint-only -f scripts/rtl_files.f --top-module core
@@ -29,6 +29,21 @@ coremark:
 	bash scripts/verilator/run_coremark.sh $(XLEN)
 
 # SoC 基础设施单独验证；暂不改变既有 Core-only 回归入口。
+soc-riscv-tests:
+	SOC=1 bash scripts/verilator/run_riscv_tests.sh $(XLEN)
+
+soc-software:
+	bash scripts/verilator/run_soc_software.sh $(XLEN)
+
+soc-smoke:
+	SOC=1 bash scripts/verilator/run_benchmark_smoke.sh $(XLEN)
+
+soc-coremark:
+	SOC=1 bash scripts/verilator/run_coremark.sh $(XLEN)
+
+soc-lint:
+	$(VERILATOR) $(VFLAGS) --lint-only -f scripts/soc_files.f --top-module soc_top
+
 soc-test:
 	bash scripts/verilator/run_soc.sh $(XLEN)
 

@@ -10,10 +10,11 @@ module csr_bypass (
 );
     // EX/MEM 中的指令比 MEM/WB 更新，因此最后覆盖并获得最高优先级。
     always_comb begin
+        // MIP 是设备实时电平，忽略它的在途写，不能把 WARL 的零前递为 pending。
         bypass_data = committed_data;
-        if (wb_forward.valid && (wb_forward.addr == read_addr))
+        if (read_addr != riscv_priv_pkg::CSR_MIP && wb_forward.valid && (wb_forward.addr == read_addr))
             bypass_data = wb_forward.data;
-        if (mem_forward.valid && (mem_forward.addr == read_addr))
+        if (read_addr != riscv_priv_pkg::CSR_MIP && mem_forward.valid && (mem_forward.addr == read_addr))
             bypass_data = mem_forward.data;
     end
 endmodule

@@ -20,6 +20,8 @@ module csr_warl (
                 legal_value[MSTATUS_MPIE_BIT] = proposed_value[MSTATUS_MPIE_BIT];
                 legal_value[MSTATUS_MPP_MSB:MSTATUS_MPP_LSB] = 2'b11;
             end
+            CSR_MIE: legal_value = proposed_value & xlen_t'(32'h888);
+            CSR_MIP: legal_value = '0; // 全部字段由硬件驱动，写入无效，旁路也不能覆盖硬件值。
             // mtvec和mepc的低两位必须为0
             CSR_MTVEC, CSR_MEPC: legal_value = proposed_value & ~xlen_t'(3);
             default: ;

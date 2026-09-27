@@ -3,8 +3,8 @@
 ## 实现边界
 
 Core 保持 IF/D1/D2/EX/MEM/WB 六级。`vsrc/soc/bus/` 提供物理地址检查和错误响应；
-ROM、I/D-TCM 与双主端口互连已有独立模块和 TB，尚未接入 SoC 顶层；
-外设、中断和 DDR 桥仍未实现。地址已分配不代表目标已经实现。
+ROM、I/D-TCM、UART/Timer/GPIO 和机器中断已由 `soc_top` 集成。
+DMA、DDR 桥尚未实现；分配窗口仍返回错误。外设语义见 [SoC 外设接口](SOC_PERIPHERALS.md)。
 Package 只保存常量、枚举和结构体；访问判断在模块内完成。
 
 ## 请求、完成与错误
@@ -67,7 +67,9 @@ ROM 为只读可执行，I-TCM 可读写可执行，D-TCM 可读写不可执行�
 `bus_interconnect` 面向两个主端口，各自最多一笔在途事务。不同目标可并行；
 同目标轮询仲裁，响应根据接受请求时记录的 owner 返回。
 从端反压期间保持选择；IF 撤回尚未接受的请求后释放选择。
-`PRESENT` 默认只启用错误端、ROM、I-TCM 和 D-TCM，其余地址返回 DECERR。
+`PRESENT` 默认只启用错误端、ROM、I-TCM 和 D-TCM；SoC 实例显式启用已实现外设。
+CPU 使用数据优先仲裁与跨 owner 一拍交接，并在 SoC 保存被 IF 反压的响应，
+使取指撤回、数据 ready 和重定向之间不形成组合反馈；默认通用互连仍采用轮询。
 
 `tcm_controller` 是单端口同步读、逐字节写的 XLEN 宽 RAM bank。
 I/D-TCM 是两个独立 bank，而非两份不相干的指令/数据镜像：两主端口可访问同一 bank。
@@ -76,14 +78,15 @@ I/D-TCM 是两个独立 bank，而非两份不相干的指令/数据镜像：两
 
 `boot_rom` 提供从复位地址 0 跳转到 `0x0100_0000` 的两条指令，剩余内容为 NOP。
 它不是镜像下载器；TCM 初始化由仿真加载或平台初始化提供。
-这些模块尚不构成完整 S1，SoC 顶层与专用软件镜像接入仍待完成。
+`soc_top` 已连接 Core；benchmark 使用 I-TCM 代码、D-TCM 数据的专用链接布局。
 
 ## 验证
 
-`make soc-test XLEN=32/64` 单独运行 `tb/soc/tb_soc_fabric.sv`，覆盖共享 TCM、
+`make soc-test XLEN=32/64` 运行互连两种仲裁配置和外设集成 TB，覆盖共享 TCM、
 字节写、ROM 子字访问、目标缺失、响应归属/反压、跨 bank 并行、同 bank 公平仲裁、
 一拍 RAM 连续吞吐、未接受请求撤回，以及复位后 RAM 内容保留。
-该命令不运行 CoreMark，也不代替下面的 Core 回归。
+另覆盖 UART 环回、计时器、GPIO、IRQ claim/complete 与 MMIO 副作用。
+该命令不运行 CoreMark，也不代替 Core 回归和 `make soc-software` 的 C 中断集成测试。
 
 `make test XLEN=32/64` 包含以下测试：
 
@@ -95,7 +98,7 @@ I/D-TCM 是两个独立 bank，而非两份不相干的指令/数据镜像：两
 
 旧 `sim_cpu_top` 仍是分离的 I/D 测试存储器，因此标准 riscv-tests 的 `fence_i`
 在该 runner 中仍 SKIP。新整核定向测试使用同一字节存储器检查 FENCE.I；
-统一 TCM/SoC harness 接入后再启用上游自修改代码用例。
+`make soc-riscv-tests` 已启用上游 `fence_i`，并只跳过 `ma_data`。
 
 CoreMark 用相同编译选项、后端及固定迭代数比较，必须校验 performance/validation CRC；
 跑分不能代替错误响应和 MMIO 副作用测试。

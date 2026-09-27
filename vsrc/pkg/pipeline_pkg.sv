@@ -120,6 +120,7 @@ package pipeline_pkg;
         logic        valid;
         xlen_t       pc;
         xlen_t       seq_pc;
+        xlen_t       next_pc; // 已执行的实际后继 PC，供排空流水后的中断恢复。
         logic [31:0] inst;
         gpr_addr_t   rd;
         xlen_t       result;
@@ -137,6 +138,7 @@ package pipeline_pkg;
         logic        valid;
         xlen_t       pc;
         xlen_t       seq_pc;
+        xlen_t       next_pc; // 已执行的实际后继 PC，供排空流水后的中断恢复。
         logic [31:0] inst;
         gpr_addr_t   rd;
         xlen_t       result; // ALU 结果或访存地址；load 在 WB 使用地址低位选择返回数据

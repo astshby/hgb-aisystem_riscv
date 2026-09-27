@@ -1,6 +1,8 @@
 // Module: tb_soc_fabric
 // Description: Exercises two-master routing, arbitration, TCM lanes, ROM, and backpressure.
-module tb_soc_fabric;
+module tb_soc_fabric #(
+    parameter bit DATA_PRIORITY = 1'b0
+);
     timeunit 1ns;
     timeprecision 1ps;
     import core_config_pkg::*;
@@ -25,7 +27,7 @@ module tb_soc_fabric;
     bus_req_t held_request;
     always #5 clk = ~clk;
 
-    bus_interconnect dut (
+    bus_interconnect #(.DATA_PRIORITY(DATA_PRIORITY)) dut (
         .clk, .rst, .m_req_valid, .m_req_ready, .m_request,
         .m_rsp_valid, .m_rsp_ready, .m_response,
         .s_req_valid, .s_req_ready, .s_request, .s_error,
@@ -206,7 +208,7 @@ module tb_soc_fabric;
         tick();
         m_rsp_ready[0] = 1'b0;
 
-        // 两主持续争用同 bank，不得饿死；同一响应只属于保存的 owner。
+        // 通用模式同 bank 轮询；CPU 模式数据端优先。同一响应只属于保存的 owner。
         prepare(1, xlen_t'(ITCM_BASE), 0, 0, MEM_WORD, 0);
         before0 = accepted[0];
         before1 = accepted[1];
@@ -224,8 +226,13 @@ module tb_soc_fabric;
         m_req_valid = '0;
         tick();
         m_rsp_ready = '0;
-        assert (accepted[0] - before0 == 6 && accepted[1] - before1 == 6)
-            else $fatal(1, "round-robin unfair");
+        if (DATA_PRIORITY) begin
+            assert (accepted[0] == before0 && accepted[1] - before1 == 12)
+                else $fatal(1, "CPU data priority changed");
+        end else begin
+            assert (accepted[0] - before0 == 6 && accepted[1] - before1 == 6)
+                else $fatal(1, "round-robin unfair");
+        end
 
         // 从端反压时新竞争者不能抢走已选请求；IF 撤回后则应释放锁。
         access(1, xlen_t'(ITCM_BASE) + DBUS_BYTES, 1, xlen_t'(32'h5a5aa5a5),
@@ -268,7 +275,7 @@ module tb_soc_fabric;
         access(0, xlen_t'(ITCM_BASE), 0, 0, MEM_WORD, 1, expected, BUS_OK);
         assert (accepted[0] == completed[0] && accepted[1] == completed[1])
             else $fatal(1, "transactions not drained");
-        $display("PASS tb_soc_fabric RV%0d checks=%0d", XLEN, checks);
+        $display("PASS tb_soc_fabric RV%0d data_priority=%0d checks=%0d", XLEN, DATA_PRIORITY, checks);
         $finish;
     end
 

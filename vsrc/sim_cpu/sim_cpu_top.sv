@@ -44,6 +44,7 @@ module sim_cpu_top #(
 
     // .name是sv特性，可以用 .* 替代（原理：扫描已有同名信号并直接连接，没有的不连接）
     core u_core (
+        .irq_software(1'b0), .irq_timer(1'b0), .irq_external(1'b0),
         .clk,
         .rst,
         .imem_req_valid,

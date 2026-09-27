@@ -5,6 +5,7 @@ xlen="${1:-32}"
 mul_impl="${MUL_IMPL:-0}"
 div_impl="${DIV_IMPL:-0}"
 config="m${mul_impl}d${div_impl}"
+source scripts/verilator/benchmark_platform.sh
 tool_root="${RISCV_TOOL_ROOT:-/opt/riscv/bin}"
 tool_prefix="${tool_root}/riscv64-unknown-elf-"
 build_dir="build/benchmark/smoke-rv${xlen}-${config}"
@@ -26,7 +27,7 @@ if [[ -z "${tohost_addr}" || -z "${console_addr}" ]]; then
     exit 1
 fi
 
-"${sim_dir}/Vtb_benchmark" \
+"${sim_dir}/V${bench_top}" \
     +IMEM="${build_dir}/imem.hex" \
     +DMEM="${build_dir}/dmem.hex" \
     +TOHOST="${tohost_addr}" \

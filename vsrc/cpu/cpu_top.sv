@@ -19,6 +19,7 @@ module cpu_top (
 
     // // 当前不完整1'b0是初始化，（）是空信号
     core u_core (
+        .irq_software(1'b0), .irq_timer(1'b0), .irq_external(1'b0),
         .clk,
         .rst,
         .imem_req_valid,

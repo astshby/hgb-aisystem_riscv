@@ -5,8 +5,20 @@ xlen="${1:-32}"
 tests_root="${RISCV_TESTS_DIR:-tb/riscv_tests/vendor/riscv-tests}"
 tool_root="${RISCV_TOOL_ROOT:-/opt/riscv/bin}"
 tool_prefix="${tool_root}/riscv64-unknown-elf-"
-build_root="build/riscv-tests/rv${xlen}"
-sim_dir="build/verilator/riscv-tests-rv${xlen}"
+platform_suffix=""
+tb_top=tb_riscv_test
+tb_file=tb/riscv_tests/tb_riscv_test.sv
+source_list=scripts/sim_files.f
+linker=tb/riscv_tests/env/link.ld
+if [[ "${SOC:-0}" == "1" ]]; then
+    platform_suffix=-soc
+    tb_top=tb_soc_benchmark
+    tb_file=tb/soc/tb_soc_benchmark.sv
+    source_list=scripts/soc_files.f
+    linker=tb/riscv_tests/env/link_soc.ld
+fi
+build_root="build/riscv-tests/rv${xlen}${platform_suffix}"
+sim_dir="build/verilator/riscv-tests-rv${xlen}${platform_suffix}"
 export CCACHE_TEMPDIR="${PWD}/build/ccache-tmp"
 export CCACHE_DIR="${PWD}/build/ccache"
 
@@ -41,17 +53,22 @@ else
     um_tests=(mul mulh mulhsu mulhu div divu rem remu mulw divw divuw remw remuw)
 fi
 
+if [[ "${SOC:-0}" == "1" ]]; then
+    march="${march}_zifencei"
+    ui_tests+=(fence_i)
+fi
+
 mkdir -p "${CCACHE_TEMPDIR}" "${CCACHE_DIR}" "${build_root}" "${sim_dir}" logs
 
 verilator -Wall -Wno-fatal --assert --timing --binary \
     -DCORE_XLEN="${xlen}" \
     -DCORE_MUL_IMPL="${MUL_IMPL:-0}" -DCORE_DIV_IMPL="${DIV_IMPL:-0}" \
     -Mdir "${sim_dir}" \
-    -f scripts/sim_files.f \
+    -f "${source_list}" \
     tb/common/store_result_monitor.sv \
-    tb/riscv_tests/tb_riscv_test.sv \
-    --top-module tb_riscv_test \
-    >"logs/riscv-tests-build-rv${xlen}.log" 2>&1
+    "${tb_file}" \
+    --top-module "${tb_top}" \
+    >"logs/riscv-tests-build-rv${xlen}${platform_suffix}.log" 2>&1
 
 failures=0
 passes=0
@@ -61,7 +78,7 @@ run_test() {
     local test_name="$2"
     local test_dir="${build_root}/${suite}/${test_name}"
     local source_file="${tests_root}/isa/rv${xlen}${suite}/${test_name}.S"
-    local run_log="logs/riscv-${suite}-${test_name}-rv${xlen}.log"
+    local run_log="logs/riscv-${suite}-${test_name}-rv${xlen}${platform_suffix}.log"
 
     if [[ ! -f "${source_file}" ]]; then
         echo "FAIL missing vendored source: ${source_file}"
@@ -77,15 +94,25 @@ run_test() {
         -I tb/riscv_tests/env \
         -I "${tests_root}/env" \
         -I "${tests_root}/isa/macros/scalar" \
-        -Wl,--no-relax -Wl,-T,tb/riscv_tests/env/link.ld \
+        -Wl,--no-relax -Wl,-T,"${linker}" \
         -Wl,-Map,"${test_dir}/${test_name}.map" \
         "${source_file}" -o "${test_dir}/${test_name}.elf" \
-        >"logs/riscv-${suite}-${test_name}-rv${xlen}-compile.log" 2>&1; then
+        >"logs/riscv-${suite}-${test_name}-rv${xlen}${platform_suffix}-compile.log" 2>&1; then
         echo "FAIL compile ${suite}/${test_name}"
         failures=$((failures + 1))
         return
     fi
 
+    if [[ "${SOC:-0}" == "1" ]]; then
+        "${tool_prefix}objcopy" -O verilog --verilog-data-width 1 \
+            --only-section=.text --only-section=.tohost --only-section=.data \
+            "${test_dir}/${test_name}.elf" "${test_dir}/imem.vhex"
+        python3 scripts/verilator/verilog_hex_to_mem.py \
+            "${test_dir}/imem.vhex" "${test_dir}/imem.hex" \
+            --word-bytes "$((xlen / 8))" --depth "$((65536 / (xlen / 8)))" --base 0x01000000
+        python3 scripts/verilator/verilog_hex_to_mem.py \
+            /dev/null "${test_dir}/dmem.hex" --word-bytes "$((xlen / 8))" --depth "$((65536 / (xlen / 8)))"
+    else
     "${tool_prefix}objcopy" -O verilog --verilog-data-width 1 \
         --only-section=.text "${test_dir}/${test_name}.elf" "${test_dir}/imem.vhex"
     "${tool_prefix}objcopy" -O verilog --verilog-data-width 1 \
@@ -94,6 +121,7 @@ run_test() {
         "${test_dir}/imem.vhex" "${test_dir}/imem.hex" --word-bytes 4
     python3 scripts/verilator/verilog_hex_to_mem.py \
         "${test_dir}/dmem.vhex" "${test_dir}/dmem.hex" --word-bytes "$((xlen / 8))"
+    fi
     "${tool_prefix}objdump" -d "${test_dir}/${test_name}.elf" >"${test_dir}/${test_name}.dump"
 
     local tohost_addr
@@ -105,11 +133,11 @@ run_test() {
         return
     fi
 
-    if "${sim_dir}/Vtb_riscv_test" \
+    if "${sim_dir}/V${tb_top}" \
         +IMEM="${test_dir}/imem.hex" \
         +DMEM="${test_dir}/dmem.hex" \
         +TOHOST="${tohost_addr}" \
-        +TEST="${suite}/${test_name}" >"${run_log}" 2>&1 &&
+        +CONSOLE=0 +TEST="${suite}/${test_name}" >"${run_log}" 2>&1 &&
         ! grep -Eq '(%Fatal|%Error|Assertion failed)' "${run_log}"; then
         grep "PASS ${suite}/${test_name}" "${run_log}" | tail -n 1
         passes=$((passes + 1))
@@ -133,5 +161,9 @@ if ((failures != 0)); then
     echo "FAIL riscv-tests RV${xlen}: pass=${passes} fail=${failures}"
     exit 1
 fi
-echo "SKIP riscv-tests RV${xlen} UI: fence_i (Zifencei/Harvard coherence), ma_data (misaligned completion policy)"
+if [[ "${SOC:-0}" == "1" ]]; then
+    echo "SKIP riscv-tests RV${xlen} SoC UI: ma_data (misaligned completion policy)"
+else
+    echo "SKIP riscv-tests RV${xlen} UI: fence_i (Zifencei/Harvard coherence), ma_data (misaligned completion policy)"
+fi
 echo "PASS riscv-tests RV${xlen}: ${passes}/${passes} (MI=${#mi_tests[@]} UI=${#ui_tests[@]} UM=${#um_tests[@]})"

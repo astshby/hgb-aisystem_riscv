@@ -31,7 +31,7 @@ module tb_core_bus_contract;
     logic done;
     logic [31:0] replacement;
     always #5 clk = ~clk;
-    core dut (.*);
+    core dut (.irq_software(1'b0), .irq_timer(1'b0), .irq_external(1'b0), .*);
 
     assign imem_req_ready = !imem_rsp_valid || imem_rsp_ready;
     assign dmem_req_ready = !pending_q && (!dmem_rsp_valid || dmem_rsp_ready);

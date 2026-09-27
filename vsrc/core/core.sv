@@ -4,6 +4,8 @@ module core (
     // 端口声明中使用包类型时需要写完整包名
     input  logic                              clk,
     input  logic                              rst,
+    // 中断输入须与 clk 同步；异步引脚同步由 SoC 外设负责。
+    input  logic                              irq_software, irq_timer, irq_external,
     output logic                              imem_req_valid,
     output logic [core_config_pkg::XLEN-1:0]  imem_req_addr,
     input  logic                              imem_req_ready,
@@ -78,7 +80,10 @@ module core (
     logic trap_enter;
     logic mret_commit;
     xlen_t trap_pc;
-    exc_cause_e trap_cause;
+    xlen_t trap_cause;
+    logic irq_pending, interrupt_take;
+    irq_cause_e irq_cause;
+    xlen_t interrupt_pc;
     xlen_t trap_tval;
     logic retire_valid;
     xlen_t mtvec;
@@ -176,9 +181,9 @@ module core (
     if_stage u_if_stage (
         .clk,
         .rst,
-        .fetch_request_enable,
+        .fetch_request_enable(fetch_request_enable && !irq_pending),
         .out_ready(fetch_ready),
-        .flush(frontend_flush),
+        .flush(frontend_flush || irq_pending),
         .redirect(selected_redirect),
         .prediction,
         .out_packet(fetch_packet),
@@ -251,6 +256,7 @@ module core (
     csr_file u_csr_file (
         .clk,
         .rst,
+        .irq_software, .irq_timer, .irq_external, .irq_pending, .irq_cause,
         .read_addr(d2_ex_q.csr_addr),
         .read_data(csr_committed_data),
         .write_valid(wb_csr_write.valid),
@@ -316,9 +322,17 @@ module core (
         .commit_exception
     );
 
+    interrupt_entry u_interrupt_entry (
+        .clk, .rst, .irq_pending,
+        .pipeline_busy(if_d1_q.valid || d1_d2_q.valid || d2_ex_q.valid ||
+                       ex_mem_q.valid || mem_wb_q.valid),
+        .retire_valid, .commit_packet, .wb_redirect, .interrupt_take, .interrupt_pc
+    );
+
     trap_controller u_trap_controller (
         .commit_packet,
         .commit_valid,
+        .interrupt_take, .interrupt_pc, .interrupt_cause(irq_cause),
         .mtvec,
         .mepc,
         .trap_enter,

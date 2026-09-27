@@ -1,5 +1,32 @@
 # 设计调整记录
 
+## 2026-09-28（Asia/Shanghai）— S2 外设、中断与完整 SoC 验收
+
+- 完成 S1 顶层集成：ROM 跳转、共享物理 I/D-TCM、专用链接布局、SoC ISA/C/CoreMark harness。
+  同 bank 跨 owner 交接隔一拍，SoC D 优先及 I 响应旁路缓冲切断真实组合环；
+  独立互连仍可选原有轮询模式，不改变 Core-only 的单周期存储路径。
+- S2 新增 UART ×2、机器/通用 Timer 各一、GPIO ×3、SoC 信息寄存器和六源中断汇聚。
+  MMIO 接受沿产生一次副作用，响应可反压；设备边界与只读/W1C 寄存器见 SOC_PERIPHERALS.md。
+- Core 实现 mie/mip、机器软件/定时器/外部中断；停止新取指并排空已入流水的操作。
+  新增 next_pc 与 interrupt_entry，保存已退休分支/JAL/JALR 的实际后继；不取消已接受访存。
+  同步异常优先；MRET 恢复，mtvec 仅 Direct，中断不计入 MINSTRET。未声称完整 PLIC。
+- 新增中断单元/七场景整核 TB、外设握手 TB 和真正运行 C handler 的软硬件闭环；
+  旧 TB 适配 IRQ 输入，CSR 测试不再把已实现的 MIE 当作非法地址。
+- rhbyv 双位宽完整回归：各 42 unit PASS、16 directed PASS / 1 位宽 SKIP；
+  Core-only ISA 58/78 PASS、各 2 SKIP（fence_i、ma_data）；
+  SoC ISA 59/79 PASS、各 1 SKIP（ma_data），FAIL 0。
+- SoC 三项 TB 均 PASS：轮询和 CPU 仲裁各 46/55 checks，外设 82/84 transfers。
+  C 外设中断测试 3625/4169 周期；Core-only C smoke 3317/358，SoC C smoke 3323/364。
+  六 MDU 后端矩阵另跑 RV32 78 / RV64 108 checks PASS。
+- Core-only 与 SoC 均独立运行 CoreMark performance/validation、CRC 均正确：
+  默认 m0d0、BTB64，RV32 32 次 / 11045355 ticks / 2.897145 CoreMark/MHz，
+  RV64 28 次 / 10854767 ticks / 2.579512 CoreMark/MHz。ROM 启动多 6 拍但不在计时区间。
+- hgb 同步后源码/测试/脚本/benchmark 与 rhbyv 逐目录一致；独立复跑两位宽
+  soc-test、soc-software、soc-riscv-tests，结果相同；未声称 hgb 重跑全部 CoreMark。
+- 用户已明确允许 README 功能与入口更新：两仓各自维护，保留 hgb 许可证及软件规划；
+  解读和历史记录仅写入 hgb。未运行厂商综合或上板；DMA/DDR/Cache 留待后续。
+  S1 独立检查点继续保留，不自合并 main。
+
 ## 2026-09-27（Asia/Shanghai）— S1 基础设施检查点（尚未完成顶层集成）
 
 - 新增双主端口互连、同步逐字节写 TCM、ROM 复位跳转模块；每主端口最多一笔在途，

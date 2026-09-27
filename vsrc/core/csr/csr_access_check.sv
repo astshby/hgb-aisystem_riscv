@@ -11,10 +11,10 @@ module csr_access_check (
     import core_config_pkg::*;
     import riscv_priv_pkg::*;
 
-    // 当前 A4 只实现同步异常所需的机器级 CSR；MIE/MIP 留待中断阶段接入。
+    // 实现机器级同步异常及中断 CSR；MIP 的只读字段允许 CSR 写入但忽略。
     always_comb begin
         unique case (address)
-            CSR_MSTATUS, CSR_MISA, CSR_MTVEC, CSR_MSCRATCH, CSR_MEPC,
+            CSR_MSTATUS, CSR_MISA, CSR_MIE, CSR_MIP, CSR_MTVEC, CSR_MSCRATCH, CSR_MEPC,
             CSR_MCAUSE, CSR_MTVAL, CSR_MCYCLE, CSR_MINSTRET,
             CSR_MVENDORID, CSR_MARCHID, CSR_MIMPID, CSR_MHARTID:
                 implemented = 1'b1;

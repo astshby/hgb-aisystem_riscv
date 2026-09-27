@@ -8,7 +8,7 @@ IF → D1 → D2 → EX → MEM → WB
 ```
 
 构建时可选择 RV32 或 RV64，已实现整数基础指令、M 乘除扩展、六种 Zicsr 指令、
-ECALL/EBREAK/MRET、机器模式精确同步异常，以及 BTB + 非推测 GShare。
+ECALL/EBREAK/MRET、机器模式精确同步异常/中断，以及 BTB + 非推测 GShare。
 Core 使用独立的指令和数据 ready/valid 接口，不直接实例化 FPGA BRAM。
 
 ## 当前状态
@@ -18,15 +18,17 @@ Core 使用独立的指令和数据 ready/valid 接口，不直接实例化 FPGA
 - JAL 在 D1 解析；条件分支与 JALR 在 EX 解析。
 - `muldiv_unit` 独立于流水级：EX 内的 `ex_mdu` 发射请求，MEM 内的 `mem_mdu` 接收并拼接结果；package 仅保留类型与常量。
 - CSR 在 EX 完成读改写与 WARL，WB 执行架构提交。
+- 无 Cache SoC：启动 ROM、I/D-TCM、2 路 UART、机器/通用 Timer、3 组 GPIO、外部中断汇聚。
+- `mie/mip` 接入真实设备电平；中断排空流水，保存实际后继 PC 后进入 Direct `mtvec`。
 - Verilator 纯 SystemVerilog 测试，不使用 Cocotb。
-- RV32/RV64 各 40 项单元测试；15 项整核定向流程中各 14 PASS、1 非适用位宽 SKIP。
+- RV32/RV64 各 42 项单元测试；17 项整核定向流程中各 16 PASS、1 非适用位宽 SKIP。
 - 适用的 riscv-tests：RV32 `58/58`，RV64 `78/78`，包括全部 8/13 项 UM；
-  Zifencei 与未对齐直接完成用例明确 SKIP。
+  旧分离存储器路径跳过 fence_i/ma_data；SoC 路径含 fence_i，为 `59/59`、`79/79`，仅跳过 ma_data。
 - CoreMark 1.0 performance/validation CRC 均通过；默认 MDU 配置的固定迭代数结果：
   RV32 `2.897145`、RV64 `2.579512 CoreMark/MHz`（Verilator 周期成绩）。
 
-硬件下一步先规划盘古 676-200K Pro 的 TCM/Cache、DMA、系统互连及外设，再
-适配 Zynq-7020。软件栈和 AI 功能仍是独立后续目标；以上成绩不代表 FPGA Fmax。
+下一步实现 DMA 与外存桥，再做盘古 676-200K Pro 板级适配；Cache 和 Zynq-7020
+随后实施。软件栈和 AI 功能仍是独立后续目标；以上成绩不代表 FPGA Fmax。
 
 ## 快速验证
 
@@ -43,6 +45,11 @@ make coremark XLEN=32
 make coremark XLEN=64
 make mdu-backends XLEN=32
 make mdu-backends XLEN=64
+make soc-test XLEN=32
+make soc-software XLEN=32
+make soc-riscv-tests XLEN=32
+make soc-coremark XLEN=32
+# SoC 命令同样须以 XLEN=64 运行。
 ```
 
 RISC-V 工具链默认位于 `/opt/riscv/bin`。`make test` 包含 lint、单元测试和
@@ -52,6 +59,7 @@ RISC-V 工具链默认位于 `/opt/riscv/bin`。`make test` 包含 lint、单元
 ## 目录入口
 
 - `vsrc/core/`：与平台无关的可综合 Core。
+- `vsrc/soc/`：可移植互连、ROM/TCM、MMIO 外设与中断。
 - `vsrc/sim_cpu/`：不可综合的仿真存储器和通用仿真顶层。
 - `vsrc/cpu/`：规划中的双平台 FPGA wrapper，优先盘古 676-200K Pro。
 - `tb/`：单元、整核和上游 riscv-tests 适配测试。
@@ -60,6 +68,8 @@ RISC-V 工具链默认位于 `/opt/riscv/bin`。`make test` 包含 lint、单元
 
 ## 文档
 
+- [SoC 访存契约](docs/SOC_BUS_CONTRACT.md)
+- [SoC 外设与中断接口](docs/SOC_PERIPHERALS.md)
 - [项目目录说明](docs/PROJECT_STRUCTURE.md)
 - [硬件目标与阶段规划](docs/HARDWARE_ROADMAP.md)
 - [软件开发目标](docs/SOFTWARE_ROADMAP.md)

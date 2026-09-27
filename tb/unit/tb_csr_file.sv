@@ -19,7 +19,10 @@ module tb_csr_file;
     logic retire_valid;
     logic trap_enter;
     xlen_t trap_pc;
-    exc_cause_e trap_cause;
+    xlen_t trap_cause;
+    logic irq_software = 0, irq_timer = 0, irq_external = 0;
+    logic irq_pending;
+    irq_cause_e irq_cause;
     xlen_t trap_tval;
     logic mret_commit;
     xlen_t mtvec;
@@ -130,6 +133,36 @@ module tb_csr_file;
         read_addr = CSR_MSTATUS; #1;
         assert (read_data[3] == 1'b1 && read_data[7] == 1'b1)
             else $fatal(1, "MRET interrupt state");
+        // MIP 不依赖全局使能；CSR 写忽略硬件 pending，清除必须来自设备。
+        @(negedge clk);
+        irq_timer = 1'b1;
+        irq_software = 1'b1;
+        irq_external = 1'b1;
+        read_addr = CSR_MIP; #1;
+        assert (read_data == xlen_t'(32'h888) && !irq_pending)
+            else $fatal(1, "MIP visibility with MIE disabled");
+        write_csr(CSR_MIP, '0);
+        assert (read_data == xlen_t'(32'h888)) else $fatal(1, "MIP CSR write changed hardware bits");
+        write_csr(CSR_MIE, xlen_t'(32'h888));
+        assert (irq_pending && irq_cause == IRQ_M_EXTERNAL) else $fatal(1, "MEI priority");
+        irq_external = 1'b0; #1;
+        assert (irq_cause == IRQ_M_SOFTWARE) else $fatal(1, "MSI priority");
+        irq_software = 1'b0; #1;
+        assert (irq_cause == IRQ_M_TIMER) else $fatal(1, "MTI priority");
+        write_csr(CSR_MSTATUS, xlen_t'(32'h1800));
+        assert (!irq_pending) else $fatal(1, "global interrupt disable");
+
+        @(negedge clk);
+        trap_enter = 1'b1;
+        trap_cause = (xlen_t'(1) << (XLEN-1)) | xlen_t'(IRQ_M_TIMER);
+        trap_pc = xlen_t'(32'h300);
+        trap_tval = '0;
+        @(posedge clk);
+        @(negedge clk);
+        trap_enter = 1'b0;
+        read_addr = CSR_MCAUSE; #1;
+        assert (read_data == trap_cause && mepc == xlen_t'(32'h300))
+            else $fatal(1, "interrupt XLEN cause/PC capture");
         $display("PASS tb_csr_file RV%0d", XLEN);
         $finish;
     end

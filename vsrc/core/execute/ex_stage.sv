@@ -173,6 +173,8 @@ module ex_stage (
         out_packet.valid = in_packet.valid && !execution_stall;
         out_packet.pc = in_packet.pc;
         out_packet.seq_pc = in_packet.seq_pc;
+        out_packet.next_pc = in_packet.uop.branch_op == BR_JAL ? in_packet.pc + in_packet.imm :
+                             (branch_taken ? branch_target : in_packet.seq_pc);
         out_packet.inst = in_packet.inst;
         out_packet.rd = in_packet.rd;
         // M 的结果在 MEM 汇合，这里只把对应元数据送入 EX/MEM，不复制算法输出。

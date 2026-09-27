@@ -24,12 +24,13 @@ DIV_IMPL=0
 
 - `scripts/rtl_files.f`：Package、Core 和可综合功能模块。
 - `scripts/sim_files.f`：引用 RTL 清单并加入仿真存储器和 `sim_cpu_top`。
+- `scripts/soc_files.f`：引用 RTL 清单并加入可移植 ROM/TCM/互连/外设和 `soc_top`。
 - `scripts/cpu_files.f`：引用 RTL 清单并加入复位同步与 `cpu_top`。
 
 Package 必须先于使用者编译。Verilator 和 Vivado 共用 `rtl_files.f`，避免两套工程
 的源码顺序漂移。
 
-Core 与存储器的时序契约详见 [BRAM、Cache 与存储器握手](understand/MEMORY_HANDSHAKE.md)。
+Core 与存储器的时序契约详见 [存储器握手解读](understand/MEMORY_HANDSHAKE.md)。
 
 ## Make 目标
 
@@ -44,6 +45,12 @@ Core 与存储器的时序契约详见 [BRAM、Cache 与存储器握手](underst
 | `make benchmark-smoke XLEN=32` | 验证裸机 C、硬件 M、宽整数 helper 和 64 位周期读取 |
 | `make coremark XLEN=32` | 执行 CoreMark 校准、performance 与 validation；不属于 `make test` |
 | `make mdu-backends XLEN=32` | 先运行正式 ISA 回归，再运行六种 MDU 配置各 5 项 M 整核测试和全部 UM |
+| `make soc-lint XLEN=32` | lint 可移植 SoC 顶层 |
+| `make soc-test XLEN=32` | 两种互连仲裁、ROM/TCM 和外设 MMIO 测试 |
+| `make soc-software XLEN=32` | C 程序验证全部设备 IRQ、MRET 和同步访问错误 |
+| `make soc-smoke XLEN=32` | ROM 启动、I/D-TCM 布局的裸机 C 冒烟 |
+| `make soc-riscv-tests XLEN=32` | 统一物理 I-TCM 执行 MI/UI/UM，包含 fence_i |
+| `make soc-coremark XLEN=32` | 在 I/D-TCM 上运行 CoreMark performance/validation |
 | `make vivado-project XLEN=32` | 创建 Zynq-7020 Vivado 工程框架 |
 | `make clean` | 删除 `build/`、`logs/` 和 `vivado-workspace/` |
 
@@ -62,12 +69,13 @@ make mdu-backends XLEN=32
 make mdu-backends XLEN=64
 ```
 
-当前两种 XLEN 各 41 项 unit PASS，directed 各 15 PASS、1 非适用位宽 SKIP。
+当前两种 XLEN 各 42 项 unit PASS，directed 各 16 PASS、1 非适用位宽 SKIP。
 unit 包含全部六种 MDU 配置的算术/握手测试、8 位穷举和独立 SRT QDS/在线转换测试。
 MDU 整核矩阵另存于 `logs/mdu-matrix-rv<XLEN>/`；构建位于
 `build/verilator/mdu-matrix-rv<XLEN>/m<MUL_IMPL>d<DIV_IMPL>/`。
 
-SoC 访存基础测试已纳入标准回归，接口见 [SoC 访存契约](SOC_BUS_CONTRACT.md)。
+新访存接口与 SoC 协议测试已纳入标准回归，详见
+[SoC 访存契约](SOC_BUS_CONTRACT.md)。SoC 回归独立于 `make test`，两种位宽均须运行。
 
 ## 单元与整核测试
 
@@ -111,7 +119,7 @@ ECALL/EBREAK/MRET、机器 CSR 和地址未对齐异常的 MI 测试，以及全
 PMP、S/U 模式或异步中断。
 
 本地环境已经定义 RV32U/RV64U 宏，但继续以 M-mode 承载 UI 基础指令测试。runner
-显式维护 MI/UI 清单，保持 `-march=rv32i_zicsr`/`rv64i_zicsr`，并统一使用 reset、
+显式维护 MI/UI 清单，使用 `-march=rv32im_zicsr`/`rv64im_zicsr`，并统一使用 reset、
 链接布局、Trap handler、超时和 `tohost` PASS/FAIL。不能通过修改 Core 识别测试魔数。
 
 ECALL/EBREAK 不只是 Decoder 识别：测试还需要精确保存 `mepc/mcause/mtval`、清除
@@ -120,11 +128,28 @@ ECALL/EBREAK 不只是 Decoder 识别：测试还需要精确保存 `mepc/mcause
 自定义 handler。上游 `breakpoint`、`ma_fetch`、PMP、用户计数器别名等测试因为超出
 A4 边界而没有纳入。
 
-正式结果为 RV32 `58/58`（MI 10 + UI 40 + UM 8）、RV64 `78/78`
+Core-only 结果为 RV32 `58/58`（MI 10 + UI 40 + UM 8）、RV64 `78/78`
 （MI 13 + UI 52 + UM 13）。两种
 位宽均明确跳过 `fence_i` 和 `ma_data`：前者属于 Zifencei 和可写指令存储一致性，
-后者要求未对齐访问直接完成；二者均不是 CoreMark 依赖。完整交互过程和边界见根目录
-[软件测试栈与硬件交互解读](understand/SOFTWARE_TEST_STACK_GUIDE.md)。
+后者要求未对齐访问直接完成；二者均不是 CoreMark 依赖。完整交互过程和边界由
+[软件测试栈解读](understand/SOFTWARE_TEST_STACK_GUIDE.md) 维护。
+
+## SoC 镜像与测试
+
+`make soc-software` 使用 `tb/soc/irq_crt0.S` 和 `peripheral_smoke.c`；
+UART/GPIO 在 TB 引脚侧环回，软件实际配置设备、接收中断、claim/complete 并 MRET，
+不是绕过 UART 状态机或伪造 CSR。普通 `soc-smoke`/`soc-coremark` 不打开外设 IRQ。
+镜像测试均保留 tohost 被动监视；benchmark 字符输出仍是 RAM 镜像，不声称经过 UART。
+
+`benchmark/bsp/link_soc.ld` 将代码放 `0x01000000` 的 I-TCM、数据和栈放
+`0x01100000` 的 D-TCM，各 64 KiB；ROM 从 0 跳到 I-TCM。
+`tb/riscv_tests/env/link_soc.ld` 将 ISA 的代码和数据都放 I-TCM，允许 fence_i 执行数据段代码。
+镜像转换使用 `--base`，RV64 I-TCM hex 为 64 位字，不再假定指令镜像总为 32 位。
+
+SoC ISA：RV32 59/59（MI 10/UI 41/UM 8）、RV64 79/79（MI 13/UI 53/UM 13），
+仅 SKIP `ma_data`；旧分离 I/D harness 仍 SKIP `fence_i` 和 `ma_data`。
+SoC 路径和旧路径使用独立 `-soc` 构建/日志，避免覆盖彼此镜像。
+外设寄存器、访问格式及中断边界见 [SoC 外设接口](SOC_PERIPHERALS.md)。
 
 ## 上游源码 Checkout
 
@@ -187,16 +212,18 @@ CoreMark/MHz = Iterations × 1,000,000 / Total ticks
 当前默认 `MUL_IMPL=0 DIV_IMPL=0`、固定迭代数的结果为 RV32
 `32 × 1,000,000 / 11,045,355 = 2.897145 CoreMark/MHz`，RV64
 `28 × 1,000,000 / 10,854,767 = 2.579512 CoreMark/MHz`。
-旧基线分数保留在协作仓的性能解读和修改记录中，不能与 TCM/Cache 布局混称。
+当前独立测量的 SoC I/D-TCM 路径得到相同的计时区间周期与分数，ROM 启动额外 6 拍
+不在 CoreMark 测量区间；两个路径仍保留各自日志，不能用一致分数替代协议验证。
 非默认后端尚未做正式 CoreMark 跑分，不能借用这些分数。
 运行日志位于
-`logs/coremark-{performance,validation}-rv<XLEN>.log`；ELF、map、dump 与镜像位于
-`build/benchmark/coremark-rv<XLEN>/`。可用 `COREMARK_ITERATIONS=N` 固定迭代数；只有
+`logs/coremark-{performance,validation}-rv<XLEN>-m<MUL_IMPL>d<DIV_IMPL>[-soc].log`；ELF、map、dump 与镜像位于
+`build/benchmark/coremark-rv<XLEN>-m<MUL_IMPL>d<DIV_IMPL>[-soc]/`。可用 `COREMARK_ITERATIONS=N` 固定迭代数；只有
 已知实际时钟时才设置 `COREMARK_FREQ_MHZ=F` 估算 CoreMark/s。
 
 benchmark harness 单独把 IMem/DMem 扩为 128 KiB，普通 TB 的默认容量不变。字符输出
 是 TB 对 `sim_console` Store 的被动镜像，结束仍使用 ECALL 后写 `tohost`；它不是硬件
-UART。更多限制和上板指标见 [CoreMark 与性能指标解读](understand/COREMARK_AND_PERFORMANCE.md)。
+UART。更多限制和上板指标由
+[CoreMark 指标解读](understand/COREMARK_AND_PERFORMANCE.md) 维护。
 
 ## 双平台与上板
 

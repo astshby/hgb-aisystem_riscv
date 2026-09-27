@@ -5,14 +5,22 @@ export CCACHE_TEMPDIR="${PWD}/build/ccache-tmp"
 export CCACHE_DIR="${PWD}/build/ccache"
 mkdir -p "${CCACHE_TEMPDIR}" "${CCACHE_DIR}" logs
 # 镜像驱动 harness 由 benchmark/ISA runner 单独运行。
-for test_name in tb_soc_fabric; do
-    out_dir="build/verilator/soc-rv${xlen}/${test_name}"
+for test_spec in tb_soc_fabric:0 tb_soc_fabric:1 tb_soc_peripherals:0; do
+    test_name="${test_spec%:*}"
+    priority="${test_spec#*:}"
+    suffix=""
+    parameters=()
+    if [[ "${test_name}" == "tb_soc_fabric" ]]; then
+        parameters+=("-GDATA_PRIORITY=${priority}")
+        suffix="-p${priority}"
+    fi
+    out_dir="build/verilator/soc-rv${xlen}/${test_name}${suffix}"
     mkdir -p "${out_dir}"
-    log="logs/${test_name}-rv${xlen}.log"
+    log="logs/${test_name}-rv${xlen}${suffix}.log"
     verilator -Wall -Wno-fatal --assert --timing --binary \
         -DCORE_XLEN="${xlen}" -Mdir "${out_dir}" \
         -f scripts/soc_files.f "tb/soc/${test_name}.sv" \
-        --top-module "${test_name}" >"${log}" 2>&1
+        "${parameters[@]}" --top-module "${test_name}" >"${log}" 2>&1
     "${out_dir}/V${test_name}" >>"${log}" 2>&1
     if grep -Eq '(%Fatal|%Error|Assertion failed)' "${log}"; then
         tail -n 15 "${log}"

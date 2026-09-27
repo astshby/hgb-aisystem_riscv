@@ -1,17 +1,20 @@
 // Module: csr_file
-// Description: Implements the minimal machine CSR state, counters, trap entry, and MRET state.
+// Description: Implements machine CSR state, interrupt qualification, counters, trap entry, and MRET.
 // 真正的csr文件
 module csr_file (
     input  logic                         clk,
     input  logic                         rst,
+    input  logic                         irq_software, irq_timer, irq_external,
+    output logic                         irq_pending,
+    output riscv_priv_pkg::irq_cause_e    irq_cause,
     input  core_types_pkg::csr_addr_t    read_addr,
     output core_types_pkg::xlen_t        read_data,
     input  logic                         write_valid,
     input  core_types_pkg::csr_addr_t    write_addr,
     input  core_types_pkg::xlen_t        write_legal_data,
-    input  logic                         trap_enter,  // trap必要（暂时：ecall，ebreak）
+    input  logic                         trap_enter,  // 同步异常或排空后的机器中断
     input  core_types_pkg::xlen_t        trap_pc,
-    input  riscv_priv_pkg::exc_cause_e   trap_cause,
+    input  core_types_pkg::xlen_t        trap_cause,
     input  core_types_pkg::xlen_t        trap_tval,
     input  logic                         mret_commit, // mret必要
     input  logic                         retire_valid, //指令计数相关
@@ -24,6 +27,7 @@ module csr_file (
 
     // Trap 状态使用 XLEN 宽寄存器；计数器始终保留完整 64 位状态。
     xlen_t mstatus_q, mstatus_d;
+    xlen_t mie_q, mie_d, mip_value, enabled_irqs;
     xlen_t mtvec_q, mtvec_d;
     xlen_t mscratch_q, mscratch_d;
     xlen_t mepc_q, mepc_d;
@@ -46,11 +50,26 @@ module csr_file (
     assign mtvec = mtvec_q;
     assign mepc = mepc_q;
 
+    // MIP 的三个机器中断位由平台驱动，CSR 写不能清除；通过对应设备撤销。
+    always_comb begin
+        mip_value = '0;
+        mip_value[MIP_MSIP_BIT] = irq_software;
+        mip_value[MIP_MTIP_BIT] = irq_timer;
+        mip_value[MIP_MEIP_BIT] = irq_external;
+        enabled_irqs = mie_q & mip_value;
+        irq_pending = mstatus_q[MSTATUS_MIE_BIT] && |enabled_irqs;
+        irq_cause = IRQ_M_TIMER;
+        if (enabled_irqs[MIP_MSIP_BIT]) irq_cause = IRQ_M_SOFTWARE;
+        if (enabled_irqs[MIP_MEIP_BIT]) irq_cause = IRQ_M_EXTERNAL;
+    end
+
     // 以下得_d连线，连线后写入寄存器
-    // CSR 读取：只暴露 A4 已实现的机器级状态和只读标识。
+    // CSR 读取：暴露已实现的机器级状态、机器中断和只读标识。
     always_comb begin
         unique case (read_addr)
             CSR_MSTATUS:  read_data = mstatus_q;
+            CSR_MIE:      read_data = mie_q;
+            CSR_MIP:      read_data = mip_value;
             CSR_MISA:     read_data = misa_value();
             CSR_MTVEC:    read_data = mtvec_q;
             CSR_MSCRATCH: read_data = mscratch_q;
@@ -71,6 +90,7 @@ module csr_file (
     // 普通写入值已在 EX 完成 WARL；Trap/MRET 按架构语义直接更新多个状态位。
     always_comb begin
         mstatus_d = mstatus_q;
+        mie_d = mie_q;
         mtvec_d = mtvec_q;
         mscratch_d = mscratch_q;
         mepc_d = mepc_q;
@@ -80,6 +100,7 @@ module csr_file (
         if (write_valid) begin
             unique case (write_addr)
                 CSR_MSTATUS:  mstatus_d = write_legal_data;
+                CSR_MIE:      mie_d = write_legal_data;
                 CSR_MTVEC:    mtvec_d = write_legal_data;
                 CSR_MSCRATCH: mscratch_d = write_legal_data;
                 CSR_MEPC:     mepc_d = write_legal_data;
@@ -97,7 +118,7 @@ module csr_file (
 
         if (trap_enter) begin
             mepc_d = trap_pc & ~xlen_t'(3);
-            mcause_d = xlen_t'(trap_cause);
+            mcause_d = trap_cause;
             mtval_d = trap_tval;
             mstatus_d[MSTATUS_MPIE_BIT] = mstatus_q[MSTATUS_MIE_BIT];
             mstatus_d[MSTATUS_MIE_BIT] = 1'b0;
@@ -145,6 +166,7 @@ module csr_file (
     always_ff @(posedge clk) begin
         if (rst) begin
             mstatus_q <= xlen_t'(32'h0000_1800);
+            mie_q <= '0;
             mtvec_q <= '0;
             mscratch_q <= '0;
             mepc_q <= '0;
@@ -152,6 +174,7 @@ module csr_file (
             mtval_q <= '0;
         end else begin
             mstatus_q <= mstatus_d;
+            mie_q <= mie_d;
             mtvec_q <= mtvec_d;
             mscratch_q <= mscratch_d;
             mepc_q <= mepc_d;

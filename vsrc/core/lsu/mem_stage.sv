@@ -72,6 +72,7 @@ module mem_stage (
         out_packet.valid = issue_enable && mdu_packet.valid && packet_can_advance;
         out_packet.pc = mdu_packet.pc;
         out_packet.seq_pc = mdu_packet.seq_pc;
+        out_packet.next_pc = mdu_packet.next_pc;
         out_packet.inst = mdu_packet.inst;
         out_packet.rd = mdu_packet.rd;
         out_packet.result = mdu_packet.result;
