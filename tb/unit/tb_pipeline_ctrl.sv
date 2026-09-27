@@ -15,6 +15,7 @@ module tb_pipeline_ctrl;
     logic d1_serialize_req;
     logic wb_wait;
     logic mem_request_stall;
+    logic mem_result_stall;
     logic execution_stall;
     logic load_use_stall;
     redirect_t redirect;
@@ -34,6 +35,7 @@ module tb_pipeline_ctrl;
         d1_serialize_req = 1'b0;
         wb_wait = 1'b0;
         mem_request_stall = 1'b0;
+        mem_result_stall = 1'b0;
         execution_stall = 1'b0;
         load_use_stall = 1'b0;
         #1;
@@ -93,6 +95,15 @@ module tb_pipeline_ctrl;
                 actions.ex_mem == PIPE_HOLD && actions.mem_wb == PIPE_ADVANCE)
             else $fatal(1, "MEM request stall priority");
 
+        // M 元数据已经进入 MEM 时，未完成结果必须压住年轻 EX 重定向，WB 仍可排空。
+        mem_request_stall = 1'b0;
+        mem_result_stall = 1'b1;
+        #1;
+        assert (!redirect.valid && !serialize_start && actions.ex_mem == PIPE_HOLD &&
+                actions.d2_ex == PIPE_HOLD && actions.mem_wb == PIPE_ADVANCE)
+            else $fatal(1, "MEM result wait priority");
+        mem_result_stall = 1'b0;
+
         // MEM 请求完成后，EX 重定向清除自身之前的年轻指令。
         mem_request_stall = 1'b0;
         execution_stall = 1'b0;
@@ -126,6 +137,7 @@ module tb_pipeline_ctrl;
         wb_redirect.valid = 1'b1;
         wb_redirect.pc = xlen_t'(32'h300);
         execution_stall = 1'b1;
+        mem_result_stall = 1'b1;
         #1;
         assert (redirect.valid && !serialize_start && d1_flush && !fetch_ready && !mem_issue_enable &&
                 redirect.pc == xlen_t'(32'h300))

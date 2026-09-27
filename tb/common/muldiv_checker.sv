@@ -19,7 +19,6 @@ module muldiv_checker #(
     logic cancel = 1'b0;
     logic req_valid = 1'b0;
     logic req_ready;
-    logic busy;
     muldiv_req_t request;
     logic rsp_valid;
     logic rsp_ready = 1'b0;
@@ -32,7 +31,7 @@ module muldiv_checker #(
     // 语义单元共用 MDU 的唯一握手壳；MODE 只筛选指令，不复制协议状态机。
     muldiv_unit #(.MUL_IMPL(MUL_IMPL), .DIV_IMPL(DIV_IMPL)) dut (
         .clk, .rst, .cancel, .req_valid, .req_ready, .request,
-        .rsp_valid, .rsp_ready, .rsp_data, .busy
+        .rsp_valid, .rsp_ready, .rsp_data
     );
 
     // TB 使用宽有符号乘法和原生除法作独立参考，不复用被测部分积或迭代算法。

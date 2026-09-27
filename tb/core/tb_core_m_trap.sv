@@ -54,8 +54,9 @@ module tb_core_m_trap;
 
         for (int cycles = 0; cycles < 1000; cycles++) begin
             @(negedge clk);
-            if (dut.u_core.execution_stall &&
-                (dut.u_core.d1_serialize_req || dut.u_core.d1_d2_q.exc.valid)) begin
+            if ((dut.u_core.execution_stall || dut.u_core.mem_result_stall) &&
+                (dut.u_core.d1_serialize_req || dut.u_core.d1_d2_q.exc.valid ||
+                 dut.u_core.d2_ex_q.exc.valid)) begin
                 young_exception_waited = 1'b1;
                 assert (!dut.u_core.serialize_start)
                     else $fatal(1, "younger exception overtook active MDU");

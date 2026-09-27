@@ -27,6 +27,7 @@ package core_types_pkg;
         BR_NONE, BR_EQ, BR_NE, BR_LT, BR_GE,
         BR_LTU, BR_GEU, BR_JAL, BR_JALR
     } branch_op_e;
+
     // M 运算与 ALU 分类分离；W 形式复用操作枚举，由 op_width 决定有效位宽。
     typedef enum logic [2:0] {
         MD_MUL, MD_MULH, MD_MULHSU, MD_MULHU,

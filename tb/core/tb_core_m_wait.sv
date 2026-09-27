@@ -72,7 +72,7 @@ module tb_core_m_wait;
             held_result_seen <= 1'b0;
             drained_operand_seen <= 1'b0;
         end else begin
-            if (dut.wb_wait && dut.u_ex_stage.u_ex_mdu.rsp_valid)
+            if (dut.wb_wait && dut.mdu_rsp_valid)
                 held_result_seen <= 1'b1;
             if (dut.mem_request_stall && commit_valid && commit_rd_we && commit_rd == gpr_addr_t'(5))
                 drained_operand_seen <= 1'b1;

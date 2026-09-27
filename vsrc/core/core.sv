@@ -84,6 +84,13 @@ module core (
     logic mem_request_stall;
     logic wb_wait;
     logic execution_stall;
+    logic mem_result_stall;
+    logic mdu_req_valid;
+    logic mdu_req_ready;
+    muldiv_req_t mdu_request;
+    logic mdu_rsp_valid;
+    logic mdu_rsp_ready;
+    xlen_t mdu_rsp_data;
     logic mem_issue_enable;
     logic mdu_operands_ready;
     pipeline_actions_t pipeline_actions;
@@ -107,14 +114,13 @@ module core (
     // D1/EX 已排除本级异常，Core 只在流水级真正推进时放行训练。
     // WB/EX 清除 D1 及其后续时，pending 中的年轻预测更新也必须作废。
     always_comb begin
-        d1_stage_advance = if_d1_q.valid &&
-                           (pipeline_actions.d1_d2 == PIPE_ADVANCE);
+        d1_stage_advance = (pipeline_actions.d1_d2 == PIPE_ADVANCE);
         ex_stage_advance = d2_ex_q.valid &&
                            (pipeline_actions.ex_mem == PIPE_ADVANCE);
         d1_update = d1_update_raw;
         ex_update = ex_update_raw;
         d1_update.valid = d1_update_raw.valid && d1_stage_advance;
-        ex_update.valid = ex_update_raw.valid && ex_stage_advance;
+        ex_update.valid = ex_update_raw.valid && (pipeline_actions.ex_mem == PIPE_ADVANCE);
     end
 
     // 预测器裁决
@@ -203,6 +209,8 @@ module core (
 
     mdu_issue_control u_mdu_issue_control (
         .ex_packet(d2_ex_q),
+        .mem_packet(ex_mem_q),
+        .mem_forward(mem_gpr_forward),
         .wb_packet(mem_wb_q),
         .wb_wait,
         .mdu_operands_ready
@@ -214,6 +222,9 @@ module core (
         .mdu_operands_ready,
         .advance(ex_stage_advance),
         .cancel(wb_redirect.valid),
+        .mdu_req_ready,
+        .mdu_req_valid,
+        .mdu_request,
         .in_packet(d2_ex_q),
         .mem_gpr_forward,
         .wb_gpr_forward(wb_gpr_write),
@@ -245,10 +256,25 @@ module core (
         .mepc
     );
 
+    muldiv_unit u_muldiv_unit (
+        .clk, .rst,
+        .cancel(wb_redirect.valid),
+        .req_valid(mdu_req_valid),
+        .req_ready(mdu_req_ready),
+        .request(mdu_request),
+        .rsp_valid(mdu_rsp_valid),
+        .rsp_ready(mdu_rsp_ready),
+        .rsp_data(mdu_rsp_data)
+    );
+
     mem_stage u_mem_stage (
         .issue_enable(mem_issue_enable),
         .request_stall(mem_request_stall),
         .in_packet(ex_mem_q),
+        .mdu_rsp_valid,
+        .mdu_rsp_data,
+        .mdu_rsp_ready,
+        .result_stall(mem_result_stall),
         .dmem_req_valid,
         .dmem_req_write,
         .dmem_req_addr,
@@ -305,6 +331,7 @@ module core (
         .d1_serialize_req,
         .wb_wait,
         .mem_request_stall,
+        .mem_result_stall,
         .execution_stall,
         .load_use_stall,
         .redirect(selected_redirect),

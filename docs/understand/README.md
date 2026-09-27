@@ -9,6 +9,8 @@
   链接、ECALL/Trap 到 `tohost` PASS/FAIL 的完整路径。
 - [CoreMark 与性能指标解读](COREMARK_AND_PERFORMANCE.md)：解释裸机 C/BSP/port、周期
   计时、CoreMark/MHz、CoreMark/LUT，以及仿真成绩与 FPGA 成绩的边界。
+- [Cache、TCM、DMA 与系统总线设计草案](THINKING.md)：物理地址路由、协议边界、
+  DMA 一致性与双平台验证门槛。
 
 新增理解文档时使用具体主题命名，优先链接源码和正式工作流，不在此重复阶段计划或
 提交日志；目标与阶段归入 roadmap，修改记录归入 `docs/COMMIT.md`。

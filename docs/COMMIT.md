@@ -1,5 +1,120 @@
 # 设计调整记录
 
+## 2026-09-27（Asia/Shanghai）— MDU 跨级实例与 MEM 内部拼包
+
+- 以维护者修改并验证的 rhbyv 工作区为硬件同步来源；不在 package 中定义函数。
+- `muldiv_unit` 移至 `core` 独立实例；`ex_mdu` 留在 EX 管理请求与 `issued_q`，
+  `mem_mdu` 内化于 `mem_stage` 接收结果、拼包与前递，不增加结果寄存拍。
+- EX/MEM 分别根据自己的流水包判断 M 指令，不跨级复用实时 `selected`。
+- 保留 `issued_q`：WB 反压期间已接收的请求无需重复发射，随后 EX 可推进元数据。
+- 保留维护者移除 `busy` 的接口调整；同步 TB 层级路径和独立 MDU 实例。
+  MEM 单元测试增加结果未到、反压前递、响应握手与无效/异常包检查。
+- 同步硬件路线、目录说明；hgb README 独立更新，软件路线与许可证不变。
+- 前轮同架构回归：RV32/RV64 各 40 unit PASS、14 directed PASS / 1 SKIP；
+  ISA 分别 58/78 PASS，各 2 SKIP（`fence_i`、`ma_data`），FAIL 0。
+  六后端整核矩阵分别 78/108 PASS；C 冒烟和 CoreMark performance/validation
+  两位宽 CRC 均通过。本次两仓库最终版本独立复跑 test 与 ISA，结果均与上述一致。
+- 不包含 hgb 工作区中与同步无关的 `wb_stage.sv` 注释改动；该改动原样保留。
+- 未执行 FPGA 综合、时序分析或上板；PR 由维护者审阅，不自行合并 main。
+
+## 2026-09-25（Asia/Shanghai）— README 规约与 Cache/TCM/DMA/总线预案
+
+- 两仓 `README.md` 均可在专用分支维护：rhbyv 保持简洁，不容纳理解文档、
+  提交记录或当前阶段流水账；hgb README 随硬件事实更新，完整记录保存在此目录。
+- 先以盘古 676-200K Pro 为板级目标，Zynq-7020 后适配；保留既有 Vivado Tcl，
+  不假定盘古 DDR IP 为 AXI，也不把 Zynq PS DDR 视作无需 PS 初始化的纯 PL 资源。
+- [设计草案](understand/THINKING.md) 区分 CPU I/D 接口、TCM、Cache、DMA 主/从端、
+  内部互连和外部 AXI4 桥；写响应、DMA/Cache 一致性与 FENCE.I 是明确待审门槛。
+- 本次只修改文档和 rhbyv 的 `.gitignore` 白名单，没有改 RTL、TB 或构建脚本；
+  因此没有重新声称本次执行了仿真或板级验证。
+
+### 上一轮两次提交：逐文件目的
+
+以下是已完成的大轮次，而非本次架构预案新增 RTL。rhbyv 的提交依次为
+`98373fe`、`42f6ee9`；hgb 的对应提交为 `f60fa61`、`d31ebbe`。
+
+`98373fe`：修复 WB 慢 Load 时 MEM 已就绪前递被错误关闭、MDU 抓取旧操作数的问题；
+没有前移 load-use 或改变六级边界。
+
+| 文件 | 修改目的 |
+|---|---|
+| `scripts/verilator/run_mdu_backends.sh` | 将新增 M 前递整核用例纳入六后端矩阵。 |
+| `tb/core/tb_core_m_forward.sv` | 新增慢 Load、MEM/WB 同名写入与 M 操作数回归。 |
+| `tb/unit/tb_mdu_issue_control.sv` | 覆盖 MEM 优先于 WB 和未就绪生产者的发射许可。 |
+| `tb/unit/tb_mem_stage.sv` | 验证 WB 反压时 MEM 已算好结果仍可前递。 |
+| `tb/unit/tb_wb_stage.sv` | 验证 Load 响应等待与正常/异常提交条件。 |
+| `vsrc/core/control/hazard_unit.sv` | 删去 D1 已转成异常后的重复 illegal 门控。 |
+| `vsrc/core/core.sv` | 接入 MEM 前递的 MDU 就绪判断，精简预测更新推进门控。 |
+| `vsrc/core/csr/csr_access_check.sv` | 去除被地址位只读规则覆盖的冗余 CSR 比较。 |
+| `vsrc/core/execute/M_extension/ex_mdu.sv` | 澄清仅在依赖的前递结果未就绪时阻止请求。 |
+| `vsrc/core/execute/M_extension/mdu_issue_control.sv` | 按最近的 MEM→WB 生产者判断两个 M 源操作数。 |
+| `vsrc/core/execute/ex_exception_check.sv` | 复用统一的 EX 控制流判定函数。 |
+| `vsrc/core/execute/ex_stage.sv` | 统一分支分类和有效门控，简化预测更新/重定向判断。 |
+| `vsrc/core/frontend/if_stage.sv` | 合并重定向/flush 取消条件及顺序 PC 计算。 |
+| `vsrc/core/lsu/mem_stage.sv` | 分离“结果可前递”与“包可推进”，删冗余请求判定。 |
+| `vsrc/core/writeback/trap_controller.sv` | 复用无异常 retire 条件确定 MRET。 |
+| `vsrc/core/writeback/wb_stage.sv` | 合并 Load 等待、正常提交与异常提交条件。 |
+| `vsrc/pkg/core_types_pkg.sv` | 增加 EX 控制流分类辅助函数。 |
+
+`42f6ee9`：EX 接受 M 请求时先将元数据寄存至 EX/MEM，MEM 等结果后拼包；
+WB 反压时结果仍由 MDU 保持，不添加额外结果寄存拍。
+
+| 文件 | 修改目的 |
+|---|---|
+| `scripts/rtl_files.f` | 将新增 `mem_mdu` 纳入可综合源码清单。 |
+| `scripts/verilator/run_mdu_backends.sh` | 把边界用例纳入六后端整机矩阵。 |
+| `tb/core/tb_core_m_boundary.sv` | 新增 EX/MEM 拼包、反压、前递边界整核测试。 |
+| `tb/core/tb_core_m_trap.sv` | 适配 M 请求与提交分离后的 Trap 时序检查。 |
+| `tb/unit/tb_ex_stage.sv` | 检查 EX 请求接受、元数据推进及 M 结果输出。 |
+| `tb/unit/tb_mem_mdu.sv` | 新增 MEM 拼包/等待/响应握手单元测试。 |
+| `tb/unit/tb_pipeline_ctrl.sv` | 验证 MEM 结果等待对年轻 EX 控制事件的优先级。 |
+| `vsrc/core/control/pipeline_ctrl.sv` | 将 MEM 请求等待与 M 结果等待统一按年龄仲裁。 |
+| `vsrc/core/core.sv` | 接入 `mem_mdu`、MDU 结果通路和 `mem_result_stall`。 |
+| `vsrc/core/execute/M_extension/ex_mdu.sv` | 用 `issued_q` 记录已接受但尚未离开 EX 的请求。 |
+| `vsrc/core/execute/M_extension/mem_mdu.sv` | 新增 EX/MEM 元数据与寄存 M 结果的无额外拍拼包。 |
+| `vsrc/core/execute/ex_stage.sv` | 只推进 M 元数据，结果改由 MEM 拼入。 |
+
+hgb 在上述两次提交还各自更新了 `docs/COMMIT.md`、
+`docs/HARDWARE_ROADMAP.md`、`docs/PROJECT_STRUCTURE.md` 和
+`docs/understand/M_EXTENSION.md`：同步修改记录、当前硬件边界、文件职责与
+M 扩展时序解读；这些发布文档不反向放进 rhbyv。
+
+## 2026-09-25（Asia/Shanghai）— MDU 结果与 EX/MEM 元数据汇合基线
+
+`ex_mdu` 在请求接收后允许元数据进入 EX/MEM，并用 `issued_q` 处理较老指令反压期间
+已启动但尚未交付的请求。新增 `mem_mdu`，在 EX/MEM 寄存器输出侧拼接 MDU 寄存结果；
+`pipeline_ctrl` 对未完成的 MEM 结果维持年龄优先。更新文件表、模块/整核 TB 和
+六后端矩阵，保留同步异常、取消和 ready/valid 的既有提交顺序。
+
+验证：两种 XLEN 各 40 unit PASS、14 directed PASS、1 非适用位宽 SKIP；
+riscv-tests 为 RV32 58 PASS、RV64 78 PASS，各 2 SKIP（`fence_i`、`ma_data`）。
+六种 MDU 后端矩阵为 RV32 78 PASS、RV64 108 PASS；EX 适配器在两种 XLEN 下各
+6 种后端 PASS。C 冒烟、CoreMark 校准、performance、validation 均通过。
+固定基线相同迭代数，默认 m0d0、BTB 64：RV32 32 次/11045355 ticks，
+`2.897145 CoreMark/MHz`；RV64 28 次/10854767 ticks，
+`2.579512 CoreMark/MHz`。未进行 FPGA 综合或板级验证。
+
+
+## 2026-09-24（Asia/Shanghai）— fix_M 前递修复与组合条件精简
+
+范围：第一阶段基线，保留六级流水与现有 EX 等待 MDU 的寄存边界；不前移 Load-use。
+
+- 修复慢 Load 停在 WB 时，MEM 已完成结果因无法推进而被关闭前递，导致 EX MDU 锁存旧操作数的问题。
+- MEM 的 GPR/CSR 前递有效性与向 WB 推进许可分离；MDU 操作数就绪遵循 MEM 优先于 WB，支持较新同名写入覆盖。
+- D1 负责将非法指令转换为异常；清理后级重复 illegal 检查，合并 WB 完成条件、EX 分支分类、IF 当前路径取消条件及 CSR 冗余只读比较。
+- 保留模块说明、中文功能块与协议注释；没有改变 Load-use 位置、乘除法算法或请求/响应状态机。
+- 新增 `tb_core_m_forward` 七场景；扩展 MEM、MDU 发射和 WB 真值测试，后端矩阵纳入新定向测试。
+- 涉及 `vsrc/core/{control,execute,frontend,lsu,writeback,csr}`、`core.sv`、类型包、上述 TB 与后端矩阵脚本。
+
+验证：两种 XLEN 各 39 项 unit PASS，14 项 directed 中 13 PASS、1 非适用位宽 SKIP；
+三种 top 的 lint 均通过。riscv-tests 为 RV32 58 PASS、RV64 78 PASS，各 2 SKIP
+（`fence_i`、`ma_data`）。C 冒烟各 1 PASS，CoreMark 校准、performance、validation 均通过。
+默认 `MUL_IMPL=0 DIV_IMPL=0 BTB_ENTRIES=64`：RV32 32 次迭代/11346027 ticks，
+`2.820371 CoreMark/MHz`；RV64 28 次迭代/11117855 ticks，`2.518471 CoreMark/MHz`。
+六种 MDU 后端矩阵为 RV32 72 PASS、RV64 102 PASS，均无 FAIL/SKIP。
+未运行 FPGA 综合或上板。
+
+
 ## 2026-09-02（Asia/Shanghai）— SYSTEM uOp 分类
 
 状态：A0 学习分支上的适应性设计调整，尚未替代后续阶段实现。

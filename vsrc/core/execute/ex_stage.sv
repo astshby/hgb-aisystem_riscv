@@ -6,6 +6,9 @@ module ex_stage (
     input  logic                         mdu_operands_ready, // M-use
     input  logic                         advance, // M-use
     input  logic                         cancel, // M-use
+    input  logic                         mdu_req_ready,
+    output logic                         mdu_req_valid,
+    output core_types_pkg::muldiv_req_t  mdu_request,
     input  pipeline_pkg::d2_ex_t         in_packet,
     input  pipeline_pkg::gpr_forward_t   mem_gpr_forward,
     input  pipeline_pkg::gpr_forward_t   wb_gpr_forward,
@@ -29,14 +32,14 @@ module ex_stage (
     logic branch_taken;
     xlen_t branch_target;
     logic control_op;
+    logic branch_valid;
     logic mispredict;
     xlen_t csr_operand;
     xlen_t csr_old_data;
     xlen_t csr_proposed_data;
     xlen_t csr_new_data;
     exception_t execute_exc;
-    logic mdu_instruction;
-    xlen_t mdu_result;
+    logic mdu_selected;
 
     // GPR 前递：MEM 比 WB 更新，因此 gpr_bypass 内部优先选择 MEM。
     gpr_bypass u_rs1_bypass (
@@ -113,12 +116,13 @@ module ex_stage (
         .legal_value(csr_new_data)
     );
 
-    // M 扩展：功能集中到子模块。
+    // M 扩展：EX 子模块组织前递操作数和请求；跨级运算由 Core 中的 MDU 管理。
     ex_mdu u_ex_mdu (
         .clk, .rst, .cancel, .mdu_operands_ready, .advance,
         .packet_valid(in_packet.valid), .exception_valid(execute_exc.valid),
         .uop(in_packet.uop), .forwarded_rs1, .forwarded_rs2,
-        .selected(mdu_instruction), .execution_stall, .result(mdu_result)
+        .selected(mdu_selected), .execution_stall,
+        .req_ready(mdu_req_ready), .req_valid(mdu_req_valid), .request(mdu_request)
     );
 
     // 同步异常处理
@@ -140,14 +144,13 @@ module ex_stage (
     // 分支控制：判断预测错误，并生成给 BTB/GShare 的实际执行结果。
     // control_op 包含条件分支与 JALR；JAL 已在 D1 处理。
     always_comb begin
-        control_op = (in_packet.uop.branch_op != BR_NONE) &&
-                     (in_packet.uop.branch_op != BR_JAL);
-        mispredict = control_op &&
-                     ((in_packet.pred.taken != branch_taken) ||
-                      (branch_taken && (in_packet.pred.target != branch_target)));
+        control_op = (in_packet.uop.branch_op != BR_NONE) && (in_packet.uop.branch_op != BR_JAL);
+        branch_valid = in_packet.valid && !execute_exc.valid && control_op;
+        mispredict = (in_packet.pred.taken != branch_taken) ||
+                     (branch_taken && (in_packet.pred.target != branch_target));
 
         pred_update = '0;
-        if (in_packet.valid && !execute_exc.valid && control_op) begin
+        if (branch_valid) begin
             pred_update.valid = 1'b1;
             pred_update.kind = in_packet.uop.branch_op;
             pred_update.pc = in_packet.pc;
@@ -157,7 +160,7 @@ module ex_stage (
         end
 
         redirect = '0;
-        if (in_packet.valid && mispredict && !execute_exc.valid) begin
+        if (branch_valid && mispredict) begin
             redirect.valid = 1'b1;
             redirect.pc = branch_taken ? branch_target : in_packet.seq_pc;
             redirect.reason = REDIR_EX_BRANCH;
@@ -172,7 +175,8 @@ module ex_stage (
         out_packet.seq_pc = in_packet.seq_pc;
         out_packet.inst = in_packet.inst;
         out_packet.rd = in_packet.rd;
-        out_packet.result = mdu_instruction ? mdu_result : alu_result;
+        // M 的结果在 MEM 汇合，这里只把对应元数据送入 EX/MEM，不复制算法输出。
+        out_packet.result = mdu_selected ? '0 : alu_result;
         out_packet.store_data = forwarded_rs2; // 地址由 rs1+imm 计算，写数据来自 rs2。
         out_packet.csr_addr = in_packet.csr_addr;
         out_packet.csr_old = csr_old_data;

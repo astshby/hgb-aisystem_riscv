@@ -2,14 +2,15 @@
 
 ## 目标与当前状态
 
-rhbyv 必须同时面向 Zynq-7020 和紫光同创盘古 676-200K Pro，而不是在可移植 Core
+rhbyv 必须同时面向紫光同创盘古 676-200K Pro 和 Zynq-7020；先集成盘古，再适配
+Zynq。不能在可移植 Core
 中固化 Xilinx 接口。目前完成的是共享 RTL 和 Verilator 验证；两块板均未完成
 BRAM、时钟、外设、约束集成或上板验证，不能把规划目标表述为已支持的板级工程。
 
 | 平台 | 工程目标 | 当前边界 |
 |---|---|---|
-| Zynq-7020 | Vivado，只使用 PL，不依赖 ARM 核通信 | 保留 `scripts/vivado/`；现有 Tcl 默认 `xc7z020clg400-1` |
-| 盘古 676-200K Pro | 独立厂商工程与约束，沿用同一 Core 和软件契约 | 精确器件型号、工具版本、引脚、存储器与时钟参数待板卡资料确认 |
+| 盘古 676-200K Pro（首个目标） | 独立厂商工程与约束，沿用同一 Core 和软件契约 | 精确器件/封装、工具版本、引脚、BRAM/DDR IP 和时钟资料待板卡资料确认 |
+| Zynq-7020（后续目标） | 保留 Vivado 工作流，CPU 运行于 PL | 现有 Tcl 默认 `xc7z020clg400-1`；是否使用 PS DDR 需单独决策 |
 
 ## 共享层与平台层
 
@@ -21,6 +22,12 @@ BRAM、时钟、外设、约束集成或上板验证，不能把规划目标表�
 建议后续将平台 adapter 分置于 `vsrc/cpu/platform/zynq7020/` 和
 `vsrc/cpu/platform/pango676/`，IP/约束使用对应平台子目录。这些目录是规划，不代表
 当前已经存在实现；Zynq 的既有 Vivado 工作流不删除。
+
+先实现共享的物理地址映射、I/D-TCM、MMIO 路由和系统总线契约，再接入 DMA
+到 TCM/外存，最后在可缓存外存路径接入 I$/D$；BRAM、DDR、IP 桥接由平台层实现。厂商
+DDR IP 的用户侧接口是否 AXI4，须按具体 IP 配置确认，不能凭器件系列推定。
+Zynq 的 PS DDR 必须经 PS–PL 接口并满足 PS 初始化条件；若保持完全纯 PL，
+首版只使用 PL 内 BRAM/TCM，DDR 方案需另审。详见 [设计草案](understand/THINKING.md)。
 
 ## 必须保持一致的契约
 
@@ -52,5 +59,6 @@ Verilator 使用 `CORE_MUL_IMPL/CORE_DIV_IMPL` 宏；未来厂商工程须设置
 ## 平台验收
 
 每个平台分别完成 BRAM 时序测试、ISA smoke、CoreMark CRC 与周期测量，并记录
-工具版本、器件、约束、LUT/FF/BRAM/DSP、实现后时序与实际时钟。完成 M 与仿真
-CoreMark 后恢复上板工作；主流水拆分在上板闭环与关键路径分析之后评审。
+工具版本、器件、约束、LUT/FF/BRAM/DSP、实现后时序与实际时钟。先完成盘古
+的 TCM/基础总线与板级闭环，再复用 Core 契约适配 Zynq；真实 Cache 与 DMA
+分步验证。主流水拆分在上板闭环与关键路径分析之后评审。

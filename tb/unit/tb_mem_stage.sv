@@ -10,6 +10,8 @@ module tb_mem_stage;
     import riscv_priv_pkg::*;
 
     logic issue_enable;
+    logic mdu_rsp_valid, mdu_rsp_ready, result_stall;
+    xlen_t mdu_rsp_data;
     ex_mem_t in_packet;
     logic dmem_req_valid;
     logic dmem_req_write;
@@ -26,6 +28,8 @@ module tb_mem_stage;
 
     initial begin
         issue_enable = 1'b1;
+        mdu_rsp_valid = 1'b0;
+        mdu_rsp_data = '0;
         dmem_req_ready = 1'b0;
         in_packet = '0;
 
@@ -42,6 +46,13 @@ module tb_mem_stage;
                 gpr_forward.data == xlen_t'(42))
             else $fatal(1, "missing MEM ALU forwarding");
 
+        // WB 反压只禁止推进，不应隐藏 MEM 已经完成的 ALU 结果。
+        issue_enable = 1'b0;
+        #1;
+        assert (!out_packet.valid && gpr_forward.valid && gpr_forward.data == xlen_t'(42))
+            else $fatal(1, "MEM forwarding lost under WB backpressure");
+        issue_enable = 1'b1;
+
         // CSR 新值在 MEM 透明传递，并作为后续 CSR 指令的旁路候选。
         in_packet = '0;
         in_packet.valid = 1'b1;
@@ -52,6 +63,12 @@ module tb_mem_stage;
         assert (csr_forward.valid && csr_forward.addr == CSR_MSCRATCH &&
                 csr_forward.data == xlen_t'(32'h1234))
             else $fatal(1, "missing MEM CSR forwarding");
+
+        issue_enable = 1'b0;
+        #1;
+        assert (!out_packet.valid && csr_forward.valid && csr_forward.data == xlen_t'(32'h1234))
+            else $fatal(1, "MEM CSR forwarding lost under WB backpressure");
+        issue_enable = 1'b1;
 
         // load 命中 ready 时立即进入 MEM/WB，但数据要到 WB 才能前递。
         in_packet = '0;
@@ -87,6 +104,52 @@ module tb_mem_stage;
         #1;
         assert (!dmem_req_valid && !request_stall && !out_packet.valid)
             else $fatal(1, "disabled MEM issue");
+
+        // M 包等待结果时不能前递占位值或发出访存请求。
+        in_packet = '0;
+        in_packet.valid = 1'b1;
+        in_packet.rd = gpr_addr_t'(7);
+        in_packet.uop.fu = FU_MULDIV;
+        in_packet.uop.gpr_write = 1'b1;
+        in_packet.uop.wb_sel = WB_ALU;
+        issue_enable = 1'b1;
+        #1;
+        assert (result_stall && !out_packet.valid && !gpr_forward.valid &&
+                !dmem_req_valid && mdu_rsp_ready)
+            else $fatal(1, "MEM forwarded unfinished M result");
+
+        // WB 反压不隐藏已完成 M 结果，只禁止推进与响应消费。
+        issue_enable = 1'b0;
+        mdu_rsp_valid = 1'b1;
+        mdu_rsp_data = xlen_t'(21);
+        #1;
+        assert (!result_stall && !out_packet.valid && !mdu_rsp_ready &&
+                gpr_forward.valid && gpr_forward.data == xlen_t'(21))
+            else $fatal(1, "MEM M forwarding lost under WB backpressure");
+        issue_enable = 1'b1;
+        #1;
+        assert (out_packet.valid && out_packet.result == xlen_t'(21) &&
+                out_packet.rd == gpr_addr_t'(7) && mdu_rsp_ready)
+            else $fatal(1, "MEM M result not joined with metadata");
+
+        // 异常包、空包与非 M 包不能消费跨级 MDU 的响应。
+        in_packet.exc.valid = 1'b1;
+        #1;
+        assert (out_packet.valid && out_packet.exc.valid && !mdu_rsp_ready &&
+                !result_stall && !gpr_forward.valid)
+            else $fatal(1, "exception MEM packet consumed M result");
+        in_packet.exc.valid = 1'b0;
+        in_packet.valid = 1'b0;
+        #1;
+        assert (!out_packet.valid && !mdu_rsp_ready && !result_stall)
+            else $fatal(1, "empty MEM packet consumed M result");
+        in_packet.valid = 1'b1;
+        in_packet.uop.fu = FU_ALU;
+        in_packet.result = xlen_t'(42);
+        #1;
+        assert (out_packet.valid && out_packet.result == xlen_t'(42) &&
+                !mdu_rsp_ready && !result_stall)
+            else $fatal(1, "non-M MEM packet reused another stage selection");
 
         $display("PASS tb_mem_stage RV%0d", XLEN);
         $finish;

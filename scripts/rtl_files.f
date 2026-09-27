@@ -39,6 +39,7 @@ vsrc/core/execute/M_extension/div_unit.sv
 vsrc/core/execute/M_extension/muldiv_unit.sv
 vsrc/core/execute/M_extension/mdu_issue_control.sv
 vsrc/core/execute/M_extension/ex_mdu.sv
+vsrc/core/execute/M_extension/mem_mdu.sv
 vsrc/core/execute/ex_stage.sv
 vsrc/core/lsu/load_unit.sv
 vsrc/core/lsu/store_unit.sv

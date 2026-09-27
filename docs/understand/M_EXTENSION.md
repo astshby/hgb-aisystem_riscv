@@ -14,7 +14,7 @@ W 指令只计算低 32 位，结果一律符号扩展，包括 DIVUW/REMUW。`m
 
 ```text
 ex_stage
-└── ex_mdu                  请求拼接、发射许可、EX 等待适配，无自有状态
+└── ex_mdu                  请求拼接、EX 发射记录与操作数等待
     └── muldiv_unit          唯一 ready/valid 状态机与结果保持寄存器
         ├── mul_unit        W 输入、MULH/MULHSU 符号修正、结果选择
         │   ├── mul_dsp             编译时三选一
@@ -23,39 +23,54 @@ ex_stage
         └── div_unit        ISA 边界、abs、无符号幅值、商余数符号修正
             ├── div_shift           编译时二选一
             └── div_srt4 → normalize + PD table + QDS + CSA + OTF
+ex_mem_q                       保存已发射 M 指令的 PC、rd、uOp 等元数据
+└── mem_mdu                    在寄存边界后与 MDU 结果拼包，再送入 mem_stage
 ```
 
 `muldiv_req_t` 的 operation、op_width、operand_a、operand_b 共同描述一次运算。
-它是多周期边界的原子请求；PC、rd、预测和异常 metadata 留在 D2/EX。
+它是多周期边界的原子请求；PC、rd、预测和异常 metadata 在请求被接收时进入
+EX/MEM，不等待运算结果。
 ALU/branch 当前是组合单元，显式端口已经清楚，无须为形式一致增加请求结构体。
 EX 中剩余的 ALU/CSR 操作数选择、分支判断和输出包组装仍按功能分块保留。
 
 ## 唯一握手所有者
 
 `ex_mdu` 只在有效、无异常的 FU_MULDIV 指令且 `mdu_operands_ready` 为 1 时请求运算。
-实际前递操作数在 `req_valid && req_ready` 的上升沿锁存。MDU 离开 IDLE 后
-busy 为 1，适配器随即撤销 req_valid；不再另存一份 EX pending 状态。
+实际前递操作数在 `req_valid && req_ready` 的上升沿锁存。`ex_mdu.issued_q` 只记录
+请求已被接收而元数据仍因较老指令反压停留在 EX 的情形；元数据进入 MEM 后清除，
+结果的保持与消费仍由 `muldiv_unit` 独占。后端 `req_ready` 决定能否接收下一请求。
+
+操作数就绪与前递使用相同的最近生产者顺序：先 MEM，再 WB。MEM 已有 ALU/CSR
+结果时，即使较老 Load 在 WB 等待，也仍然可以前递；“结果已经可用”不等于
+“流水包现在能推进”。MEM 的同名新写入覆盖 WB 的旧写入；只有实际选中的
+生产者尚未提供结果才阻止 MDU 启动。x0 和未使用的源不产生依赖。
+
+`tb_core_m_forward` 覆盖慢 Load、MEM 写入、EX 乘除法三者重叠的七种场景，
+同时检查两路操作数、覆盖关系、真实 WB 依赖、Load 写 x0 和不重复启动/退休。
 
 | MDU 状态 | req_ready | rsp_valid | 含义 |
 |---|---|---|---|
 | IDLE | 1 | 0 | 可以接收一个请求 |
 | RUN | 0 | `done` | 计算中；后端完成当拍直接给出响应 |
-| RESULT | 0 | 1 | 特殊除法或被反压的结果等待 EX/MEM 接收 |
+| RESULT | 0 | 1 | 特殊除法或被反压的结果等待 MEM 接收 |
 
-复位或 cancel 时两个握手输出都为 0。RUN 收到 done 后直接尝试交付；若 EX/MEM
+复位或 cancel 时两个握手输出都为 0。RUN 收到 done 后直接尝试交付；若 MEM
 当拍不能接收，才把结果锁存并进入 RESULT。特殊除法在请求沿保存规定结果并进入
 RESULT。RESULT 在 `rsp_valid && rsp_ready` 时回到 IDLE。不支持同拍交付旧结果并
-接收新请求；这与当前阻塞式 EX 一致。
+接收新请求；连续 M 指令仍受单条在途请求约束。
 
 下层使用 `start/done`：start 是请求握手派生的一拍启动脉冲，done 是计算完成的一拍
 通知，数据与 done 同时有效。下层没有 ready，也不处理交付背压；计数器或有效位只
 记录计算进度。完成当拍未被接收的结果由 `muldiv_unit` 保留。
 
-结果未产生时 `execution_stall=1`：保留前端至 EX；较老 MEM/WB 在无自身反压时
-推进，同时清空已排空的 EX/MEM，避免重复提交。结果产生后撤销 execution_stall，
-但 rsp_ready 仍由 EX 的真实 advance 决定，较老访存等待不会提前消费结果。
+EX 的 `execution_stall` 只等待操作数和 MDU 请求接收。无较老级反压时，请求握手的
+同一上升沿将元数据送入 EX/MEM。`mem_mdu` 在寄存器输出侧选择 MDU 结果；结果尚未
+就绪时关闭面向 LSU/WB 的包有效位，并由 `mem_result_stall` 保持 MEM 及年轻流水级，
+较老 WB 仍可排空。结果就绪且 WB 允许推进时，MEM 才拉高 `rsp_ready` 并交付结果。
+WB 等待期间结果可以保持，前递可见性与流水包推进许可分开判断。
 
-年轻异常不能取消较老 MDU；当前 cancel 来自 WB Trap/MRET 重定向。取消优先于接收、
+年轻 EX 分支或异常不能取消 MEM 中较老的 MDU；`mem_result_stall` 优先于这些事件。
+当前 cancel 来自 WB Trap/MRET 重定向。取消优先于接收、
 计算完成和响应交付，并清除各算法的进度/有效位，不能返回旧结果。
 EX HOLD 时 Core 仍将较老 WB 已提交值保存到包内操作数，避免前递消失；已经启动的
 运算只观察自身快照，不受后来旁路线或输入请求变化影响。
@@ -163,6 +178,9 @@ q=0 时，`Q'=4Q`、`QM'=4QM+3`。全部通过两位拼接实现，不用在每�
 后端完成当拍直接给 `rsp_valid`，消除了统一包装器原有的额外完成周期；背压时才进入
 RESULT 保存结果。表中的响应握手按上升沿计，计算延迟与连续请求吞吐不同。特殊除法
 在请求沿保存结果并进入 RESULT，因此与 DSP 后端一样至少占用一个请求/响应周期。
+当没有较老指令反压时，E0 同时把 M 元数据写入 EX/MEM；DSP 乘法和特殊除法的结果
+在 E0 后已经有效，可于 E1 与元数据一起进入 MEM/WB，不再先复制到 EX/MEM 的结果寄存器。
+多拍后端仍按表中的 `rsp_valid` 时间交付；结果寄存和算法时序没有变成组合零周期。
 
 ## 配置与验证
 
@@ -184,7 +202,9 @@ make mdu-backends XLEN=64
 并要求覆盖五种 SRT 商位与两条末余数修正路径。
 `tb_div_srt4_components` 单独遍历 QDS 阈值范围以及在线转换的算术恒等式。
 
-`make mdu-backends` 先运行正式 riscv-tests 生成镜像，再对六种配置逐一运行三个
+`make mdu-backends` 先运行正式 riscv-tests 生成镜像，再对六种配置逐一运行五个
 M 整核 TB 和全部 8/13 项 UM，日志单独保存在 `logs/mdu-matrix-rv<XLEN>/`。
+`tb_mem_mdu` 检查结果拼包和背压；`tb_core_m_boundary` 检查请求沿元数据、
+MEM/WB 接收、连续依赖和较年轻分支；EX 适配器还遍历六种后端验证取消与保持。
 默认完整回归另外包含 EX、A 阶段、MI/UI、C smoke 和 CoreMark。
 完成上板后再根据 DSP/LUT、关键路径与实测频率选择算法或加深主流水。

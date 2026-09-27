@@ -1,6 +1,6 @@
 // Module: muldiv_unit
 // Description: Sole request/response owner for single-outstanding selectable multiply/divide backends.
-// 处理握手响应，组合mul与div块,使用类似总线的状态机（包括特殊情况，暂时保证乘法每次都有一个时延）
+// MDU 跨 EX/MEM：EX 发射一次请求，MEM 按当前指令接收结果；WB 重定向取消。
 module muldiv_unit #(
     parameter int MUL_IMPL = core_config_pkg::MUL_IMPL,
     parameter int DIV_IMPL = core_config_pkg::DIV_IMPL
@@ -11,8 +11,7 @@ module muldiv_unit #(
     input core_types_pkg::muldiv_req_t request,
     output logic rsp_valid,
     input  logic rsp_ready,
-    output core_types_pkg::xlen_t rsp_data,
-    output logic busy
+    output core_types_pkg::xlen_t rsp_data
 );
     import core_types_pkg::*;
     typedef enum logic [1:0] { IDLE, RUN, RESULT } state_e;
@@ -26,11 +25,10 @@ module muldiv_unit #(
     always_comb begin
         divide_request = (request.operation == MD_DIV) || (request.operation == MD_DIVU) ||
                          (request.operation == MD_REM) || (request.operation == MD_REMU);
-        busy = (state_q != IDLE);
         backend_done = divide_q ? div_done : mul_done;
         backend_response = (state_q == RUN) && backend_done;
 
-        req_ready = !rst && !cancel && !busy;
+        req_ready = !rst && !cancel && state_q == IDLE;
         rsp_valid = !rst && !cancel && (backend_response || (state_q == RESULT));
         req_fire = req_valid && req_ready;
         rsp_fire = rsp_valid && rsp_ready;
