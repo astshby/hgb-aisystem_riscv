@@ -1,5 +1,22 @@
 # 设计调整记录
 
+## 2026-09-27（Asia/Shanghai）— MDU 跨级实例与 MEM 内部拼包
+
+- 以维护者修改并验证的 rhbyv 工作区为硬件同步来源；不在 package 中定义函数。
+- `muldiv_unit` 移至 `core` 独立实例；`ex_mdu` 留在 EX 管理请求与 `issued_q`，
+  `mem_mdu` 内化于 `mem_stage` 接收结果、拼包与前递，不增加结果寄存拍。
+- EX/MEM 分别根据自己的流水包判断 M 指令，不跨级复用实时 `selected`。
+- 保留 `issued_q`：WB 反压期间已接收的请求无需重复发射，随后 EX 可推进元数据。
+- 保留维护者移除 `busy` 的接口调整；同步 TB 层级路径和独立 MDU 实例。
+  MEM 单元测试增加结果未到、反压前递、响应握手与无效/异常包检查。
+- 同步硬件路线、目录说明；hgb README 独立更新，软件路线与许可证不变。
+- 前轮同架构回归：RV32/RV64 各 40 unit PASS、14 directed PASS / 1 SKIP；
+  ISA 分别 58/78 PASS，各 2 SKIP（`fence_i`、`ma_data`），FAIL 0。
+  六后端整核矩阵分别 78/108 PASS；C 冒烟和 CoreMark performance/validation
+  两位宽 CRC 均通过。本次两仓库最终版本独立复跑 test 与 ISA，结果均与上述一致。
+- 不包含 hgb 工作区中与同步无关的 `wb_stage.sv` 注释改动；该改动原样保留。
+- 未执行 FPGA 综合、时序分析或上板；PR 由维护者审阅，不自行合并 main。
+
 ## 2026-09-25（Asia/Shanghai）— README 规约与 Cache/TCM/DMA/总线预案
 
 - 两仓 `README.md` 均可在专用分支维护：rhbyv 保持简洁，不容纳理解文档、

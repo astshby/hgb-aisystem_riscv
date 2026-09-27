@@ -61,11 +61,11 @@ ready-valid 存储器协议。
 | `ex_stage` | ALU/BRU/CSR 执行、分支验证和 EX 输出打包 |
 | `mul_unit` | 选择 DSP/Booth-Wallace/移位后端，并完成 signed 高半积修正和 W 扩展 |
 | `div_unit` | 处理 ISA 边界、符号与 W 语义，选择移位恢复或 Radix-4 SRT 后端 |
-| `muldiv_unit` | 单条在途请求/响应、后端选择、结果反压和取消 |
-| `ex_mdu` | EX 请求打包与已发射但尚未交付 MEM 的元数据记录 |
-| `mem_mdu` | 在 EX/MEM 寄存器后拼包 MDU 结果，控制 MEM 结果等待和响应接收 |
+| `muldiv_unit` | Core 中跨 EX/MEM 的单条在途运算、握手、反压与取消 |
+| `ex_mdu` | EX 请求打包与已发射、尚未送入 MEM 的元数据记录，不实例化运算单元 |
+| `mem_mdu` | mem_stage 内部拼包寄存的运算结果，等待结果并控制响应接收 |
 | `ex_exception_check` | 继承异常、CSR 权限、访存与控制目标对齐检查 |
-| `mem_stage` | 请求侧握手和 MEM 前递，不等待 Load 返回 |
+| `mem_stage` | 内部汇合 M 结果、请求侧访存握手和 MEM 前递，不等待 Load 返回 |
 | `wb_stage` | 响应侧握手、写回数据和真实 commit 许可 |
 | `trap_controller` | 由最老 commit 产生 Trap/MRET 状态与重定向 |
 | `hazard_unit` | 判断数据尚不可用的 load-use 依赖 |

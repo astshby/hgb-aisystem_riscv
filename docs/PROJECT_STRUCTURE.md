@@ -43,8 +43,8 @@ hgb-aisystem_riscv/
 | `frontend/` | IF 请求/响应、BTB、GShare、预测器和更新仲裁 |
 | `decode/` | Decoder、立即数、D1/D2 和 D1 异常检测 |
 | `execute/` | ALU、分支、GPR 旁路、EX/异常检测；M 模块位于下级 `M_extension/` |
-| `execute/M_extension/` | EX 发射适配、MEM 结果拼包、唯一 MDU 握手层、乘除语义层和可选算法后端 |
-| `lsu/` | Load/Store 字节通道和 MEM 请求发射 |
+| `execute/M_extension/` | EX 请求适配、Core 中独立 MDU 握手层、MEM 内部结果适配和乘除后端 |
+| `lsu/` | Load/Store 字节通道、MEM 请求发射；mem_stage 内部实例化 mem_mdu 拼包运算结果 |
 | `csr/` | CSR 运算、访问检查、WARL、旁路和状态寄存器 |
 | `control/` | load-use、MDU 等待、流水事件仲裁和异常序列化 |
 | `writeback/` | Load 响应、GPR/CSR 提交、Trap/MRET 重定向 |

@@ -16,6 +16,7 @@ Core 使用独立的指令和数据 ready/valid 接口，不直接实例化 FPGA
 - RV32IM/RV64IM 六级流水、GPR/CSR 前递、load-use 检测和存储器反压。
 - 单条在途多周期 MDU：统一握手与取消；三种乘法、两种除法可选，默认 DSP 推断乘法 + 移位除法（most easy）。
 - JAL 在 D1 解析；条件分支与 JALR 在 EX 解析。
+- `muldiv_unit` 独立于流水级：EX 内的 `ex_mdu` 发射请求，MEM 内的 `mem_mdu` 接收并拼接结果；package 仅保留类型与常量。
 - CSR 在 EX 完成读改写与 WARL，WB 执行架构提交。
 - Verilator 纯 SystemVerilog 测试，不使用 Cocotb。
 - RV32/RV64 各 40 项单元测试；15 项整核定向流程中各 14 PASS、1 非适用位宽 SKIP。

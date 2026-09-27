@@ -13,6 +13,8 @@ module tb_ex_stage;
     logic mdu_operands_ready = 1'b0;
     logic advance = 1'b0;
     logic cancel = 1'b0;
+    logic mdu_req_valid, mdu_req_ready;
+    muldiv_req_t mdu_request;
     logic mdu_rsp_ready = 1'b0;
     logic mdu_rsp_valid;
     xlen_t mdu_rsp_data;
@@ -30,6 +32,13 @@ module tb_ex_stage;
 
     always #5 clk = ~clk;
     ex_stage dut (.*);
+
+    // 与 Core 一致：MDU 独立于 EX，响应接收端模拟 MEM 反压。
+    muldiv_unit u_muldiv_unit (
+        .clk, .rst, .cancel,
+        .req_valid(mdu_req_valid), .req_ready(mdu_req_ready), .request(mdu_request),
+        .rsp_valid(mdu_rsp_valid), .rsp_ready(mdu_rsp_ready), .rsp_data(mdu_rsp_data)
+    );
 
     initial begin
         in_packet = '0;
@@ -117,7 +126,7 @@ module tb_ex_stage;
         cancel = 1'b0;
         repeat (XLEN + 4) begin
             @(negedge clk);
-            assert (!dut.u_ex_mdu.rsp_valid && !out_packet.valid)
+            assert (!mdu_rsp_valid && !out_packet.valid)
                 else $fatal(1, "cancelled EX division returned late");
         end
 

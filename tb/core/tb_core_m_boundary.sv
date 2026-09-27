@@ -87,7 +87,7 @@ module tb_core_m_boundary;
                 assert (dut.u_core.ex_mem_q.valid && dut.u_core.ex_mem_q.pc == launch_pc_q)
                     else $fatal(1, "M metadata did not enter MEM on request edge");
                 if (single_cycle_q)
-                    assert (dut.u_core.mem_input_packet.valid && dut.u_core.mdu_rsp_valid)
+                    assert (dut.u_core.u_mem_stage.mdu_packet.valid && dut.u_core.mdu_rsp_valid)
                         else $fatal(1, "single-cycle M result gained an extra transfer cycle");
             end
             if (consume_q)

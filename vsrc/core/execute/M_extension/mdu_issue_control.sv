@@ -11,7 +11,7 @@ module mdu_issue_control (
 );
     import core_types_pkg::*;
 
-    // x0/未使用源不等待。MEM 中较新的写入覆盖 WB 同名写入，不能先按 WB 判停顿。
+    // x0/未使用源不等待。MEM 中较新的写入覆盖 WB 同名写入。
     function automatic logic operand_ready(input logic used, input gpr_addr_t addr);
         if (!used || addr == '0)
             return 1'b1;

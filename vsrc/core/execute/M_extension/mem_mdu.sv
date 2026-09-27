@@ -1,8 +1,9 @@
 // Module: mem_mdu
 // Description: Joins EX/MEM metadata with registered MDU results without another result register.
+// 乘除法统一出口接收，在 MEM 内拼包，rsp握手
 module mem_mdu (
     input  pipeline_pkg::ex_mem_t in_packet,
-    input  logic                  issue_enable,
+    input  logic                  issue_enable, // mem阶段允许推进(WB相关)才能交付结果
     input  logic                  rsp_valid,
     input  core_types_pkg::xlen_t rsp_data,
     output logic                  rsp_ready,
@@ -13,6 +14,7 @@ module mem_mdu (
     logic selected;
 
     // 只为有效、无异常的 M 指令等待结果。WB 允许推进时才交付，年轻 EX 不能取消它。
+    // rsp_ready：MEM 可向 WB 交付本条指令时才消费结果。
     always_comb begin
         selected = in_packet.valid && !in_packet.exc.valid && (in_packet.uop.fu == FU_MULDIV);
         result_stall = selected && !rsp_valid;
