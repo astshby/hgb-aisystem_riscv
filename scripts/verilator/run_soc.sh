@@ -5,7 +5,7 @@ export CCACHE_TEMPDIR="${PWD}/build/ccache-tmp"
 export CCACHE_DIR="${PWD}/build/ccache"
 mkdir -p "${CCACHE_TEMPDIR}" "${CCACHE_DIR}" logs
 # 镜像驱动 harness 由 benchmark/ISA runner 单独运行。
-for test_spec in tb_soc_fabric:0 tb_soc_fabric:1 tb_soc_peripherals:0; do
+for test_spec in tb_soc_fabric:0 tb_soc_fabric:1 tb_soc_peripherals:0 tb_local_to_axi:0; do
     test_name="${test_spec%:*}"
     priority="${test_spec#*:}"
     suffix=""

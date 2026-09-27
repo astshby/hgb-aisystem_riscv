@@ -4,7 +4,8 @@
 
 Core 保持 IF/D1/D2/EX/MEM/WB 六级。`vsrc/soc/bus/` 提供物理地址检查和错误响应；
 ROM、I/D-TCM、UART/Timer/GPIO 和机器中断已由 `soc_top` 集成。
-DMA、DDR 桥尚未实现；分配窗口仍返回错误。外设语义见 [SoC 外设接口](SOC_PERIPHERALS.md)。
+DMA 与 DDR 顶层集成尚未实现；分配窗口仍返回错误。
+独立的 AXI4 单笔桥见 [外存接入边界](SOC_EXTERNAL_MEMORY.md)。外设语义见 [SoC 外设接口](SOC_PERIPHERALS.md)。
 Package 只保存常量、枚举和结构体；访问判断在模块内完成。
 
 ## 请求、完成与错误

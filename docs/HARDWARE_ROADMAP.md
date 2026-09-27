@@ -171,7 +171,9 @@ RV32 58/58、RV64 78/78，各明确跳过 `fence_i` 与 `ma_data`。六种 MDU �
 - S1：Boot ROM、I/D-TCM、系统路由、统一存储器仿真与 CoreMark，已集成验证。
 - S2：两 UART、机器/通用 Timer 各一、三 GPIO、机器中断与外设验证，已实现。
   验收入口：`soc-test`、`soc-software`、`soc-riscv-tests`、`soc-coremark`。
-- S3：DDR 桥与 DMA；S4：盘古 IP/引脚与板级闭环。各步骤独立交接。
+- S3：DDR 桥与 DMA。当前独立 AXI4 单笔桥已开始实现/验证；顶层外存、DMA 和三主仲裁尚未接入。
+  接口边界和后续顺序见 [外存与 DMA](SOC_EXTERNAL_MEMORY.md)。
+- S4：盘古 IP/引脚与板级闭环。各步骤独立交接。
 
 ## 阶段 C：C 扩展
 

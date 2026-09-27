@@ -17,6 +17,7 @@ Core 使用独立的指令和数据 ready/valid 接口，不直接实例化 FPGA
 - 单条在途多周期 MDU：统一握手与取消；三种乘法、两种除法可选，默认 DSP 推断乘法 + 移位除法（most easy）。
 - JAL 在 D1 解析；条件分支与 JALR 在 EX 解析。
 - `muldiv_unit` 独立于流水级：EX 内的 `ex_mdu` 发射请求，MEM 内的 `mem_mdu` 接收并拼接结果；package 仅保留类型与常量。
+- 独立 AXI4 单笔桥已验证握手、错误与反压，尚未接入 SoC DDR 窗口或 DMA。
 - CSR 在 EX 完成读改写与 WARL，WB 执行架构提交。
 - 无 Cache SoC：启动 ROM、I/D-TCM、2 路 UART、机器/通用 Timer、3 组 GPIO、外部中断汇聚。
 - `mie/mip` 接入真实设备电平；中断排空流水，保存实际后继 PC 后进入 Direct `mtvec`。
@@ -70,6 +71,7 @@ RISC-V 工具链默认位于 `/opt/riscv/bin`。`make test` 包含 lint、单元
 
 - [SoC 访存契约](docs/SOC_BUS_CONTRACT.md)
 - [SoC 外设与中断接口](docs/SOC_PERIPHERALS.md)
+- [外存与 DMA 接入边界](docs/SOC_EXTERNAL_MEMORY.md)
 - [项目目录说明](docs/PROJECT_STRUCTURE.md)
 - [硬件目标与阶段规划](docs/HARDWARE_ROADMAP.md)
 - [软件开发目标](docs/SOFTWARE_ROADMAP.md)

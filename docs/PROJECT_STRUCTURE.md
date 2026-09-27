@@ -55,7 +55,7 @@ hgb-aisystem_riscv/
 ### 可移植 SoC
 
 `vsrc/soc/soc_top.sv` 连接 Core、ROM、I/D-TCM、双主端口互连和外设集群。
-`bus/` 负责地址、仲裁与错误响应；`memory/` 提供同步 TCM 和启动 ROM；
+`bus/` 负责地址、仲裁与错误响应，并提供尚未接入顶层的 `local_to_axi`；`memory/` 提供同步 TCM 和启动 ROM；
 `common/` 提供 MMIO 端点与输入同步器；`peripheral/` 实现 UART、Timer、GPIO，
 `interrupt/` 汇聚外部中断。DMA/DDR 尚未接入。
 协议见 [SoC 访存契约](SOC_BUS_CONTRACT.md)，寄存器见 [外设接口](SOC_PERIPHERALS.md)。
@@ -70,7 +70,7 @@ hgb-aisystem_riscv/
 
 - `unit/`：当前 42 项，包含 MEM 结果拼包、六种 MDU 配置、8 位算法穷举与 SRT 组件验证。
 - `core/`：17 项短程序流程，每种 XLEN 为 16 PASS、1 非适用位宽 SKIP；覆盖基础/M 指令、访存等待、MDU 前递与寄存边界、预测、CSR、Trap 和序列化取消。
-- `soc/`：互连、ROM/TCM、外设 TB；SoC 镜像 harness、C 中断程序及启动汇编。
+- `soc/`：互连、ROM/TCM、外设、AXI4 单笔桥 TB；SoC 镜像 harness、C 中断程序及启动汇编。
 - `benchmark/`：运行 ELF 镜像的长程序 harness，被动镜像字符 Store 并监视 `tohost`。
 - `common/rv_asm_pkg.sv`：为整核定向测试生成具名 32 位指令编码。
 - `common/muldiv_checker.sv`：乘法、除法和统一 MDU 共用的独立算术/协议参考检查器。

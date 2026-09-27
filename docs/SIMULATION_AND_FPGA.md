@@ -46,7 +46,7 @@ Core 与存储器的时序契约详见 [存储器握手解读](understand/MEMORY
 | `make coremark XLEN=32` | 执行 CoreMark 校准、performance 与 validation；不属于 `make test` |
 | `make mdu-backends XLEN=32` | 先运行正式 ISA 回归，再运行六种 MDU 配置各 5 项 M 整核测试和全部 UM |
 | `make soc-lint XLEN=32` | lint 可移植 SoC 顶层 |
-| `make soc-test XLEN=32` | 两种互连仲裁、ROM/TCM 和外设 MMIO 测试 |
+| `make soc-test XLEN=32` | 两种互连仲裁、ROM/TCM、外设 MMIO 与独立 AXI4 桥测试 |
 | `make soc-software XLEN=32` | C 程序验证全部设备 IRQ、MRET 和同步访问错误 |
 | `make soc-smoke XLEN=32` | ROM 启动、I/D-TCM 布局的裸机 C 冒烟 |
 | `make soc-riscv-tests XLEN=32` | 统一物理 I-TCM 执行 MI/UI/UM，包含 fence_i |

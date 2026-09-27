@@ -1,5 +1,26 @@
 # 设计调整记录
 
+## 2026-09-28（Asia/Shanghai）— S3 起步：独立 AXI4 单笔桥
+
+- 两仓从各自 S2 提交（rhbyv 58358a1 / hgb de67bbb）新开 soc/s3-axi-dma；
+  S2 与 S1 检查点均保留。S2 分支已推送，未自合并 main。
+- 新增 local_to_axi：32 位物理地址、XLEN 数据、固定 ID=0、单笔在途/单 beat；
+  本地接受后寄存，AW/W 独立握手，B/R 完成后保持本地响应。无新增 Core 时延，
+  因为本轮尚未接到 SoC 顶层，也没有打开 DDR/DMA 地址窗口。
+- 拒绝非法本地格式与高地址截断；窄访问不改 byte lane；传播 SLVERR/DECERR，
+  不发独占，异常多 beat 读排空到 RLAST。复位要求与外部从端协调，不假装可取消已接受写入。
+- 新增 tb_local_to_axi 并纳入 soc-test，覆盖 35/51 次完成、每位宽 4 种协调复位，
+  AW/W 先后、最早/延迟响应、反压、所有对齐 lane、错误和非法请求无副作用。
+- rhbyv 重新执行双位宽 test、riscv-tests 和 soc-test：
+  各 42 unit PASS、16 directed PASS / 1 位宽 SKIP；
+  ISA 58/78 PASS，各 2 SKIP（fence_i、ma_data），原 SoC 三流程与新增 AXI 流程均 PASS。
+  hgb 同步后独立运行两位宽 soc-test，结果一致。
+- 本轮未重复运行 CoreMark：新增桥未接入已测的 Core/SoC 执行路径；S2 的四组
+  performance/validation 结果仍作为该未改路径的基线，而非外存性能。
+  DMA、三主仲裁、DDR 顶层/模型、burst 和板级验证均未完成，见 SOC_EXTERNAL_MEMORY.md。
+- README 各自同步入口；完整记录仅在 hgb。当前无 GitHub CLI/API 凭据，无法自动创建 PR；
+  分支推送后由维护者通过比较入口创建/审阅，不把“已推送”说成“PR 已提交”。
+
 ## 2026-09-28（Asia/Shanghai）— S2 外设、中断与完整 SoC 验收
 
 - 完成 S1 顶层集成：ROM 跳转、共享物理 I/D-TCM、专用链接布局、SoC ISA/C/CoreMark harness。
