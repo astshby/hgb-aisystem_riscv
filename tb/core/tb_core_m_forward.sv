@@ -26,6 +26,10 @@ module tb_core_m_forward;
     xlen_t expected;
 
     always #5 clk = ~clk;
+    logic imem_rsp_error = 1'b0;
+    logic dmem_rsp_error = 1'b0;
+    mem_size_e dmem_req_size;
+
     core dut (.*);
     sim_imem #(.DEPTH_WORDS(64)) u_imem (
         .clk, .rst, .req_valid(imem_req_valid), .req_addr(imem_req_addr),

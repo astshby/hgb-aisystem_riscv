@@ -1,5 +1,26 @@
 # 设计调整记录
 
+## 2026-09-27（Asia/Shanghai）— S0 访存完成、访问错误与排序契约
+
+- Core 新增访问大小和 I/D 响应错误；Store 与 Load 都在 WB 接收一次完成响应。
+  WB 输出补充总线异常后的提交包，错误访问不写寄存器，年轻 MEM 不产生副作用。
+- IF 携带取指错误及 PC；D1 优先保留访问错误。FENCE/FENCE.I 在 D1 序列化，
+  排空旧访存后从 WB 顺序 PC 恢复；FENCE.I 清除旧 BTB/PHT 与待训练项。
+- 新增三个 SoC package（无函数）、地址译码和错误从设备；DDR 默认为关闭。
+  TCM、外设及中断尚未接入，不能把 S0 说成完整 SoC。
+- 新增地址/错误握手单元与统一内存整核测试，覆盖延迟写响应、三类访问错误、
+  阻止年轻 Store、自修改代码及已训练的旧 BTB；同步旧 TB 的新接口与 Store ack。
+- rhbyv 最终 RTL 回归：双位宽各 41 unit PASS、15 directed PASS / 1 SKIP；
+  ISA RV32 58 PASS、RV64 78 PASS，各 SKIP fence_i、ma_data，FAIL 0；
+  六后端矩阵分别 78/108 PASS，C smoke 为 3317/358 周期。
+- CoreMark m0d0、BTB64，固定 RV32 32 迭代、RV64 28 迭代：
+  performance 分别 11045355/10854767 ticks，2.897145/2.579512 CoreMark/MHz；
+  performance/validation CRC 均正确，与 S0 修改前的同参数基线完全一致。
+- hgb 同步后的 vsrc、tb、scripts、benchmark 与已测 rhbyv 快照逐目录比较一致；
+  本轮未重复声称在 hgb 独立执行完整回归。未执行 FPGA 综合、时序或上板。
+- 同步接口规范、硬件路线、目录和握手说明；README 功能简介更新暂被自动审核阻止，
+  已请求维护者明确确认，尚未修改 README。
+
 ## 2026-09-27（Asia/Shanghai）— MDU 跨级实例与 MEM 内部拼包
 
 - 以维护者修改并验证的 rhbyv 工作区为硬件同步来源；不在 package 中定义函数。

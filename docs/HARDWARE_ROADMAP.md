@@ -26,14 +26,15 @@ ready-valid 存储器协议。
   MDU 请求被接收后将指令元数据送入 EX/MEM。
 - MEM 发射一次 Load/Store 请求，或将寄存的 MDU 结果与元数据汇合；
   请求未 ready 或运算结果未就绪时保持流水。
-- WB 接收 Load 响应，作为 GPR/CSR、计数器和 Trap 的架构提交点。
+- WB 接收 Load/Store 完成响应，作为 GPR/CSR、计数器和 Trap 的架构提交点。
 - 同步异常在发现时清除年轻指令，携带 metadata 到 WB 后精确提交。
 - JAL 只训练 BTB；JALR 训练 BTB；条件分支训练 BTB、PHT 和 GHR。
 
 当前 RTL 支持 RV32IM/RV64IM、六种 Zicsr、ECALL、EBREAK、MRET、机器模式同步异常、
 `mstatus/misa/mtvec/mscratch/mepc/mcause/mtval/mcycle/minstret`；RV32 还可通过
-`mcycleh/minstreth` 原子读取完整 64 位计数。FENCE 在当前
-单核无 Cache 平台中按无副作用指令处理；FENCE.I 尚无真实 I/D 同步结构。
+`mcycleh/minstreth` 配合高低高重读获取完整 64 位计数。FENCE/FENCE.I 已实现
+序列化、旧访存排空与顺序 PC 恢复；FENCE.I 另清除旧预测并丢弃旧取指响应。
+统一地址存储的定向测试已覆盖自修改代码，完整 SoC/TCM 接入留待下一步。
 
 ## SystemVerilog 规则
 
@@ -161,6 +162,14 @@ RV32 58/58、RV64 78/78，各明确跳过 `fence_i` 与 `ma_data`。六种 MDU �
 默认 m0d0、BTB 64，固定同一迭代数对比：RV32 32 次迭代/11045355 ticks，
 `2.897145 CoreMark/MHz`；RV64 28 次迭代/10854767 ticks，
 `2.579512 CoreMark/MHz`。这是仿真周期效率，FPGA 时序与板级频率仍待测量。
+
+## 无 Cache SoC：S0 → S2
+
+- S0：读写完成响应、访问大小与错误、FENCE/FENCE.I 和物理地址表；见
+  [SoC 访存契约](SOC_BUS_CONTRACT.md)。
+- S1：Boot ROM、I/D-TCM、路由和统一存储器 CoreMark 仿真。
+- S2：两 UART、机器/通用 Timer 各一、三 GPIO、机器中断与外设验证。
+- S3：DDR 桥与 DMA；S4：盘古 IP/约束和上板。各步骤独立交接。
 
 ## 阶段 C：C 扩展
 

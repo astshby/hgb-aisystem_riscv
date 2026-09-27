@@ -9,15 +9,18 @@ module core (
     input  logic                              imem_req_ready,
     input  logic                              imem_rsp_valid,
     input  logic [31:0]                       imem_rsp_data,
+    input  logic                              imem_rsp_error,
     output logic                              imem_rsp_ready,
     output logic                              dmem_req_valid,
     output logic                              dmem_req_write,
+    output core_types_pkg::mem_size_e         dmem_req_size,
     output logic [core_config_pkg::XLEN-1:0]  dmem_req_addr,
     output logic [core_config_pkg::XLEN-1:0]  dmem_req_wdata,
     output logic [core_config_pkg::DBUS_BYTES-1:0] dmem_req_wstrb,
     input  logic                              dmem_req_ready,
     input  logic                              dmem_rsp_valid,
     input  logic [core_config_pkg::XLEN-1:0]  dmem_rsp_rdata,
+    input  logic                              dmem_rsp_error,
     output logic                              dmem_rsp_ready,
     // commit 用于退休统计、差分测试和波形调试。
     output logic                              commit_valid,
@@ -45,6 +48,7 @@ module core (
     d2_ex_t d2_packet;
     ex_mem_t ex_packet;
     mem_wb_t mem_packet;
+    mem_wb_t commit_packet; // WB 补充总线异常后，交给 Trap 和架构提交。
 
     // 预测、重定向与错误路径清理。
     pred_info_t prediction;
@@ -58,6 +62,7 @@ module core (
     pred_update_t ex_update;
     pred_update_t predictor_update;
     logic predictor_overflow;
+    logic predictor_reset;
     logic d1_flush;
 
     // GPR 读写和前递。
@@ -123,10 +128,14 @@ module core (
         ex_update.valid = ex_update_raw.valid && (pipeline_actions.ex_mem == PIPE_ADVANCE);
     end
 
+    // FENCE.I 同时清除旧代码的 BTB/PHT 状态，避免代码改写后继续沿旧预测取指。
+    assign predictor_reset = rst || (commit_valid && !commit_exception &&
+                                    (commit_packet.uop.sys_op == SYS_FENCE_I));
+
     // 预测器裁决
     predictor_update_arbiter u_predictor_update_arbiter (
         .clk,
-        .rst,
+        .rst(predictor_reset),
         .d1_flush,
         .d1_update,
         .ex_update,
@@ -137,7 +146,7 @@ module core (
     // 分支预测器
     predictor u_predictor (
         .clk,
-        .rst,
+        .rst(predictor_reset),
         .lookup_pc(imem_req_addr),
         .prediction,
         .update(predictor_update)
@@ -153,7 +162,7 @@ module core (
 `endif
 
     // 各功能单元与流水级连线。
-    // WB Trap/MRET 正常完成序列化；更老的 D1/EX 控制流重定向取消错误路径序列化。
+    // WB Trap/MRET/FENCE 正常完成序列化；更老的 D1/EX 控制流重定向取消错误路径序列化。
     serialize_controller u_serialize_controller (
         .clk,
         .rst,
@@ -178,6 +187,7 @@ module core (
         .imem_req_ready,
         .imem_rsp_valid,
         .imem_rsp_data,
+        .imem_rsp_error,
         .imem_rsp_ready
     );
 
@@ -277,6 +287,7 @@ module core (
         .result_stall(mem_result_stall),
         .dmem_req_valid,
         .dmem_req_write,
+        .dmem_req_size,
         .dmem_req_addr,
         .dmem_req_wdata,
         .dmem_req_wstrb,
@@ -290,6 +301,8 @@ module core (
         .in_packet(mem_wb_q),
         .dmem_rsp_valid,
         .dmem_rsp_rdata,
+        .dmem_rsp_error,
+        .commit_packet,
         .dmem_rsp_ready,
         .wait_for_response(wb_wait),
         .gpr_write(wb_gpr_write),
@@ -304,7 +317,7 @@ module core (
     );
 
     trap_controller u_trap_controller (
-        .commit_packet(mem_wb_q),
+        .commit_packet,
         .commit_valid,
         .mtvec,
         .mepc,

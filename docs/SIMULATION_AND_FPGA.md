@@ -43,7 +43,7 @@ Core 与存储器的时序契约详见 [BRAM、Cache 与存储器握手](underst
 | `make riscv-tests XLEN=32` | 编译并运行 A4+B 适用的 MI/UI/UM 回归；不属于 `make test` |
 | `make benchmark-smoke XLEN=32` | 验证裸机 C、硬件 M、宽整数 helper 和 64 位周期读取 |
 | `make coremark XLEN=32` | 执行 CoreMark 校准、performance 与 validation；不属于 `make test` |
-| `make mdu-backends XLEN=32` | 先运行正式 ISA 回归，再运行六种 MDU 配置各 3 项 M 整核测试和全部 UM |
+| `make mdu-backends XLEN=32` | 先运行正式 ISA 回归，再运行六种 MDU 配置各 5 项 M 整核测试和全部 UM |
 | `make vivado-project XLEN=32` | 创建 Zynq-7020 Vivado 工程框架 |
 | `make clean` | 删除 `build/`、`logs/` 和 `vivado-workspace/` |
 
@@ -62,10 +62,12 @@ make mdu-backends XLEN=32
 make mdu-backends XLEN=64
 ```
 
-当前两种 XLEN 各 40 项 unit PASS，directed 各 14 PASS、1 非适用位宽 SKIP。
+当前两种 XLEN 各 41 项 unit PASS，directed 各 15 PASS、1 非适用位宽 SKIP。
 unit 包含全部六种 MDU 配置的算术/握手测试、8 位穷举和独立 SRT QDS/在线转换测试。
 MDU 整核矩阵另存于 `logs/mdu-matrix-rv<XLEN>/`；构建位于
 `build/verilator/mdu-matrix-rv<XLEN>/m<MUL_IMPL>d<DIV_IMPL>/`。
+
+SoC 访存基础测试已纳入标准回归，接口见 [SoC 访存契约](SOC_BUS_CONTRACT.md)。
 
 ## 单元与整核测试
 

@@ -16,7 +16,8 @@ fire = valid && ready
 
 - `valid=1`：发送方提供的内容有效。
 - `ready=1`：接收方当前可以接收。
-- `valid=1, ready=0`：发送方必须保持 `valid` 和 payload 不变。
+- `valid=1, ready=0`：响应方必须保持 `valid` 和 payload 不变；请求方在仍发出
+  同一请求期间保持载荷。Core IF 允许在未被接受前因重定向撤回请求，不能直接当 AXI 主端口。
 - `ready=1, valid=0`：接收方空闲，但当前没有数据。
 
 `ready` 不表示数据已经返回。例如 `imem_req_ready=1` 只表示存储器接受了 PC，
@@ -88,12 +89,16 @@ use     D2      bubble    EX（WB forward）
 两种等待必须区分：
 
 - `mem_request_stall`：请求尚未被 DMEM/Cache 接受，`EX/MEM` 保持请求内容。
-- `wb_wait`：Load 请求已接受但响应未返回，`MEM/WB` 保存 metadata，顺序流水线等待。
+- `wb_wait`：Load/Store 请求已接受但响应未返回，`MEM/WB` 保存 metadata，顺序流水线等待。
 
 D-Cache hit 可在 Load 到达 WB 时给出响应；miss 则先接受请求并执行 refill，通过
-`wb_wait` 延长等待。当前 Store 在请求被接受后进入 WB，不等待返回数据，因此 Cache
-在拉高 `req_ready` 后必须负责保存并最终完成写请求。未来若需要总线错误或精确 Store
-异常，应增加 completion/ack 或 Store buffer。
+`wb_wait` 延长等待。Store 现在也在 WB 等待一次完成响应；请求被接收只表示
+从端取得事务，不能提前宣称写入完成。两种响应均可携带错误，WB 会补充精确异常，
+禁止年轻 MEM 发请求，并抑制错误 Load 写回。
+
+FENCE 排空旧访存再恢复顺序执行；FENCE.I 额外丢弃旧取指和旧预测。
+取指错误随 IF 请求 PC 传播；被重定向杀死的取指响应即使报错也不能进入 Trap。
+详细地址、宽度、错误与复位契约见 [SoC 访存契约](../SOC_BUS_CONTRACT.md)。
 
 ## FPGA Cache 结构
 
@@ -112,8 +117,8 @@ transaction ID、MSHR 和新的顺序提交设计。
 
 ## 波形检查要点
 
-- `req_valid && !req_ready` 时，请求地址和 payload 必须保持。
+- 未被接受的同一请求保持地址与 payload；IF 重定向撤回不等于取消已接受事务。
 - `rsp_valid && !rsp_ready` 时，响应数据必须保持。
 - IF redirect 后，旧响应可以 fire，但不能生成有效 `out_packet`。
 - 普通 Load hit 后的无关指令应连续推进；load-use 只产生必要的一个 bubble。
-- miss 时应保持 `MEM/WB` 中的 Load，不得重复发送同一请求。
+- 读写响应等待时保持 `MEM/WB`，不得重复发送同一请求。

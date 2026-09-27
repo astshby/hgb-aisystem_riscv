@@ -46,6 +46,10 @@ module tb_core_m_wait;
     int retired = 0;
 
     always #5 clk = ~clk;
+    logic imem_rsp_error = 1'b0;
+    logic dmem_rsp_error = 1'b0;
+    mem_size_e dmem_req_size;
+
     core dut (.*);
     sim_imem #(.DEPTH_WORDS(32)) u_imem (
         .clk, .rst,
@@ -90,6 +94,8 @@ module tb_core_m_wait;
                 store_delay_q <= store_delay_q + 1;
             if (dmem_req_valid && dmem_req_ready) begin
                 if (dmem_req_write) begin
+                    dmem_rsp_valid <= 1'b1;
+                    dmem_rsp_rdata <= '0;
                     stores <= stores + 1;
                     store_delay_q <= 0;
                     assert (dmem_req_wstrb[3:0] == 4'b1111)

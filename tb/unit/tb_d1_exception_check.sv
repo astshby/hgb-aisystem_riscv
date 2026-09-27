@@ -64,6 +64,14 @@ module tb_d1_exception_check;
         #1;
         assert (!exception.valid) else $fatal(1, "aligned JAL target");
 
+        // 无效返回数据可以同时译成 illegal，但必须优先报告取指访问错误。
+        in_packet.exc.valid = 1'b1;
+        in_packet.exc.cause = EXC_INST_ACCESS_FAULT;
+        in_packet.exc.tval = in_packet.pc;
+        uop.illegal = 1'b1;
+        #1;
+        assert (exception.cause == EXC_INST_ACCESS_FAULT && exception.tval == in_packet.pc)
+            else $fatal(1, "fetch fault lost to decoder");
         $display("PASS tb_d1_exception_check RV%0d", core_config_pkg::XLEN);
         $finish;
     end

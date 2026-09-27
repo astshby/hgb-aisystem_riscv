@@ -11,6 +11,7 @@ module mem_stage (
     output logic                              result_stall, // M 运算结果尚未返回
     output logic                              dmem_req_valid,
     output logic                              dmem_req_write,
+    output core_types_pkg::mem_size_e         dmem_req_size,
     output core_types_pkg::xlen_t             dmem_req_addr,
     output core_types_pkg::xlen_t             dmem_req_wdata,
     output logic [core_config_pkg::DBUS_BYTES-1:0] dmem_req_wstrb,
@@ -55,6 +56,7 @@ module mem_stage (
                          !mdu_packet.exc.valid;
         dmem_req_valid = issue_enable && memory_request;
         dmem_req_write = mdu_packet.uop.mem_write;
+        dmem_req_size = mdu_packet.uop.mem_size;
         dmem_req_addr = mdu_packet.result;
         dmem_req_wdata = store_wdata;
         dmem_req_wstrb = store_wstrb;

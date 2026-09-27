@@ -44,6 +44,10 @@ module tb_core_cache_wait;
 
     always #5 clk = ~clk;
 
+    logic imem_rsp_error = 1'b0;
+    logic dmem_rsp_error = 1'b0;
+    mem_size_e dmem_req_size;
+
     core dut (.*);
 
     sim_imem #(.DEPTH_WORDS(32)) u_imem (

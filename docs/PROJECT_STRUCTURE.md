@@ -32,6 +32,8 @@ hgb-aisystem_riscv/
 | `pkg/riscv_priv_pkg.sv` | MRET、机器 CSR、异常与中断编号 |
 | `pkg/core_types_pkg.sv` | uOp、执行操作和寄存器地址类型 |
 | `pkg/pipeline_pkg.sv` | 流水包、异常、重定向、预测更新、前递和流水动作 |
+| `pkg/soc_config_pkg.sv`、`soc_addr_pkg.sv` | SoC 容量参数和统一物理地址表 |
+| `pkg/bus_types_pkg.sv` | 本地请求/响应、目标与错误枚举，无函数 |
 
 ### 可移植 Core
 
@@ -47,8 +49,13 @@ hgb-aisystem_riscv/
 | `lsu/` | Load/Store 字节通道、MEM 请求发射；mem_stage 内部实例化 mem_mdu 拼包运算结果 |
 | `csr/` | CSR 运算、访问检查、WARL、旁路和状态寄存器 |
 | `control/` | load-use、MDU 等待、流水事件仲裁和异常序列化 |
-| `writeback/` | Load 响应、GPR/CSR 提交、Trap/MRET 重定向 |
+| `writeback/` | 读写响应、访问错误、GPR/CSR 提交、Trap/MRET/FENCE 重定向 |
 | `common/` | RegFile 等跨功能域基础模块 |
+
+### 可移植 SoC
+
+`vsrc/soc/bus/` 提供地址检查和错误从设备。TCM 与外设尚未接入；
+接口定义见 [SoC 访存契约](SOC_BUS_CONTRACT.md)。
 
 ### 仿真和 FPGA Wrapper
 
@@ -58,8 +65,8 @@ hgb-aisystem_riscv/
 
 ## `tb/`
 
-- `unit/`：当前 40 项，包含 MEM 结果拼包、六种 MDU 配置、8 位算法穷举与 SRT 组件验证。
-- `core/`：15 项短程序流程，每种 XLEN 为 14 PASS、1 非适用位宽 SKIP；覆盖基础/M 指令、访存等待、MDU 前递与寄存边界、预测、CSR、Trap 和序列化取消。
+- `unit/`：当前 41 项，包含 MEM 结果拼包、六种 MDU 配置、8 位算法穷举与 SRT 组件验证。
+- `core/`：16 项短程序流程，每种 XLEN 为 15 PASS、1 非适用位宽 SKIP；覆盖基础/M 指令、访存等待、MDU 前递与寄存边界、预测、CSR、Trap 和序列化取消。
 - `benchmark/`：运行 ELF 镜像的长程序 harness，被动镜像字符 Store 并监视 `tohost`。
 - `common/rv_asm_pkg.sv`：为整核定向测试生成具名 32 位指令编码。
 - `common/muldiv_checker.sv`：乘法、除法和统一 MDU 共用的独立算术/协议参考检查器。

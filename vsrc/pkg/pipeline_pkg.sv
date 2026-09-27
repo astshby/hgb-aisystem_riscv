@@ -48,7 +48,7 @@ package pipeline_pkg;
 
     // 流水线重定向信息原因, 用于指示流水线需要跳转到新的PC
     typedef enum logic [2:0] {
-        REDIR_NONE, REDIR_D1_JAL, REDIR_EX_BRANCH, REDIR_TRAP, REDIR_MRET
+        REDIR_NONE, REDIR_D1_JAL, REDIR_EX_BRANCH, REDIR_TRAP, REDIR_MRET, REDIR_FENCE
     } redirect_reason_e;
 
     // 重定向信息包
@@ -81,6 +81,7 @@ package pipeline_pkg;
         xlen_t       seq_pc;
         logic [31:0] inst;
         pred_info_t  pred;
+        exception_t  exc; // 取指错误随请求 PC 传播；被重定向杀死的响应不进入流水。
     } if_d1_t;
 
     typedef struct packed {

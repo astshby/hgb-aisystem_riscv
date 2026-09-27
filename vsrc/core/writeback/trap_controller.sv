@@ -36,6 +36,12 @@ module trap_controller (
             redirect.valid = 1'b1;
             redirect.pc = mepc;
             redirect.reason = REDIR_MRET;
+        end else if (retire_valid && ((commit_packet.uop.sys_op == SYS_FENCE) ||
+                                     (commit_packet.uop.sys_op == SYS_FENCE_I))) begin
+            // 单条在途数据访问已排空；重新取下一条指令，并丢弃 IF 中的旧响应。
+            redirect.valid = 1'b1;
+            redirect.pc = commit_packet.seq_pc;
+            redirect.reason = REDIR_FENCE;
         end
     end
 endmodule

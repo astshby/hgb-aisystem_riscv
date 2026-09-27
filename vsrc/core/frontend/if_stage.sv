@@ -15,6 +15,7 @@ module if_stage (
     input  logic                              imem_req_ready,
     input  logic                              imem_rsp_valid,
     input  logic [31:0]                       imem_rsp_data,
+    input  logic                              imem_rsp_error,
     output logic                              imem_rsp_ready
 );
     import core_config_pkg::*;
@@ -62,6 +63,12 @@ module if_stage (
         response_packet = request_q;
         response_packet.inst = imem_rsp_data;
         response_packet.valid = response_usable;
+        response_packet.exc = '0;
+        if (imem_rsp_error) begin
+            response_packet.exc.valid = 1'b1;
+            response_packet.exc.cause = riscv_priv_pkg::EXC_INST_ACCESS_FAULT;
+            response_packet.exc.tval = request_q.pc;
+        end
     end
 
     // 输出选择：buffer 优先，否则允许新响应直接送往 D1。
