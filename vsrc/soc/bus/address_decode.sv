@@ -1,6 +1,6 @@
 // Module: address_decode
 // Description: Decodes implemented ranges and validates access size and region permissions.
-// 首版无 MMU/Cache；完整访问必须落在同一区间，未实现地址不回绕到 RAM 低位。
+// 无 MMU；缓存和互连共用完整地址校验，访问须落在同一区间，不能回绕到 RAM 低位。
 module address_decode #(
     parameter int unsigned DDR_BYTES = 0
 ) (

@@ -31,7 +31,9 @@ module core (
     output logic [core_config_pkg::GPR_ADDR_W-1:0] commit_rd,
     output logic                              commit_rd_we,
     output logic [core_config_pkg::XLEN-1:0]  commit_rd_data,
-    output logic                              commit_exception
+    output logic                              commit_exception,
+    // 仅在无异常 FENCE.I 退休时失效外部指令缓存；普通 FENCE 不触发。
+    output logic                              fence_i_commit
 );
     import core_config_pkg::*;
     import core_types_pkg::*;
@@ -134,8 +136,9 @@ module core (
     end
 
     // FENCE.I 同时清除旧代码的 BTB/PHT 状态，避免代码改写后继续沿旧预测取指。
-    assign predictor_reset = rst || (commit_valid && !commit_exception &&
-                                    (commit_packet.uop.sys_op == SYS_FENCE_I));
+    assign fence_i_commit = commit_valid && !commit_exception &&
+                            (commit_packet.uop.sys_op == SYS_FENCE_I);
+    assign predictor_reset = rst || fence_i_commit;
 
     // 预测器裁决
     predictor_update_arbiter u_predictor_update_arbiter (

@@ -1,4 +1,4 @@
-# 无 Cache SoC 与外设接口
+# SoC 与外设接口
 
 ## 实现范围与层次
 
@@ -6,7 +6,8 @@
 `soc_peripherals`。Core 保持六级，不包含 BRAM 或 MMIO 设备。
 外设采用可移植 RTL，尚未完成厂商综合、资源/时序检查和板级连接。
 DMA 已实现；外存仅有可配置的本地端口和仿真 AXI RAM，尚无板级 DDR 控制器。
-Cache、MMU、S/U 模式、WFI 不在本版范围。
+DDR 两路 I$/D$ 已接入，MMIO/TCM 保持旁路。
+MMU、S/U 模式、WFI 不在本版范围；Cache 契约见 [访存接口](SOC_BUS_CONTRACT.md)。
 
 地址、权限和错误契约见 [SoC 访存契约](SOC_BUS_CONTRACT.md)。
 普通 MMIO 仅接受对齐 32 位访问，包括 RV64；不自动拆分有副作用的 LD/SD。
@@ -146,7 +147,22 @@ MRET 恢复 MIE/MPIE 并从 mepc 继续。mtvec 仍仅支持 Direct 模式。
 
 ## SoC 信息与验证入口
 
-`0x10040000` 只读：偏移 0 为 XLEN，4 为 CLOCK_HZ，8/12 为 I/D-TCM 字节数。
+系统寄存器基址 `0x10040000`，仅接受对齐 32 位访问：
+
+| 偏移 | 寄存器 | 语义 |
+|---|---|---|
+| `0x00/04/08/0c` | XLEN/CLOCK_HZ/ITCM_BYTES/DTCM_BYTES | 原有只读信息 |
+| `0x20` | DCACHE_INVALIDATE | 写 bit 0=1 全失效，读恒 0；零值/零掩码无副作用 |
+| `0x24` | DCACHE_ENABLED | 只读 bit 0：D$ 开关开启且 DDR_BYTES 非零 |
+| `0x28/2c` | DCACHE_BYTES/LINE_BYTES | 只读配置容量，默认 4096/32 |
+
+维护寄存器有效写掩码中的保留位非零返回 SLVERR，不触发维护；写只读寄存器报错。
+命令脉冲寄存一拍，清 valid 的沿不晚于该写响应的 CPU 消费沿。响应反压不会重复触发。
+这是项目自定义 MMIO 协议，不是 Zicbom 或普通 FENCE 的隐藏行为。
+
+DMA 完成或报错后，CPU 读取可能被 DMA 修改的 DDR 前须写此命令；错误也可能已有
+部分写入。DMA 工作时不得访问或修改交接的缓存行。D$ 为写穿透，无 dirty/clean；
+FENCE.I 仅负责代码可见性，不代替 D$ 维护。
 CLOCK_HZ 是平台参数，不是测出的 FPGA Fmax。
 
 `make soc-lint`、`soc-test`、`soc-software`、`soc-smoke`、

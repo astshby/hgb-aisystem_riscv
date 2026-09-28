@@ -7,6 +7,9 @@ if [[ "${SOC:-0}" == "1" ]]; then
     if [[ "${SOC_DDR_BYTES:-0}" != 0 ]]; then
         config="${config}-ddr${SOC_DDR_BYTES}"
     fi
+    if [[ "${SOC_DCACHE_ENABLE:-1}" != 1 ]]; then
+        config="${config}-dcache${SOC_DCACHE_ENABLE}"
+    fi
     bench_top=tb_soc_benchmark
     bench_tb=tb/soc/tb_soc_benchmark.sv
     bench_files=scripts/soc_files.f

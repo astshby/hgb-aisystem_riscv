@@ -17,4 +17,10 @@ vsrc/soc/dma/dma_engine.sv
 vsrc/soc/dma/dma_regs.sv
 vsrc/soc/dma/dma_controller.sv
 vsrc/soc/peripheral/soc_peripherals.sv
+vsrc/soc/cache/cache_port.sv
+vsrc/soc/cache/cache_data_array.sv
+vsrc/soc/cache/cache_meta_array.sv
+vsrc/soc/cache/cache_refill.sv
+vsrc/soc/cache/icache.sv
+vsrc/soc/cache/dcache.sv
 vsrc/soc/soc_top.sv

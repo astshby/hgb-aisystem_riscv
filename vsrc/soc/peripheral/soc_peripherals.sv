@@ -2,6 +2,9 @@
 // Description: Portable MMIO endpoints and single-hart interrupt aggregation.
 module soc_peripherals #(
     parameter int unsigned DDR_BYTES = 0,
+    parameter bit DCACHE_ENABLE = 1'b1,
+    parameter int unsigned DCACHE_BYTES = 4096,
+    parameter int unsigned DCACHE_LINE_BYTES = 32,
     parameter logic [31:0] CLOCK_HZ = 50000000,
     parameter logic [31:0] UART_DIVISOR = 434
 ) (
@@ -11,6 +14,7 @@ module soc_peripherals #(
     input logic [31:0] gpio_in [3],
     output logic [31:0] gpio_out [3], gpio_oe [3],
     output logic irq_software, irq_timer, irq_external,
+    output logic dcache_invalidate,
     output logic dma_req_valid,
     input logic dma_req_ready,
     output bus_types_pkg::bus_req_t dma_request,
@@ -66,10 +70,11 @@ module soc_peripherals #(
         .master_request(dma_request), .master_rsp_valid(dma_rsp_valid),
         .master_rsp_ready(dma_rsp_ready), .master_response(dma_response)
     );
-    soc_info #(.CLOCK_HZ(CLOCK_HZ)) u_info (
+    soc_info #(.CLOCK_HZ(CLOCK_HZ), .DCACHE_ENABLE(DCACHE_ENABLE && DDR_BYTES != 0),
+               .DCACHE_BYTES(DCACHE_BYTES), .DCACHE_LINE_BYTES(DCACHE_LINE_BYTES)) u_info (
         .clk, .rst, .req_valid(s_req_valid[13]), .req_ready(s_req_ready[13]),
         .request(s_request[13]), .rsp_valid(s_rsp_valid[13]),
-        .rsp_ready(s_rsp_ready[13]), .response(s_response[13])
+        .rsp_ready(s_rsp_ready[13]), .response(s_response[13]), .dcache_invalidate
     );
 
 endmodule

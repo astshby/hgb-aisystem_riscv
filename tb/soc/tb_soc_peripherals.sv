@@ -13,6 +13,9 @@ module tb_soc_peripherals;
     logic [31:0] gpio_in [3] = '{default:'0};
     logic [31:0] gpio_out [3], gpio_oe [3];
     logic irq_software, irq_timer, irq_external;
+    logic dcache_invalidate;
+    int invalidations = 0;
+    always_ff @(posedge clk) if (!rst && dcache_invalidate) invalidations <= invalidations + 1;
     logic [14:4] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready;
     bus_req_t s_request [4:14], request;
     bus_rsp_t s_response [4:14], response;
@@ -36,7 +39,7 @@ module tb_soc_peripherals;
     assign s_response[14] = '0;
     soc_peripherals #(.UART_DIVISOR(8)) dut (
         .clk, .rst, .uart_rx, .uart_tx, .gpio_in, .gpio_out, .gpio_oe,
-        .irq_software, .irq_timer, .irq_external,
+        .irq_software, .irq_timer, .irq_external, .dcache_invalidate,
         .dma_req_valid, .dma_req_ready, .dma_request,
         .dma_rsp_valid, .dma_rsp_ready, .dma_response,
         .s_req_valid(s_req_valid[13:4]), .s_req_ready(s_req_ready[13:4]),
@@ -246,6 +249,24 @@ module tb_soc_peripherals;
         rd(SOC_BASE, value);
         assert (value == XLEN) else $fatal(1, "SoC XLEN info");
         wr(SOC_BASE, 1, 4'hf, BUS_SLVERR);
+        rd(SOC_BASE + 32'h24, value);
+        assert (value == 0) else $fatal(1, "DDR absent must report no active D-cache");
+        rd(SOC_BASE + 32'h28, value);
+        assert (value == 4096) else $fatal(1, "D-cache capacity");
+        rd(SOC_BASE + 32'h2c, value);
+        assert (value == 32) else $fatal(1, "D-cache line size");
+        begin
+            logic [63:0] ignored;
+            transfer(SOC_BASE + 32'h20, 1, 1, MEM_WORD, 8'hf, BUS_OK, ignored, 6);
+        end
+        assert (invalidations == 1) else $fatal(1, "invalidate repeated while MMIO response held");
+        rd(SOC_BASE + 32'h20, value);
+        assert (value == 0) else $fatal(1, "invalidate command is not persistent state");
+        wr(SOC_BASE + 32'h20, 1, 0);
+        wr(SOC_BASE + 32'h20, 0);
+        wr(SOC_BASE + 32'h20, 2, 4'hf, BUS_SLVERR);
+        wr(SOC_BASE + 32'h24, 1, 4'hf, BUS_SLVERR);
+        assert (invalidations == 1) else $fatal(1, "masked/invalid write triggered maintenance");
         $display("PASS tb_soc_peripherals RV%0d transfers=%0d", XLEN, checks);
         $finish;
     end

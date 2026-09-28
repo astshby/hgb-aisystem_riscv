@@ -4,11 +4,11 @@
 
 本项目按“可移植 Core、仿真平台、FPGA 平台”分层。当前 A5 基线加 B 阶段基础 M，
 已完成六级 RV32IM/RV64IM、Zicsr、机器模式同步异常/中断、裸机 C 与 CoreMark 仿真闭环；
-可移植 SoC 已含 TCM、UART/Timer/GPIO。板级 IP、Cache、C 扩展和操作系统支持仍待实现。平台目标为
+可移植 SoC 已含 TCM、UART/Timer/GPIO。已接入 DDR 两路 I$/D$；板级 IP、C 扩展和操作系统支持仍待实现。平台目标为
 Zynq-7020 和紫光同创盘古 676-200K Pro，详见 [平台适配](PLATFORM_ADAPTATION.md)。
 
 ```text
-hgb-aisystem_riscv/
+rhbyv-cpu-forlinux/
 ├── vsrc/          # SystemVerilog RTL 与仿真模型
 ├── tb/            # 单元、整核和上游 ISA 测试适配
 ├── scripts/       # 源码清单、Verilator、工具链和 Vivado 脚本
@@ -54,7 +54,9 @@ hgb-aisystem_riscv/
 
 ### 可移植 SoC
 
-`vsrc/soc/soc_top.sv` 连接 Core、ROM、I/D-TCM、三主端口互连、DMA 和外设集群。
+`vsrc/soc/soc_top.sv` 连接 Core、ROM、I/D-TCM、三主端口互连、I$/D$、DMA 和外设集群。
+`cache/` 分离端口路由、同步数据阵列、tag/LRU、填行和 I$/D$ 控制；仅缓存 DDR，D$ 采用 WT/NWA。
+`common/soc_info.sv` 另提供 D$ 能力查询与全失效命令，便于 DMA 软件交接。
 `bus/` 负责地址、仲裁、错误响应及本地到 AXI4 单拍桥；`memory/` 提供同步 TCM 与启动 ROM；
 `dma/` 包含引擎、MMIO 寄存器和控制封装；`common/` 提供 MMIO 端点与输入同步器；
 `peripheral/` 实现 UART、Timer、GPIO，`interrupt/` 汇聚外部中断。
@@ -70,8 +72,9 @@ hgb-aisystem_riscv/
 ## `tb/`
 
 - `unit/`：当前 42 项，包含 MEM 结果拼包、六种 MDU 配置、8 位算法穷举与 SRT 组件验证。
-- `core/`：17 项短程序流程，每种 XLEN 为 16 PASS、1 非适用位宽 SKIP；覆盖基础/M 指令、访存等待、MDU 前递与寄存边界、预测、CSR、Trap 和序列化取消。
+- `core/`：18 项短程序流程，每种 XLEN 为 17 PASS、1 非适用位宽 SKIP；覆盖基础/M 指令、访存等待、MDU 前递与寄存边界、预测、CSR、Trap 和序列化取消。
 - `soc/`：互连、ROM/TCM、外设、DMA、AXI4 单拍桥与外存模型 TB；SoC 镜像 harness、C 中断/DMA 程序及启动汇编。
+- `cache/`：I$/D$ 各四种配置单测；DDR 循环、CPU/DMA 改码、数据搬运及部分失败维护的 C 测试。
 - `benchmark/`：运行 ELF 镜像的长程序 harness，被动镜像字符 Store 并监视 `tohost`。
 - `common/rv_asm_pkg.sv`：为整核定向测试生成具名 32 位指令编码。
 - `common/muldiv_checker.sv`：乘法、除法和统一 MDU 共用的独立算术/协议参考检查器。
@@ -85,7 +88,8 @@ hgb-aisystem_riscv/
 ## `scripts/`
 
 - `rtl_files.f`：可综合 Core 的有序源码清单。
-- `soc_files.f`：Core 清单加可移植 SoC、DMA、存储器及外设；`make soc-test XLEN=32/64` 验证基础设施。
+- `soc_files.f`：Core 清单加可移植 SoC、Cache、DMA、存储器及外设；`make soc-test XLEN=32/64` 验证基础设施。
+- `verilator/run_cache.sh`：`make cache-test XLEN=32/64` 的 I$/D$ 专项入口。
 - `sim_files.f`：在 Core 上加入 `sim_cpu`。
 - `cpu_files.f`：在 Core 上加入 FPGA wrapper。
 - `verilator/run_unit.sh`：遍历 `tb/unit/tb_*.sv`。
@@ -133,13 +137,10 @@ C++ 编译缓存。`logs/` 保存每个测试的编译和运行输出。它们�
 - `README.md`：项目状态、功能和文档入口。
 - `Makefile`：统一的仿真和 Vivado 命令入口。
 - `AGENTS.md`：注释、审阅、测试、分支和文档同步规则。
-- `docs/COMMIT.md`：阶段变更和精确验证记录。
-- `docs/understand/`：协议与实现链路的学习、解读文档。
-- `docs/understand/MEMORY_HANDSHAKE.md`：Core、BRAM 和未来阻塞式 Cache 的握手约束。
-- `docs/understand/SOFTWARE_TEST_STACK_GUIDE.md`：软件测试从源码到硬件执行、Trap、`tohost` 和判定的完整链路。
-- `docs/understand/COREMARK_AND_PERFORMANCE.md`：CoreMark port、计时、分数及 FPGA 性能指标边界。
-- `docs/understand/M_EXTENSION.md`：MDU 算法、六级接入、反压、取消和验证入口。
 - `docs/PLATFORM_ADAPTATION.md`：Zynq-7020 与盘古 676-200K Pro 的共享契约和平台隔离。
 - `.gitignore`：根级白名单，未列出的顶层内容默认忽略。
 - `.gitattributes`：保留官方 CoreMark 快照原有的行尾格式，不影响其他项目文件检查。
 - `LICENSE`：项目许可证。
+
+阶段修改记录和协议/实现解读仅在协作仓库 `hgb-aisystem_riscv` 的
+`docs/COMMIT.md` 与 `docs/understand/` 中维护，不复制回本硬件仓库。

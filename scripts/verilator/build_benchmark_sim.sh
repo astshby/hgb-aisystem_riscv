@@ -15,7 +15,7 @@ extra_sources=()
 extra_options=()
 if [[ "${SOC:-0}" == "1" ]]; then
     extra_sources+=(tb/soc/axi_memory_model.sv)
-    extra_options+=("-GDDR_BYTES=${SOC_DDR_BYTES:-0}")
+    extra_options+=("-GDDR_BYTES=${SOC_DDR_BYTES:-0}" "-GDCACHE_ENABLE=${SOC_DCACHE_ENABLE:-1}")
 fi
 verilator -Wall -Wno-fatal --assert --timing --binary \
     -DCORE_XLEN="${xlen}" \

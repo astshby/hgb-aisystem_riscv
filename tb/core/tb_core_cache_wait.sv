@@ -48,7 +48,7 @@ module tb_core_cache_wait;
     logic dmem_rsp_error = 1'b0;
     mem_size_e dmem_req_size;
 
-    core dut (.irq_software(1'b0), .irq_timer(1'b0), .irq_external(1'b0), .*);
+    core dut (.fence_i_commit(), .irq_software(1'b0), .irq_timer(1'b0), .irq_external(1'b0), .*);
 
     sim_imem #(.DEPTH_WORDS(32)) u_imem (
         .clk,

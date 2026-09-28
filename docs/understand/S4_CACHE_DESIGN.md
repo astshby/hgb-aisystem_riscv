@@ -1,6 +1,9 @@
 # S4 Cache：Astra 复核与最简实现设计
 
-> 2026-09-28（Asia/Shanghai）。本文件是设计审阅稿，尚未实现 Cache RTL。
+> 2026-09-28（Asia/Shanghai）初始设计；2026-09-29 更新实施状态：
+> 两路 I$/D$ 已实现并接入 SoC；D$ 采用 WT/NWA 与 MMIO 全失效。
+> DMA 数据采用显式维护方案，不限制为固定 uncached pool。见 [D$ 实现解读](DCACHE_IMPLEMENTATION.md)。
+> 实际模块、时序和验收见 [I$ 实现解读](ICACHE_IMPLEMENTATION.md)。
 > 审核基线：rhbyv `b30d8bc`、hgb `f714fba`，两仓均在 `s4/cache`。
 > Astra 独立只读审核后，结合现有总线、流水与测试代码形成以下方案。
 
@@ -101,7 +104,7 @@ commit_valid && !commit_exception &&
 (commit_packet.uop.sys_op == SYS_FENCE_I)
 ```
 
-计划将它命名为 `fence_i_commit` 并从 Core 导出，预测器清除也复用此事件。
+已将它命名为 `fence_i_commit` 并从 Core 导出，预测器清除也复用此事件。
 不重新译码 commit trace，也不从 REDIR_FENCE 推断，因为普通 FENCE 与 FENCE.I
 共用这个重定向原因。各 wrapper 和直接实例化 Core 的 TB 需补齐该端口。
 
@@ -152,7 +155,7 @@ Store hit 时保存命中 way 和原请求，向下游发送原地址、size、�
 DMA DONE/IRQ 也不等于缓存失效。首版 I$ 验收阶段保留 D 通路原状；DMA 写代码
 需先完成，再执行 FENCE.I，并避免 CPU 同时执行或修改该范围。
 
-对后续 D$ 首版，推荐最少硬件的起点：数据共享使用 TCM 或固定、整行对齐的
+对后续 D$ 首版，原设计讨论的最少硬件选项：数据共享使用 TCM 或固定、整行对齐的
 uncached DDR pool。它是现有 DDR 内一个明确物理范围，不建立 cached/uncached
 地址别名；具体 pool 范围由配置与软件布局共同定义。CPU 与 DMA 按缓冲区所有权
 交接，DMA 工作时 CPU 不访问交接的缓存行。
@@ -165,6 +168,9 @@ uncached DDR pool。它是现有 DDR 内一个明确物理范围，不建立 cac
 
 后续写回策略还要求 CPU→DMA 交接前 clean。clean、invalidate 和 flush 的区别可见
 官方 [CMO 规范](https://docs.riscv.org/reference/isa/unpriv/cmo.html)。当前没有实现 Zicbom。
+
+当前选择显式全失效方案，系统寄存器 `0x10040020` 写 1；具体时序、约束和测试见
+[D$ 实现解读](DCACHE_IMPLEMENTATION.md)。上面的 uncached pool 是保留的设计选项，并未实现。
 
 ## 拟议文件职责
 
@@ -205,7 +211,7 @@ FENCE.I、再执行新函数”的覆盖。D$ DMA 用例必须包括目的区已
 RV64 高地址、非整行边界、缓存属性边界和 TCM 原时序。保留缓存开关配置作为对照。
 FPGA 综合、BRAM 映射、时序和上板仍属后续工作，不计入本轮设计审核的测试结果。
 
-## 本次实际变更
+## 初次审核时的变更（历史记录）
 
 本次仅修改 hgb 的审核/设计文档及索引/记录，未修改 RTL、正式 TB、脚本或地址表。
 已重跑双位宽 Core 与 ISA 回归，并运行临时诊断；具体 PASS/SKIP 和发现的失败见

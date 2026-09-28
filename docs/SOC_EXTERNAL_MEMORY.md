@@ -51,10 +51,12 @@ CPU 配置 DMA，等待 ID 7 中断，校验数据，再从 DMA 写入的外存�
   同时对齐时按 XLEN 字搬运。重叠、零长度和越界在启动前拒绝。
 - AXI 仿真 RAM 可注入延迟和读写错误。实板仍需盘古 DDR3 控制器/PHY、时钟复位、
   跨时钟域与真实容量配置，并实测读写反压、错误和时序；Zynq 适配随后进行。
-- S4 Cache 建立之后必须定义 DMA 与 CPU 的一致性维护；在此之前 TCM 和外存是
-  无 Cache 的共享物理内存。进一步的 burst、4 KiB 拆分与吞吐优化不是 S3 保证。
+- 当前 DDR 已有 I$/D$，D$ 为 WT/NWA、无写缓冲。
+  DMA 更新数据后须等 DONE/ERROR，再写 SoC 全失效命令；更新代码还需 FENCE.I。
+  进一步的 burst、4 KiB 拆分与吞吐优化不是 S3 保证。
 
-暂不加入 Cache/MMU。未来 DMA 若写可执行内存，软件须等完成后执行 FENCE.I；
-未来 Cache 一致性需要独立维护协议，不由 AXI4 自动提供。
+I$/D$ 已加入，MMU 尚未实现。一致性不由 AXI4 自动提供。
+`make cache-test XLEN=32/64` 另验 I$/D$ 单元及真实 DDR 循环取指、
+CPU/DMA 修改预热代码后的 FENCE.I、数据交接和部分写错后的 D$ 失效；不把 TCM CoreMark 当作 Cache 性能测试。
 先核实盘古 DDR IP 的数据宽度、用户接口和时钟复位，再做厂商适配；
 Zynq-7020/Vivado 工作流保留，未进行板级实现。

@@ -1,7 +1,8 @@
 // Module: tb_soc_benchmark
 // Description: Runs a bare-metal C image and passively observes console and tohost Stores.
 module tb_soc_benchmark #(
-    parameter int unsigned DDR_BYTES = 0
+    parameter int unsigned DDR_BYTES = 0,
+    parameter bit DCACHE_ENABLE = 1'b1
 );
     timeunit 1ns;
     timeprecision 1ps;
@@ -42,6 +43,7 @@ module tb_soc_benchmark #(
     integer max_cycles;
     integer cycles;
     logic trace_enable;
+    logic [31:0] fault_read_addr = 32'hffffffff, fault_write_addr = 32'hffffffff;
 
     // 成功时先跳出采样循环，统一结束仿真，避免继续执行循环后的超时路径。
     logic completed = 1'b0;
@@ -52,7 +54,7 @@ module tb_soc_benchmark #(
         assign gpio_in[g] = gpio_loopback ? (gpio_out[g] & gpio_oe[g]) : '0;
     end
 
-    soc_top #(.DDR_BYTES(DDR_BYTES)) dut (.*);
+    soc_top #(.DDR_BYTES(DDR_BYTES), .DCACHE_ENABLE(DCACHE_ENABLE)) dut (.*);
     if (DDR_BYTES != 0) begin : g_external
         logic awvalid, awready, awid, awlock, wvalid, wready, wlast;
         logic arvalid, arready, arid, arlock, bvalid, bready, bid, rvalid, rready, rid, rlast;
@@ -75,8 +77,8 @@ module tb_soc_benchmark #(
             .rvalid, .rready, .rid, .rdata, .rresp, .rlast
         );
         axi_memory_model #(.BYTES(DDR_BYTES)) u_external (
-            .clk, .rst, .fault_read_addr(32'hffff_ffff),
-            .fault_write_addr(32'hffff_ffff),
+            .clk, .rst, .fault_read_addr,
+            .fault_write_addr,
             .awvalid, .awready, .awaddr, .awsize,
             .wvalid, .wready, .wdata, .wstrb, .wlast, .bvalid, .bready, .bid, .bresp,
             .arvalid, .arready, .araddr, .arsize,
@@ -92,8 +94,21 @@ module tb_soc_benchmark #(
     // Core 一笔在途的约束保证接收缓冲不会被第二个 I 响应覆盖。
     always @(posedge clk) begin
         if (!rst && dut.m_rsp_valid[0])
-            assert (!dut.fetch_buffer_valid_q)
+            assert (!dut.u_icache.u_port.buffer_valid_q)
                 else $fatal(1, "instruction response buffer overwritten");
+    end
+
+    // Cache 统计来自真实 DDR 取指事务，而非 TCM 软件是否 PASS。
+    integer cache_hits = 0, ddr_fetches = 0, fence_commits = 0;
+    integer dcache_hits = 0, dcache_invalidations = 0;
+    always_ff @(posedge clk) begin
+        if (!rst) begin
+            if (dut.u_icache.touch && !dut.u_icache.install) cache_hits <= cache_hits + 1;
+            if (ddr_req_valid && ddr_req_ready && ddr_request.execute) ddr_fetches <= ddr_fetches + 1;
+            if (dut.u_dcache.touch && !dut.u_dcache.install) dcache_hits <= dcache_hits + 1;
+            if (dut.dcache_invalidate) dcache_invalidations <= dcache_invalidations + 1;
+            if (dut.fence_i_commit) fence_commits <= fence_commits + 1;
+        end
     end
 
     // 输出 Store 仍写入物理 TCM；TB 只把指定地址的字节镜像到仿真日志。
@@ -117,6 +132,8 @@ module tb_soc_benchmark #(
             test_name = "benchmark";
         if (!$value$plusargs("MAX_CYCLES=%d", max_cycles))
             max_cycles = 1000000;
+        void'($value$plusargs("FAULT_READ=%h", fault_read_addr));
+        void'($value$plusargs("FAULT_WRITE=%h", fault_write_addr));
         trace_enable = $test$plusargs("TRACE");
         uart_loopback = $test$plusargs("UART_LOOPBACK");
         gpio_loopback = $test$plusargs("GPIO_LOOPBACK");
@@ -136,6 +153,20 @@ module tb_soc_benchmark #(
                 assert (test_pass)
                     else $fatal(1, "FAIL %s code=%0d pc=%h inst=%h",
                                 test_name, test_code, commit_pc, commit_inst);
+                if ($test$plusargs("CACHE_CHECKS")) begin
+                    assert (cache_hits >= 16 && ddr_fetches >= 24 && fence_commits >= 3)
+                        else $fatal(1, "missing cache coverage hits=%0d reads=%0d fences=%0d",
+                                    cache_hits, ddr_fetches, fence_commits);
+                    $display("CACHE hits=%0d DDR_fetches=%0d FENCE.I=%0d",
+                             cache_hits, ddr_fetches, fence_commits);
+                end
+                if ($test$plusargs("DCACHE_CHECKS")) begin
+                    assert ((!DCACHE_ENABLE || dcache_hits >= 8) && dcache_invalidations >= 2)
+                        else $fatal(1, "missing D-cache coverage hits=%0d invalidations=%0d",
+                                    dcache_hits, dcache_invalidations);
+                    $display("DCACHE enabled=%0d hits=%0d invalidations=%0d",
+                             DCACHE_ENABLE, dcache_hits, dcache_invalidations);
+                end
                 $display("PASS %s RV%0d cycles=%0d", test_name, XLEN, cycles);
                 completed = 1'b1;
                 break;

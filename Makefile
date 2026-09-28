@@ -50,6 +50,10 @@ soc-lint:
 soc-test:
 	bash scripts/verilator/run_soc.sh $(XLEN)
 
+.PHONY: cache-test
+cache-test:
+	bash scripts/verilator/run_cache.sh $(XLEN)
+
 test: lint unit directed
 
 # 先生成并验证正式 ISA 镜像，矩阵再复用 UM 镜像验证全部后端组合。

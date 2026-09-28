@@ -46,6 +46,7 @@ module cpu_top (
         .commit_rd(),
         .commit_rd_we(),
         .commit_rd_data(),
-        .commit_exception()
+        .commit_exception(),
+        .fence_i_commit()
     );
 endmodule

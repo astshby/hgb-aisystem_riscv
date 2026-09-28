@@ -30,7 +30,7 @@ module tb_core_interrupt;
     int delay_q, scenario, cycles, interrupts, traps, stores, irq_started_cycle;
     logic requested, mret_seen, done;
     always #5 clk = ~clk;
-    core dut (.*);
+    core dut (.fence_i_commit(), .*);
     assign imem_req_ready = !imem_rsp_valid || imem_rsp_ready;
     assign dmem_req_ready = !pending_q && (!dmem_rsp_valid || dmem_rsp_ready);
 

@@ -6,7 +6,9 @@
 - [IRQ 撤销与 MINSTRET 修复](CPU_IRQ_COUNTER_FIX.md)：三个缺陷的原因、最小修复、六分支双位宽回归和保留的非对齐访问策略。
 
 - [Cache 接入前的 CPU 整体审核](CORE_ASTRA_REVIEW.md)：Astra 对 pre-SoC 核心与当前接口的复核、已复现问题和测试边界。
-- [S4 Cache 设计复核](S4_CACHE_DESIGN.md)：分阶段两路 I$/D$、FENCE.I、填行错误与 DMA 契约；尚未实现。
+- [S4 Cache 设计复核](S4_CACHE_DESIGN.md)：分阶段两路 I$/D$、FENCE.I、填行错误与 DMA 契约；I$/D$ 已实现，DMA 使用显式 D$ 全失效。
+- [D$ 写穿透与 DMA 数据维护](DCACHE_IMPLEMENTATION.md)：WT/NWA、MMIO 旁路、完成/错误边界及软件所有权交接。
+- [两路 I$ 实现与握手](ICACHE_IMPLEMENTATION.md)：五个模块、请求/响应时序、错误回退、在途失效与 DDR 改码验证。
 - [AXI 外存接入边界](../SOC_EXTERNAL_MEMORY.md)：单拍桥的通道、完成和复位契约。
 - [DMA 搬运、进度与中断](DMA_DATA_PATH.md)：从寄存器启动到读/写完成、错误码和 ID 7 IRQ。
 - [AXI 仿真与真实 DDR3](AXI_DDR_BOUNDARY.md)：区分可综合边界、AXI 桥、仿真 RAM 与板级控制器。

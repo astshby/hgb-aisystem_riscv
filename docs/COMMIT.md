@@ -1,5 +1,75 @@
 # 设计调整记录
 
+## 2026-09-29（Asia/Shanghai）— S4 验收基线
+
+- 用户确认 S4 完成，保存已同步、已双位宽验证的 I$/WT-NWA D$ 基线，再分支到 s5/cache-up。
+- 本次仅整理本地提交，不改 S4 行为；测试结果复用下方 D$ 交付记录与现有日志。
+- main、S2、S3 不变；S5 的写回/写分配、DMA 与维护协议变更另行记录。
+
+## 2026-09-29（Asia/Shanghai）— WT/NWA D$ 与显式 DMA 数据维护
+
+- 在两仓当前 s4/cache 上继续实现，不动 main、S2、S3；保留上一轮 I$ 未提交成果、
+  现有注释和功能分块。Core 流水、load-use、MDU、非对齐异常策略不变。
+- 新增 vsrc/soc/cache/dcache.sv：两路阻塞式，默认 4 KiB/32 B 行。
+  Load 分配填行；Store 全部等待真实下层响应，成功命中按 byte strobe 更新，
+  错误命中失效，写缺失不分配。没有 dirty、Store buffer 或提前 ACK。
+- cache_port 增加数据访问模式；cache_data_array 支持字宽/字节掩码；
+  cache_refill 按 I$ 的 4 B 或 D$ 的 XLEN 填行，失败仍只回退一次原始请求。
+  I$ 算法与 FENCE.I 语义不变。soc_top/soc_peripherals 连接 D$ 与维护信号。
+- soc_info 在既有系统窗口新增 0x20 全失效、0x24 启用状态、0x28/2c 容量/行大小。
+  绝对地址 0x10040020 写 1，读恒 0；命令寄存一拍，失效不晚于写响应消费，
+  反压不重复副作用。DMA 等 DONE/ERROR 后失效再读数据，不限制 DMA 的合法地址，
+  不使用固定 uncached pool。普通 FENCE/FENCE.I 不充当 D$ invalidate。
+- 新增 tb/cache/tb_dcache.sv、dcache_smoke.c、run_dcache_software.sh。
+  更新 Cache runner、benchmark 构建参数/独立目录、SoC harness 的故障注入与计数，
+  外设 TB 验证新寄存器的掩码、非法写和响应反压。修正参数矩阵脚本后逐项核对实际配置。
+- 两仓独立运行 RV32/RV64：Cache 各 11 PASS、0 SKIP（I$/D$ 各 4 配置 + 3 软件）；
+  D$ 四配置检查数 RV32 为 111/111/13/13，RV64 为 112/112/14/14。
+  覆盖原样 Store 载荷、所有宽度/lane、NWA、延迟/错误写、部分副作用、每个填行错误、
+  扩宽失败窄读成功、在途/安装沿失效、旁路交接与协调复位。
+- DDR 软件以 D$ 开/关分别验证 CPU→DMA WT 可见性、预热目的区更新、第二笔 AXI 写错
+  后的部分完成与全失效，并访问独立 DDR 区域与 DMA 竞争；开启各观察 30 hit、2 次维护。
+- 每仓每位宽完整回归：42 unit + 17 directed PASS、1 位宽 SKIP；
+  Core-only ISA 58/58、78/78 PASS，各跳过 fence_i/ma_data；
+  SoC ISA 59/59、79/79 PASS，各仅跳过 ma_data。
+  SoC 模块各 5 PASS（外设 TB 91/93 次传输），外设 C 各 1 PASS，DMA DDR=0/65536 各 2 PASS；
+  Core/SoC C smoke 与 CoreMark performance/validation 均 PASS。
+- TCM/Core-only CoreMark 仍为 RV32 2.897145、RV64 2.579496 CoreMark/MHz，
+  不作为 DDR Cache 性能结论。DDR CoreMark、三主持续压力、完整 mdu-backends 矩阵、
+  BRAM/综合/FPGA 时序未运行；保留既有非致命 lint 告警。
+- 两仓独立更新 README 和维护文档；hgb 新增 understand/DCACHE_IMPLEMENTATION.md，
+  更新 I$ 解读、Cache 设计状态与索引。理解与历史记录不复制到 rhbyv。
+  当前仍是工作区交接，没有 Git commit/push/PR。
+
+## 2026-09-29（Asia/Shanghai）— 两路 I$ 首版与 DDR 改码验证
+
+- 在两仓既有 `s4/cache` 分支实现 I$ 交付，不回改 S2/S3/main；六级流水、load-use、
+  MDU 边界和非对齐异常策略不变。D$ 仍未实现，后续按 WT/NWA 与 DMA 契约推进。
+- 新增 `vsrc/soc/cache/{cache_port,cache_data_array,cache_meta_array,cache_refill,icache}.sv`：
+  默认 4 KiB、两路、32 B 行、同步数据 RAM、一位 LRU；只缓存合法且整行位于 DDR 的取指。
+  RV32/RV64 均发 8 笔 4 B 填行请求，部分失败不安装，按原请求仅回退一次。
+- Core 只导出 `fence_i_commit`；更新 wrappers/TB 接线，SoC 搬迁原 I 响应缓冲至
+  cache_port，保留 TCM 旁路交接和断环。FENCE.I 清 valid，旧填行粘滞 discard 并排空，
+  不复位状态机丢失旧响应；普通 FENCE/分支不失效 I$。保留原注释与功能分块。
+- 新增 `tb/cache/tb_icache.sv`、`icache_smoke.c` 和两个 runner；更新 Makefile、
+  soc_files、SoC harness 的缓冲检查与被动统计。每位宽 Cache 5 PASS、0 SKIP：
+  四种配置单测 + AXI DDR 的分支循环、CPU/DMA 修改预热函数、FENCE.I 集成。
+  单测检查数 RV32 为 59/59/10/10，RV64 为 60/60/11/11；
+  软件每位宽观察 99 hit、40 笔 DDR 取指、4 次 FENCE.I。
+- 两仓均独立执行 RV32/RV64 完整回归：各 42 unit + 17 directed PASS，1 位宽 SKIP；
+  Core-only ISA 为 58/58、78/78 PASS，各 2 SKIP（fence_i、ma_data）；
+  SoC ISA 为 59/59、79/79 PASS，各 1 SKIP（ma_data）。
+  SoC 模块各 5 PASS，外设软件各 1 PASS，DMA 的 DDR=0/65536 各 2 PASS；
+  Core/SoC C smoke、CoreMark performance/validation 均 PASS。
+- 默认 m0d0 的 TCM/Core-only CoreMark 周期成绩未退化：RV32 2.897145、
+  RV64 2.579496 CoreMark/MHz。它们不是 DDR Cache 跑分。
+  未运行 DDR CoreMark、完整 mdu-backends 矩阵、厂商综合、BRAM 映射或上板；
+  lint 存在既有非致命告警，不宣称零告警。
+- 两仓 README 各自更新功能入口，维护硬件目录/契约/规划/工作流；
+  仅 hgb 新增 `understand/ICACHE_IMPLEMENTATION.md` 并更新设计稿与索引。
+  hgb 的 LICENSE、软件路线和两仓 AGENTS 保持不变。当前为工作区交接，
+  尚未 Git commit、push 或创建 PR。
+
 ## 2026-09-29（Asia/Shanghai）— 同步修复 IRQ 撤销与 MINSTRET
 
 - 按用户确认在两仓 TCM/MMIO、完整 AXI/DMA、Cache 三阶段同步同一 Core/TB 修复；
