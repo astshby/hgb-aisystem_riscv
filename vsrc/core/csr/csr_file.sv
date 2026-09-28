@@ -131,7 +131,9 @@ module csr_file (
     always_comb begin
         mcycle_d = mcycle_q + 64'd1;
         minstret_d = minstret_q;
-        if (retire_valid)
+        // RV32 写任一半都替代本指令对整个 MINSTRET 的增量，未写的半部保持原值。
+        if (retire_valid && !(write_valid &&
+            ((write_addr == CSR_MINSTRET) || ((XLEN == 32) && (write_addr == CSR_MINSTRETH)))))
             minstret_d = minstret_q + 64'd1;
 
         if (write_valid) begin

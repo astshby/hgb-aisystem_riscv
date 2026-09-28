@@ -27,7 +27,7 @@ module tb_core_interrupt;
     logic [7:0] memory [2048];
     logic pending_q, pending_error_q;
     xlen_t pending_data_q, expected_pc, saved_pc;
-    int delay_q, scenario, cycles, interrupts, traps, stores;
+    int delay_q, scenario, cycles, interrupts, traps, stores, irq_started_cycle;
     logic requested, mret_seen, done;
     always #5 clk = ~clk;
     core dut (.*);
@@ -118,8 +118,8 @@ module tb_core_interrupt;
                 if (commit_pc == 32)
                     assert (commit_rd_data == 9) else $fatal(1, "MDU result corrupted by IRQ");
                 case (int'(commit_pc))
-                    40: expected_pc = 56;
-                    60: expected_pc = 96;
+                    40: expected_pc = (scenario < 7) ? 56 : 44;
+                    60: expected_pc = (scenario < 7) ? 96 : 64;
                     104: expected_pc = 104;
                     268: begin expected_pc = saved_pc; mret_seen = 1; end
                     default: expected_pc = commit_pc + 4;
@@ -132,7 +132,7 @@ module tb_core_interrupt;
     endtask
 
     initial begin
-        for (scenario = 0; scenario < 7; scenario++) begin
+        for (scenario = 0; scenario < 11; scenario++) begin
             @(negedge clk);
             rst = 1;
             irq_timer = 0;
@@ -158,6 +158,13 @@ module tb_core_interrupt;
             put_inst(96, enc_addi(8, 0, 1));
             put_inst(100, enc_sw(8, 3, 12));
             put_inst(104, enc_jal(0, 0));
+            // 撤销场景必须直线退休，不能让 taken branch 恰好掩盖 IF 丢包。
+            if (scenario >= 7) begin
+                put_inst(40, scenario == 10 ? enc_csrrci(0, CSR_MSTATUS, 8) : nop());
+                put_inst(44, nop());
+                put_inst(60, nop());
+                put_inst(64, nop());
+            end
             put_inst(256, enc_csrrs(10, CSR_MCAUSE, 0));
             put_inst(260, enc_csrrs(11, CSR_MEPC, 0));
             put_inst(264, enc_addi(12, 0, 1));
@@ -173,12 +180,26 @@ module tb_core_interrupt;
                         (scenario == 2 && dut.if_d1_q.valid && dut.if_d1_q.pc == 40) ||
                         (scenario == 3 && dut.if_d1_q.valid && dut.if_d1_q.pc == 60) ||
                         (scenario == 4 && dut.if_d1_q.valid && dut.if_d1_q.pc == 104) ||
-                        (scenario == 5 && dut.wb_wait && dut.mem_wb_q.pc == 36)) begin
+                        (scenario == 5 && dut.wb_wait && dut.mem_wb_q.pc == 36) ||
+                        (scenario == 7 && dut.wb_wait && dut.mem_wb_q.pc == 24) ||
+                        (scenario == 8 && dut.wb_wait && dut.mem_wb_q.pc == 36) ||
+                        (scenario == 9 && dut.mem_result_stall) ||
+                        (scenario == 10 && dut.d2_ex_q.valid && dut.d2_ex_q.pc == 40)) begin
                         irq_timer = 1;
                         requested = 1;
+                        irq_started_cycle = cycles;
                     end
                 end
                 if (interrupts != 0) irq_timer = 0;
+                // IRQ 脉冲在 Load/Store/MDU 排空前撤销；场景 10 保持电平，由 CSR 关闭 MIE。
+                if (scenario >= 7 && scenario <= 9 && requested && cycles > irq_started_cycle)
+                    irq_timer = 0;
+                if (scenario >= 7 && commit_valid && commit_pc == 104) begin
+                    assert (requested && interrupts == 0 && traps == 0 && stores == 2)
+                        else $fatal(1, "withdrawn/masked IRQ lost work scenario=%0d", scenario);
+                    done = 1;
+                    break;
+                end
                 if (scenario == 6 && traps == 1) begin
                     done = 1;
                     break;
@@ -192,7 +213,7 @@ module tb_core_interrupt;
             end
             assert (done) else $fatal(1, "IRQ scenario timeout %0d", scenario);
         end
-        $display("PASS tb_core_interrupt RV%0d scenarios=7", XLEN);
+        $display("PASS tb_core_interrupt RV%0d scenarios=11", XLEN);
         $finish;
     end
 endmodule
