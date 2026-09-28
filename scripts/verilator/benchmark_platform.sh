@@ -4,6 +4,9 @@ bench_tb=tb/benchmark/tb_benchmark.sv
 bench_files=scripts/sim_files.f
 if [[ "${SOC:-0}" == "1" ]]; then
     config="${config}-soc"
+    if [[ "${SOC_DDR_BYTES:-0}" != 0 ]]; then
+        config="${config}-ddr${SOC_DDR_BYTES}"
+    fi
     bench_top=tb_soc_benchmark
     bench_tb=tb/soc/tb_soc_benchmark.sv
     bench_files=scripts/soc_files.f

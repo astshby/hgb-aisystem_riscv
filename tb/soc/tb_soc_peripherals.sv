@@ -25,7 +25,24 @@ module tb_soc_peripherals;
     always #5 clk = ~clk;
     assign uart_rx = loopback ? uart_tx : rx_drive;
     address_decode u_decode (.request, .target, .error);
-    soc_peripherals #(.UART_DIVISOR(8)) dut (.*);
+    logic dma_req_valid, dma_req_ready, dma_rsp_valid, dma_rsp_ready;
+    bus_req_t dma_request;
+    bus_rsp_t dma_response;
+    assign dma_req_ready = 1'b0;
+    assign dma_rsp_valid = 1'b0;
+    assign dma_response = '0;
+    assign s_req_ready[14] = 1'b0;
+    assign s_rsp_valid[14] = 1'b0;
+    assign s_response[14] = '0;
+    soc_peripherals #(.UART_DIVISOR(8)) dut (
+        .clk, .rst, .uart_rx, .uart_tx, .gpio_in, .gpio_out, .gpio_oe,
+        .irq_software, .irq_timer, .irq_external,
+        .dma_req_valid, .dma_req_ready, .dma_request,
+        .dma_rsp_valid, .dma_rsp_ready, .dma_response,
+        .s_req_valid(s_req_valid[13:4]), .s_req_ready(s_req_ready[13:4]),
+        .s_request(s_request[4:13]), .s_rsp_valid(s_rsp_valid[13:4]),
+        .s_rsp_ready(s_rsp_ready[13:4]), .s_response(s_response[4:13])
+    );
 
     // 单主端口定向驱动，沿用真实地址译码；非法偏移由各外设返回 SLVERR。
     always_comb begin

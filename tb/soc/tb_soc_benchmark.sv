@@ -1,6 +1,8 @@
 // Module: tb_soc_benchmark
 // Description: Runs a bare-metal C image and passively observes console and tohost Stores.
-module tb_soc_benchmark;
+module tb_soc_benchmark #(
+    parameter int unsigned DDR_BYTES = 0
+);
     timeunit 1ns;
     timeprecision 1ps;
 
@@ -13,6 +15,9 @@ module tb_soc_benchmark;
     logic [1:0] uart_tx;
     logic [31:0] gpio_in [3];
     logic [31:0] gpio_out [3], gpio_oe [3];
+    logic ddr_req_valid, ddr_req_ready, ddr_rsp_valid, ddr_rsp_ready;
+    bus_types_pkg::bus_req_t ddr_request;
+    bus_types_pkg::bus_rsp_t ddr_response;
     logic clk = 1'b0;
     logic rst = 1'b1;
     logic commit_valid;
@@ -47,7 +52,41 @@ module tb_soc_benchmark;
         assign gpio_in[g] = gpio_loopback ? (gpio_out[g] & gpio_oe[g]) : '0;
     end
 
-    soc_top dut (.*);
+    soc_top #(.DDR_BYTES(DDR_BYTES)) dut (.*);
+    if (DDR_BYTES != 0) begin : g_external
+        logic awvalid, awready, awid, awlock, wvalid, wready, wlast;
+        logic arvalid, arready, arid, arlock, bvalid, bready, bid, rvalid, rready, rid, rlast;
+        logic [31:0] awaddr, araddr;
+        logic [7:0] awlen, arlen;
+        logic [2:0] awsize, arsize, awprot, arprot;
+        logic [1:0] awburst, arburst, bresp, rresp;
+        logic [3:0] awcache, awqos, awregion, arcache, arqos, arregion;
+        logic [XLEN-1:0] wdata, rdata;
+        logic [DBUS_BYTES-1:0] wstrb;
+        local_to_axi u_bridge (
+            .clk, .rst, .req_valid(ddr_req_valid), .req_ready(ddr_req_ready),
+            .request(ddr_request), .rsp_valid(ddr_rsp_valid),
+            .rsp_ready(ddr_rsp_ready), .response(ddr_response),
+            .awvalid, .awready, .awid, .awaddr, .awlen, .awsize, .awburst,
+            .awlock, .awcache, .awqos, .awregion, .awprot,
+            .wvalid, .wready, .wdata, .wstrb, .wlast, .bvalid, .bready, .bid, .bresp,
+            .arvalid, .arready, .arid, .araddr, .arlen, .arsize, .arburst,
+            .arlock, .arcache, .arqos, .arregion, .arprot,
+            .rvalid, .rready, .rid, .rdata, .rresp, .rlast
+        );
+        axi_memory_model #(.BYTES(DDR_BYTES)) u_external (
+            .clk, .rst, .fault_read_addr(32'hffff_ffff),
+            .fault_write_addr(32'hffff_ffff),
+            .awvalid, .awready, .awaddr, .awsize,
+            .wvalid, .wready, .wdata, .wstrb, .wlast, .bvalid, .bready, .bid, .bresp,
+            .arvalid, .arready, .araddr, .arsize,
+            .rvalid, .rready, .rid, .rdata, .rresp, .rlast
+        );
+    end else begin : g_no_external
+        assign ddr_req_ready = 1'b0;
+        assign ddr_rsp_valid = 1'b0;
+        assign ddr_response = '0;
+    end
     store_result_monitor u_result_monitor (.*);
 
     // Core 一笔在途的约束保证接收缓冲不会被第二个 I 响应覆盖。

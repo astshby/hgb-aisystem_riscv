@@ -17,9 +17,9 @@ Core 使用独立的指令和数据 ready/valid 接口，不直接实例化 FPGA
 - 单条在途多周期 MDU：统一握手与取消；三种乘法、两种除法可选，默认 DSP 推断乘法 + 移位除法（most easy）。
 - JAL 在 D1 解析；条件分支与 JALR 在 EX 解析。
 - `muldiv_unit` 独立于流水级：EX 内的 `ex_mdu` 发射请求，MEM 内的 `mem_mdu` 接收并拼接结果；package 仅保留类型与常量。
-- 独立 AXI4 单笔桥已验证握手、错误与反压，尚未接入 SoC DDR 窗口或 DMA。
+- 三主端口互连和单通道 DMA 已接入 SoC；AXI4 单拍桥与可变延迟 RAM 完成外存仿真闭环。
 - CSR 在 EX 完成读改写与 WARL，WB 执行架构提交。
-- 无 Cache SoC：启动 ROM、I/D-TCM、2 路 UART、机器/通用 Timer、3 组 GPIO、外部中断汇聚。
+- 无 Cache SoC：启动 ROM、I/D-TCM、2 路 UART、机器/通用 Timer、3 组 GPIO、外部中断汇聚与 DMA。
 - `mie/mip` 接入真实设备电平；中断排空流水，保存实际后继 PC 后进入 Direct `mtvec`。
 - Verilator 纯 SystemVerilog 测试，不使用 Cocotb。
 - RV32/RV64 各 42 项单元测试；17 项整核定向流程中各 16 PASS、1 非适用位宽 SKIP。
@@ -28,8 +28,9 @@ Core 使用独立的指令和数据 ready/valid 接口，不直接实例化 FPGA
 - CoreMark 1.0 performance/validation CRC 均通过；默认 MDU 配置的固定迭代数结果：
   RV32 `2.897145`、RV64 `2.579512 CoreMark/MHz`（Verilator 周期成绩）。
 
-下一步实现 DMA 与外存桥，再做盘古 676-200K Pro 板级适配；Cache 和 Zynq-7020
-随后实施。软件栈和 AI 功能仍是独立后续目标；以上成绩不代表 FPGA Fmax。
+S3 DMA/外存功能仿真已完成；接下来从 `s4/cache` 分支研究两路组相联 Cache 与 DMA
+一致性。盘古 676-200K Pro、Zynq-7020 的 DDR3 IP 和上板时序验证继续后推。
+软件栈和 AI 功能仍是独立后续目标；以上成绩不代表 FPGA Fmax。
 
 ## 快速验证
 
@@ -48,6 +49,7 @@ make mdu-backends XLEN=32
 make mdu-backends XLEN=64
 make soc-test XLEN=32
 make soc-software XLEN=32
+make soc-dma-software XLEN=32
 make soc-riscv-tests XLEN=32
 make soc-coremark XLEN=32
 # SoC 命令同样须以 XLEN=64 运行。
@@ -60,7 +62,7 @@ RISC-V 工具链默认位于 `/opt/riscv/bin`。`make test` 包含 lint、单元
 ## 目录入口
 
 - `vsrc/core/`：与平台无关的可综合 Core。
-- `vsrc/soc/`：可移植互连、ROM/TCM、MMIO 外设与中断。
+- `vsrc/soc/`：可移植互连、ROM/TCM、DMA、MMIO 外设与中断。
 - `vsrc/sim_cpu/`：不可综合的仿真存储器和通用仿真顶层。
 - `vsrc/cpu/`：规划中的双平台 FPGA wrapper，优先盘古 676-200K Pro。
 - `tb/`：单元、整核和上游 riscv-tests 适配测试。
@@ -76,6 +78,9 @@ RISC-V 工具链默认位于 `/opt/riscv/bin`。`make test` 包含 lint、单元
 - [硬件目标与阶段规划](docs/HARDWARE_ROADMAP.md)
 - [软件开发目标](docs/SOFTWARE_ROADMAP.md)
 - [仿真与 FPGA 工作流](docs/SIMULATION_AND_FPGA.md)
+- [DMA 搬运与中断时序](docs/understand/DMA_DATA_PATH.md)
+- [AXI、外存模型与 DDR3 板级边界](docs/understand/AXI_DDR_BOUNDARY.md)
+- [多主仲裁与未来 Cache 一致性](docs/understand/ARBITRATION_AND_COHERENCE.md)
 - [BRAM、Cache 与存储器握手](docs/understand/MEMORY_HANDSHAKE.md)
 - [软件测试栈与硬件交互解读](docs/understand/SOFTWARE_TEST_STACK_GUIDE.md)
 - [CoreMark 与性能指标解读](docs/understand/COREMARK_AND_PERFORMANCE.md)

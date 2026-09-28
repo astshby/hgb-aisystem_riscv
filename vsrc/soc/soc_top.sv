@@ -1,8 +1,9 @@
 // Module: soc_top
-// Description: Portable no-cache core, ROM, shared physical TCM banks, and local fabric.
+// Description: Portable no-cache core, ROM, TCM, MMIO, DMA and optional external-memory port.
 module soc_top #(
     parameter string ITCM_INIT_FILE = "",
     parameter string DTCM_INIT_FILE = "",
+    parameter int unsigned DDR_BYTES = 0,
     parameter logic [31:0] CLOCK_HZ = 50000000,
     parameter logic [31:0] UART_DIVISOR = 434
 ) (
@@ -11,6 +12,12 @@ module soc_top #(
     output logic [1:0] uart_tx,
     input logic [31:0] gpio_in [3],
     output logic [31:0] gpio_out [3], gpio_oe [3],
+    output logic ddr_req_valid,
+    input logic ddr_req_ready,
+    output bus_types_pkg::bus_req_t ddr_request,
+    input logic ddr_rsp_valid,
+    output logic ddr_rsp_ready,
+    input bus_types_pkg::bus_rsp_t ddr_response,
     output logic commit_valid,
     output logic [core_config_pkg::XLEN-1:0] commit_pc,
     output logic [31:0] commit_inst,
@@ -36,9 +43,9 @@ module soc_top #(
     xlen_t dmem_req_addr, dmem_req_wdata, dmem_rsp_rdata;
     logic [DBUS_BYTES-1:0] dmem_req_wstrb;
     logic [$clog2(DBUS_BYTES)-1:0] fetch_lane_q;
-    logic [1:0] m_req_valid, m_req_ready, m_rsp_valid, m_rsp_ready;
-    bus_req_t m_request [2];
-    bus_rsp_t m_response [2];
+    logic [2:0] m_req_valid, m_req_ready, m_rsp_valid, m_rsp_ready;
+    bus_req_t m_request [3];
+    bus_rsp_t m_response [3];
     bus_rsp_t fetch_response, fetch_buffer_q;
     logic fetch_buffer_valid_q;
     logic [14:0] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready;
@@ -69,9 +76,9 @@ module soc_top #(
         m_request[1].wdata = dmem_req_wdata;
         m_request[1].wstrb = dmem_req_wstrb;
     end
-    assign m_req_valid = {dmem_req_valid, imem_req_valid};
-    assign m_rsp_ready = {dmem_rsp_ready, 1'b1};
-    assign {dmem_req_ready, imem_req_ready} = m_req_ready;
+    assign m_req_valid[1:0] = {dmem_req_valid, imem_req_valid};
+    assign m_rsp_ready[1:0] = {dmem_rsp_ready, 1'b1};
+    assign {dmem_req_ready, imem_req_ready} = m_req_ready[1:0];
     assign dmem_rsp_valid = m_rsp_valid[1];
     assign imem_rsp_valid = fetch_buffer_valid_q || m_rsp_valid[0];
     assign fetch_response = fetch_buffer_valid_q ? fetch_buffer_q : m_response[0];
@@ -111,7 +118,9 @@ module soc_top #(
     assign dmem_store_strb = dmem_req_wstrb;
 
     // CPU 的 D-ready 不依赖可被重定向撤回的 I-valid；跨 owner 交接隔一拍。
-    bus_interconnect #(.PRESENT(15'h2fff), .DATA_PRIORITY(1'b1)) u_fabric (
+    bus_interconnect #(.MASTERS(3), .DDR_BYTES(DDR_BYTES),
+                       .PRESENT(DDR_BYTES == 0 ? 15'h3fff : 15'h7fff),
+                       .DATA_PRIORITY(1'b1)) u_fabric (
         .clk, .rst, .m_req_valid, .m_req_ready, .m_request,
         .m_rsp_valid, .m_rsp_ready, .m_response,
         .s_req_valid, .s_req_ready, .s_request, .s_error,
@@ -137,11 +146,22 @@ module soc_top #(
         .request(s_request[3]), .rsp_valid(s_rsp_valid[3]),
         .rsp_ready(s_rsp_ready[3]), .response(s_response[3])
     );
-    soc_peripherals #(.CLOCK_HZ(CLOCK_HZ), .UART_DIVISOR(UART_DIVISOR)) u_peripherals (
+    soc_peripherals #(.DDR_BYTES(DDR_BYTES), .CLOCK_HZ(CLOCK_HZ),
+                      .UART_DIVISOR(UART_DIVISOR)) u_peripherals (
         .clk, .rst, .uart_rx, .uart_tx, .gpio_in, .gpio_out, .gpio_oe,
         .irq_software, .irq_timer, .irq_external,
-        .s_req_valid(s_req_valid[14:4]), .s_req_ready(s_req_ready[14:4]),
-        .s_request(s_request[4:14]), .s_rsp_valid(s_rsp_valid[14:4]),
-        .s_rsp_ready(s_rsp_ready[14:4]), .s_response(s_response[4:14])
+        .dma_req_valid(m_req_valid[2]), .dma_req_ready(m_req_ready[2]),
+        .dma_request(m_request[2]), .dma_rsp_valid(m_rsp_valid[2]),
+        .dma_rsp_ready(m_rsp_ready[2]), .dma_response(m_response[2]),
+        .s_req_valid(s_req_valid[13:4]), .s_req_ready(s_req_ready[13:4]),
+        .s_request(s_request[4:13]), .s_rsp_valid(s_rsp_valid[13:4]),
+        .s_rsp_ready(s_rsp_ready[13:4]), .s_response(s_response[4:13])
     );
+    // 容量为 0 时 DDR 保持显式错误；实际桥或仿真模型接在这个可综合端口之外。
+    assign ddr_req_valid = DDR_BYTES != 0 && s_req_valid[14];
+    assign ddr_request = s_request[14];
+    assign s_req_ready[14] = DDR_BYTES != 0 && ddr_req_ready;
+    assign s_rsp_valid[14] = DDR_BYTES != 0 && ddr_rsp_valid;
+    assign s_response[14] = DDR_BYTES != 0 ? ddr_response : '0;
+    assign ddr_rsp_ready = s_rsp_ready[14];
 endmodule

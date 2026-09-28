@@ -1,5 +1,24 @@
 # 设计调整记录
 
+## 2026-09-28（Asia/Shanghai）— S3 DMA 与仿真外存闭环
+
+- `soc_top` 加入 CPU I/D + DMA 三主端口互连；DMA 以独立主端搬运，寄存器仍为
+  MMIO 从端。DMA 只访问 TCM/已启用外存，任意错位和尾数可逐字节复制；
+  完成字节数仅在成功写响应后增加。无效范围/重叠启动前拒绝；读写错误不回滚。
+- IRQ 控制器新增 DMA 源 ID 7，状态采用 W1C 电平中断。DDR 窗口默认关闭，
+  启用容量时由可综合本地端口接外部；仿真 harness 接单拍 AXI 桥与反压/故障 RAM。
+  没有实现 DDR3 控制器、PHY、Cache、FPGA 综合或上板。
+- `tb_dma_fabric` 验证跨 TCM/外存搬运、持续 CPU D 竞争、IRQ claim/complete、
+  故障、非法命令、协调复位及复位后恢复；两种 XLEN 均 PASS。
+  `soc-dma-software` 在 RV32/RV64 的无外存与 64 KiB 外存两种配置均 PASS：
+  TCM 搬运、双向外存搬运、ID 7 handler、配置错误和外存取指。
+- 原有 `make soc-test soc-lint` 两种 XLEN 均 PASS；完整 `make test`、
+  Core-only ISA `58/58` 与 `78/78`、SoC ISA `59/59` 与 `79/79`、C smoke、
+  CoreMark performance/validation 均通过。Core-only 跳过 `fence_i/ma_data`，
+  SoC 仅跳过 `ma_data`。S3 不把仿真 RAM 当作 DDR3 性能结果。
+- 同步硬件文档并新增 `understand/` 三篇专题解读；下一步从 `s4/cache`
+  独立分支研究两路组相联 Cache 与 DMA 一致性。板级 DDR3 验证后推。
+
 ## 2026-09-28（Asia/Shanghai）— S3 起步：独立 AXI4 单笔桥
 
 - 两仓从各自 S2 提交（rhbyv 58358a1 / hgb de67bbb）新开 soc/s3-axi-dma；

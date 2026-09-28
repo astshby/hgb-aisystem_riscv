@@ -2,9 +2,10 @@
 
 ## 当前实现
 
-`vsrc/soc/bus/local_to_axi.sv` 是独立验证的本地总线到 AXI4 主端口桥。
-尚未实例化到 `soc_top`，DDR 与 DMA 地址窗口仍按原契约返回错误。
-本模块不是 DDR 控制器或 PHY，也不是 AXI4-Lite；首版 AXI4 只发单 beat。
+`soc_top` 已连接三主端口互连（CPU I/D、DMA），并将可选外存窗口暴露为可综合的本地总线端口。
+`tb_soc_benchmark` 和 DMA 定向 TB 在该端口外实例化 `local_to_axi` 与可变延迟 AXI RAM。
+`DDR_BYTES=0` 时外存窗口返回 DECERR；非零时须连接实际响应端，不能仅靠参数宣称 DDR 可用。
+桥不是 DDR 控制器或 PHY，也不是 AXI4-Lite；首版 AXI4 只发单 beat。
 
 端口：32 位物理地址、XLEN 位数据、固定 1 位 ID=0、单笔在途；
 读写不并行，LEN=0、BURST=INCR、LOCK=0、CACHE/QOS/REGION=0。
@@ -37,24 +38,21 @@ AXI OKAY/SLVERR/DECERR 分别映射本地对应结果；不发独占，因此 EX
 
 ## 验证入口
 
-`make soc-test XLEN=32` / `XLEN=64` 除原三个 SoC 流程外运行 `tb_local_to_axi`。
-TB 检查 AW-first/W-first/同拍、各通道反压与载荷稳定、最早响应、窄访问全部合法 lane、
-页末取指、响应错误、非法请求无外部副作用、异常读排空、响应保持及协调复位。
-`logs/tb_local_to_axi-rv<XLEN>.log` 保存构建与 PASS；这不是实际 DDR 性能测试。
+`make soc-test XLEN=32/64` 运行 `tb_local_to_axi` 和 `tb_dma_fabric`：检查 AXI
+AW/W/AR/R/B 反压、错误、请求归属，以及 DMA 的 TCM↔外存搬运、IRQ、对齐与字节尾数。
+`make soc-dma-software XLEN=32/64` 分别使用 `SOC_DDR_BYTES=0/65536` 运行裸机 C：
+CPU 配置 DMA，等待 ID 7 中断，校验数据，再从 DMA 写入的外存地址取指。
+这些是功能模型和周期级反压测试，不是 DDR3 物理时序或板级带宽测试。
 
-## 后续接入顺序
+## 后续边界
 
-- 外存模型与顶层：增加可配置 DDR 容量和 AXI 端口，建立可变延迟/错误注入 RAM TB。
-  未就绪的 DDR 必须有明确访问错误策略，不把初始化状态伪装成可用 RAM。
-- DMA 数据引擎：先单通道 memory-to-memory，一笔读完成后发一笔写；
-  源/目的只允许 TCM 和已启用外存，禁止把普通内存拷贝引擎用于具有副作用的 MMIO。
-  控制寄存器仍在 `0x10030000`，至少包含 src/dst/length/start/busy/done/error/IRQ。
-  精确寄存器偏移、尾字节策略、重叠区间限制及故障进度在 DMA 实现前固定。
-- 三主端口互连：CPU I/D 加 DMA；保留 CPU 重定向取消边界，明确争用和公平性。
-  DMA 完成仅在最后一笔写响应后发布，CPU 通过状态/中断观察，失败不回滚已完成写入。
-- 端到端：CPU 配置 DMA、TCM↔外存校验、并行取指、IRQ、访问错误及复位；
-  分别运行 TCM 布局和外存布局的 ISA/C/CoreMark，禁止混用两者成绩。
-- 吞吐优化：完成正确性基线后再加 burst、4 KiB 拆分和缓冲，不把单拍桥称为高带宽 DMA。
+- S3 已有单通道 memory-to-memory DMA：一笔读响应后发一笔写，成功的写响应后
+  才增加完成字节数；不访问带副作用的 MMIO。任意错位或尾数按字节搬运，
+  同时对齐时按 XLEN 字搬运。重叠、零长度和越界在启动前拒绝。
+- AXI 仿真 RAM 可注入延迟和读写错误。实板仍需盘古 DDR3 控制器/PHY、时钟复位、
+  跨时钟域与真实容量配置，并实测读写反压、错误和时序；Zynq 适配随后进行。
+- S4 Cache 建立之后必须定义 DMA 与 CPU 的一致性维护；在此之前 TCM 和外存是
+  无 Cache 的共享物理内存。进一步的 burst、4 KiB 拆分与吞吐优化不是 S3 保证。
 
 暂不加入 Cache/MMU。未来 DMA 若写可执行内存，软件须等完成后执行 FENCE.I；
 未来 Cache 一致性需要独立维护协议，不由 AXI4 自动提供。

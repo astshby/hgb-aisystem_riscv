@@ -45,5 +45,6 @@ SoC 的 riscv-tests 为 RV32 59 / RV64 79 PASS，只有 ma_data 明确 SKIP；
 ROM 启动多出的 6 拍不计入分数。benchmark 字符输出仍为被动 RAM 镜像，不是 UART。
 
 完整寄存器和约束见 [外设接口](../SOC_PERIPHERALS.md)，运行入口见
-[仿真说明](../SIMULATION_AND_FPGA.md)。DMA、DDR、Cache、厂商 IP 和板级时序尚未完成；
+[仿真说明](../SIMULATION_AND_FPGA.md)。DMA 与外存功能仿真已完成，见 [DMA 搬运解读](DMA_DATA_PATH.md)；
+Cache、DDR3 厂商 IP 和板级时序尚未完成；
 现有仿真通过不等于 FPGA 已验证。

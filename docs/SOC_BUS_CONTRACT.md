@@ -3,9 +3,9 @@
 ## 实现边界
 
 Core 保持 IF/D1/D2/EX/MEM/WB 六级。`vsrc/soc/bus/` 提供物理地址检查和错误响应；
-ROM、I/D-TCM、UART/Timer/GPIO 和机器中断已由 `soc_top` 集成。
-DMA 与 DDR 顶层集成尚未实现；分配窗口仍返回错误。
-独立的 AXI4 单笔桥见 [外存接入边界](SOC_EXTERNAL_MEMORY.md)。外设语义见 [SoC 外设接口](SOC_PERIPHERALS.md)。
+ROM、I/D-TCM、UART/Timer/GPIO、DMA 和机器中断已由 `soc_top` 集成。
+DDR 窗口默认关闭并返回错误；配置 `DDR_BYTES` 后由可综合本地端口向外连接。
+仿真通过独立 AXI4 单笔桥与可变延迟 RAM 接入，详见 [外存接入边界](SOC_EXTERNAL_MEMORY.md)。外设语义见 [SoC 外设接口](SOC_PERIPHERALS.md)。
 Package 只保存常量、枚举和结构体；访问判断在模块内完成。
 
 ## 请求、完成与错误
@@ -23,7 +23,7 @@ Package 只保存常量、枚举和结构体；访问判断在模块内完成。
   `dmem_rsp_error` 在 WB 转为 Load/Store access fault，携带原访问地址到 Trap。
   WB 输出补充异常后的 `commit_packet`，异常指令不写 GPR/CSR。
 - 未映射访问用 DECERR，权限/大小错误用 SLVERR。错误从设备也必须返回响应，
-  不得用永久 ready=0 代替报错。未来 AXI 桥必须接收 B/R 错误。
+  不得用永久 ready=0 代替报错。AXI 桥接收 B/R 错误。
 - 写错误不承诺回滚已产生的外部副作用；保证故障 PC/地址准确，并阻止年轻指令越过错误。
 
 ## 排序与复位
@@ -34,7 +34,7 @@ FENCE.I 另清除 BTB/PHT 和待训练项，避免旧跳转被改成普通指令
 已接受的错误路径取指响应必须排空并丢弃，其访问错误不能变成有效 Trap。
 
 全系统复位清除 Core/本地响应状态，但不回滚 RAM 已发生的写入。
-后续外存桥必须协调复位和外部在途事务，不能只复位 CPU 后遗忘已接受请求。
+外存桥必须协调复位和外部在途事务，不能只复位 CPU 后遗忘已接受请求。
 
 ## 地址与访问属性
 
@@ -53,7 +53,7 @@ FENCE.I 另清除 BTB/PHT 和待训练项，避免旧跳转被改成普通指令
 | GPIO0 / GPIO1 / GPIO2 | `0x1002_0000` / `0x1002_1000` / `0x1002_2000` | 各 4 KiB |
 | DMA regs | `0x1003_0000` | 4 KiB |
 | SoC regs | `0x1004_0000` | 4 KiB |
-| DDR | `0x8000_0000` | 预留 512 MiB |
+| DDR | `0x8000_0000` | `DDR_BYTES` 配置容量，默认 0；仿真用 64 KiB |
 
 `address_decode.DDR_BYTES` 默认 0（关闭），启用时按实际容量配置。
 I/D-TCM 各自所在 1 MiB 区域留作扩展，超出已实现容量的访问报错，不回绕。
@@ -65,11 +65,11 @@ ROM 为只读可执行，I-TCM 可读写可执行，D-TCM 可读写不可执行�
 
 ## ROM、TCM 与互连模块
 
-`bus_interconnect` 面向两个主端口，各自最多一笔在途事务。不同目标可并行；
+`bus_interconnect` 可配置主端口数量；SoC 实例为 CPU I、CPU D、DMA 三路，各自最多一笔在途事务。不同目标可并行；
 同目标轮询仲裁，响应根据接受请求时记录的 owner 返回。
 从端反压期间保持选择；IF 撤回尚未接受的请求后释放选择。
 `PRESENT` 默认只启用错误端、ROM、I-TCM 和 D-TCM；SoC 实例显式启用已实现外设。
-CPU 使用数据优先仲裁与跨 owner 一拍交接，并在 SoC 保存被 IF 反压的响应，
+CPU D 相对 I 优先，同时与 DMA 公平轮询；跨 owner 一拍交接，SoC 保存被 IF 反压的响应，
 使取指撤回、数据 ready 和重定向之间不形成组合反馈；默认通用互连仍采用轮询。
 
 `tcm_controller` 是单端口同步读、逐字节写的 XLEN 宽 RAM bank。
@@ -83,11 +83,12 @@ I/D-TCM 是两个独立 bank，而非两份不相干的指令/数据镜像：两
 
 ## 验证
 
-`make soc-test XLEN=32/64` 运行互连两种仲裁配置和外设集成 TB，覆盖共享 TCM、
+`make soc-test XLEN=32/64` 运行互连两种仲裁配置、外设和 DMA/AXI 集成 TB，覆盖共享 TCM、
 字节写、ROM 子字访问、目标缺失、响应归属/反压、跨 bank 并行、同 bank 公平仲裁、
 一拍 RAM 连续吞吐、未接受请求撤回，以及复位后 RAM 内容保留。
 另覆盖 UART 环回、计时器、GPIO、IRQ claim/complete 与 MMIO 副作用。
-该命令不运行 CoreMark，也不代替 Core 回归和 `make soc-software` 的 C 中断集成测试。
+该命令不运行 CoreMark，也不代替 Core 回归、`make soc-software` 的 C 中断测试或
+`make soc-dma-software` 的 CPU→DMA→TCM/外存端到端测试。
 
 `make test XLEN=32/64` 包含以下测试：
 

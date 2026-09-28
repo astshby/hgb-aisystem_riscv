@@ -1,6 +1,7 @@
 // Module: soc_peripherals
 // Description: Portable MMIO endpoints and single-hart interrupt aggregation.
 module soc_peripherals #(
+    parameter int unsigned DDR_BYTES = 0,
     parameter logic [31:0] CLOCK_HZ = 50000000,
     parameter logic [31:0] UART_DIVISOR = 434
 ) (
@@ -10,23 +11,30 @@ module soc_peripherals #(
     input logic [31:0] gpio_in [3],
     output logic [31:0] gpio_out [3], gpio_oe [3],
     output logic irq_software, irq_timer, irq_external,
-    input logic [14:4] s_req_valid,
-    output logic [14:4] s_req_ready,
-    input bus_types_pkg::bus_req_t s_request [4:14],
-    output logic [14:4] s_rsp_valid,
-    input logic [14:4] s_rsp_ready,
-    output bus_types_pkg::bus_rsp_t s_response [4:14]
+    output logic dma_req_valid,
+    input logic dma_req_ready,
+    output bus_types_pkg::bus_req_t dma_request,
+    input logic dma_rsp_valid,
+    output logic dma_rsp_ready,
+    input bus_types_pkg::bus_rsp_t dma_response,
+    input logic [13:4] s_req_valid,
+    output logic [13:4] s_req_ready,
+    input bus_types_pkg::bus_req_t s_request [4:13],
+    output logic [13:4] s_rsp_valid,
+    input logic [13:4] s_rsp_ready,
+    output bus_types_pkg::bus_rsp_t s_response [4:13]
 );
     logic timer_irq;
     logic [1:0] uart_irq;
     logic [2:0] gpio_irq;
+    logic dma_irq;
     machine_timer u_mtime (
         .clk, .rst, .req_valid(s_req_valid[4]), .req_ready(s_req_ready[4]),
         .request(s_request[4]), .rsp_valid(s_rsp_valid[4]), .rsp_ready(s_rsp_ready[4]),
         .response(s_response[4]), .irq_software, .irq_timer
     );
     irq_controller u_irq (
-        .clk, .rst, .sources({gpio_irq, timer_irq, uart_irq}), .irq(irq_external),
+        .clk, .rst, .sources({dma_irq, gpio_irq, timer_irq, uart_irq}), .irq(irq_external),
         .req_valid(s_req_valid[5]), .req_ready(s_req_ready[5]), .request(s_request[5]),
         .rsp_valid(s_rsp_valid[5]), .rsp_ready(s_rsp_ready[5]), .response(s_response[5])
     );
@@ -50,16 +58,18 @@ module soc_peripherals #(
             .rsp_ready(s_rsp_ready[9+g]), .response(s_response[9+g])
         );
     end
+    dma_controller #(.DDR_BYTES(DDR_BYTES)) u_dma (
+        .clk, .rst, .req_valid(s_req_valid[12]), .req_ready(s_req_ready[12]),
+        .request(s_request[12]), .rsp_valid(s_rsp_valid[12]),
+        .rsp_ready(s_rsp_ready[12]), .response(s_response[12]), .irq(dma_irq),
+        .master_req_valid(dma_req_valid), .master_req_ready(dma_req_ready),
+        .master_request(dma_request), .master_rsp_valid(dma_rsp_valid),
+        .master_rsp_ready(dma_rsp_ready), .master_response(dma_response)
+    );
     soc_info #(.CLOCK_HZ(CLOCK_HZ)) u_info (
         .clk, .rst, .req_valid(s_req_valid[13]), .req_ready(s_req_ready[13]),
         .request(s_request[13]), .rsp_valid(s_rsp_valid[13]),
         .rsp_ready(s_rsp_ready[13]), .response(s_response[13])
     );
 
-    // DDR 和 DMA 留待后续阶段；PRESENT 屏蔽它们并由错误从端结束访问。
-    for (genvar s = 12; s < 15; s += 2) begin : g_absent
-        assign s_req_ready[s] = 1'b0;
-        assign s_rsp_valid[s] = 1'b0;
-        assign s_response[s] = '0;
-    end
 endmodule

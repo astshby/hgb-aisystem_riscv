@@ -6,7 +6,7 @@ export MUL_IMPL DIV_IMPL
 
 VFLAGS := -Wall -Wno-fatal --assert --timing -DCORE_XLEN=$(XLEN) -DCORE_MUL_IMPL=$(MUL_IMPL) -DCORE_DIV_IMPL=$(DIV_IMPL)
 
-.PHONY: lint unit directed riscv-tests benchmark-smoke coremark mdu-backends test clean vivado-project soc-test soc-smoke soc-coremark soc-lint soc-software soc-riscv-tests
+.PHONY: lint unit directed riscv-tests benchmark-smoke coremark mdu-backends test clean vivado-project soc-test soc-smoke soc-coremark soc-lint soc-software soc-dma-software soc-riscv-tests
 
 lint:
 	$(VERILATOR) $(VFLAGS) --lint-only -f scripts/rtl_files.f --top-module core
@@ -34,6 +34,9 @@ soc-riscv-tests:
 
 soc-software:
 	bash scripts/verilator/run_soc_software.sh $(XLEN)
+
+soc-dma-software:
+	bash scripts/verilator/run_dma_software.sh $(XLEN)
 
 soc-smoke:
 	SOC=1 bash scripts/verilator/run_benchmark_smoke.sh $(XLEN)

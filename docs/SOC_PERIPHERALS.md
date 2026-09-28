@@ -5,7 +5,8 @@
 `soc_top` 组合 Core、复位 ROM、两个 64 KiB TCM bank、互连和
 `soc_peripherals`。Core 保持六级，不包含 BRAM 或 MMIO 设备。
 外设采用可移植 RTL，尚未完成厂商综合、资源/时序检查和板级连接。
-DMA、DDR 尚未实现，对应窗口返回 DECERR；Cache、MMU、S/U 模式、WFI 也不在本版范围。
+DMA 已实现；外存仅有可配置的本地端口和仿真 AXI RAM，尚无板级 DDR 控制器。
+Cache、MMU、S/U 模式、WFI 不在本版范围。
 
 地址、权限和错误契约见 [SoC 访存契约](SOC_BUS_CONTRACT.md)。
 普通 MMIO 仅接受对齐 32 位访问，包括 RV64；不自动拆分有副作用的 LD/SD。
@@ -19,9 +20,10 @@ benchmark 的代码放 I-TCM，数据、栈和 tohost 放 D-TCM `0x01100000`。
 I/D 访问同一个物理 bank，D-TCM 不可执行；专用 ISA 链接脚本将自修改代码的
 `.data` 也放进可执行 I-TCM，因此 SoC runner 可运行上游 `fence_i`。
 
-通用互连支持两主端口轮询。CPU 顶层使用 `DATA_PRIORITY=1`：
+互连在 SoC 中支持 CPU I、CPU D 与 DMA 三主端口。CPU 顶层使用 `DATA_PRIORITY=1`：
 同 bank 优先数据请求，跨 owner 交接隔一拍；不同 bank 并行，同 owner 可每拍传输。
-这是为了让 D-ready 不依赖可撤回的 I-valid。未来 DMA 不应直接沿用固定优先级而不评估饥饿。
+这是为了让 D-ready 不依赖可撤回的 I-valid；CPU D 与 DMA 对同一 bank 轮流获得机会，
+避免持续数据访问让 DMA 饥饿。
 SoC 另有一项 I 响应缓冲：正常响应直接旁路，IF 反压时保存，互连 I-rsp-ready 恒为 1。
 Core 每端口一笔在途保证该缓冲不会被覆盖；它切断共享 bank 的组合反压环，不增加正常取指延迟。
 全系统复位统一清除在途状态，RAM 不清零。
@@ -93,14 +95,14 @@ RX 读接受与新字符到达同拍时，可同时返回旧字符并保存新�
 
 ## 外部中断汇聚
 
-基址 `0x0c000000`，六个电平源：ID 1/2 为 UART0/1，3 为 Timer1，4/5/6 为 GPIO0/1/2。
+基址 `0x0c000000`，七个电平源：ID 1/2 为 UART0/1，3 为 Timer1，4/5/6 为 GPIO0/1/2，7 为 DMA。
 使用常见单上下文 claim/complete 布局，但这是精简控制器，不宣称完整 PLIC 兼容。
 它没有多 hart、多上下文或可配置触发模式；本实现 claim 与 IRQ 共用阈值筛选。
 
 | 偏移 | 寄存器 | 行为 |
 |---|---|---|
-| `4 × ID` | PRIORITY[1..6] | 3 位优先级，0 禁用，复位 0 |
-| `0x1000` | PENDING | bit 1..6，只读 |
+| `4 × ID` | PRIORITY[1..7] | 3 位优先级，0 禁用，复位 0 |
+| `0x1000` | PENDING | bit 1..7，只读 |
 | `0x2000` | ENABLE | bit 1..6 |
 | `0x200000` | THRESHOLD | 3 位，选取 priority > threshold 的源 |
 | `0x200004` | CLAIM/COMPLETE | 读领取 ID，写完成 ID；0 表示没有可领取源 |
@@ -108,6 +110,23 @@ RX 读接受与新字符到达同拍时，可同时返回旧字符并保存新�
 较大优先级先服务，同级先较小 ID。每源最多一个 pending/in-service。
 claim 只在读请求接受时消费；响应被阻塞不再次领取。
 处理程序须先清设备中断原因，再 complete；仍为高电平的源会重新挂起。
+
+## DMA 控制器
+
+基址 `0x10030000`，寄存器均为对齐 32 位访问。DMA 同时作为互连的第三主端口；
+寄存器是 CPU 配置用的从端，搬运不经 CPU 软件逐字读写。
+
+| 偏移 | 寄存器 | 行为 |
+|---|---|---|
+| `0x00/0x04/0x08` | SRC/DST/LENGTH | 32 位物理源地址、目的地址和字节长度；busy 时不可写 |
+| `0x0c` | CTRL | 写 bit 0 启动；bit 1 保持为 IRQ_EN；busy 时不可写 |
+| `0x10` | STATUS | bit 0 busy、1 done、2 error；done/error 写 1 清除 |
+| `0x14/0x18/0x1c` | BYTES/FAULT/CODE | 已成功写入的字节、故障地址、结果码，只读 |
+
+结果码 0 成功；1 配置无效；2/3 读 DECERR/SLVERR；4/5 写 DECERR/SLVERR。
+DMA 只允许 I-TCM、D-TCM 与启用容量内的 DDR，拒绝 MMIO、零长度、范围重叠和越界。
+对齐的整字按 XLEN 宽传输，其余字节逐个搬运；失败不回滚已完成写入。
+IRQ_EN 且 done/error 置位时持续请求 ID 7；软件先读结果并清状态，再写 IRQ complete。
 
 ## Core 中断入口
 
@@ -129,6 +148,6 @@ MRET 恢复 MIE/MPIE 并从 mepc 继续。mtvec 仍仅支持 Direct 模式。
 CLOCK_HZ 是平台参数，不是测出的 FPGA Fmax。
 
 `make soc-lint`、`soc-test`、`soc-software`、`soc-smoke`、
-`soc-riscv-tests`、`soc-coremark` 均支持 `XLEN=32/64`。
+`soc-riscv-tests`、`soc-coremark`、`soc-dma-software` 均支持 `XLEN=32/64`。
 原 Core-only 命令和镜像保留，SoC 镜像/日志使用独立 `-soc` 路径。
 见 [仿真与 FPGA 工作流](SIMULATION_AND_FPGA.md)。
