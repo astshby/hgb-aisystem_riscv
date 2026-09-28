@@ -12,7 +12,8 @@ module interrupt_entry (
 );
     import core_types_pkg::*;
     xlen_t resume_pc_q;
-    // Core 在 irq_pending 期间停止新取指并清 IF 响应；已入流水的访存/MDU 必须先完成。
+    // Core 在 irq_pending 期间停止新取指，保留已接受的 IF 响应；访存/MDU 必须先完成。
+    // 若中断撤销则继续顺序执行；只有真正进入 Trap 的重定向才杀死尚未入流水的取指。
     assign interrupt_take = irq_pending && !pipeline_busy;
     assign interrupt_pc = resume_pc_q;
 

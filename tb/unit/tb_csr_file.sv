@@ -103,6 +103,35 @@ module tb_csr_file;
         else
             assert (read_data == xlen_t'(1)) else $fatal(1, "MINSTRET increment");
 
+        // 显式退休与半宽写在同一沿发生；检查未写半部没有残留的加一或进位。
+        if (XLEN == 32) begin
+            write_csr(CSR_MINSTRETH, '0);
+            write_csr(CSR_MINSTRET, xlen_t'(32'hffff_ffff));
+            @(negedge clk);
+            retire_valid = 1'b1;
+            write_valid = 1'b1;
+            write_addr = CSR_MINSTRET;
+            write_legal_data = '0;
+            @(negedge clk);
+            retire_valid = 1'b0;
+            write_valid = 1'b0;
+            read_addr = CSR_MINSTRETH; #1;
+            assert (read_data == 0) else $fatal(1, "MINSTRET low write leaked high carry");
+
+            @(negedge clk);
+            retire_valid = 1'b1;
+            write_valid = 1'b1;
+            write_addr = CSR_MINSTRETH;
+            write_legal_data = 5;
+            @(negedge clk);
+            retire_valid = 1'b0;
+            write_valid = 1'b0;
+            read_addr = CSR_MINSTRET; #1;
+            assert (read_data == 0) else $fatal(1, "MINSTRETH write incremented low half");
+            read_addr = CSR_MINSTRETH; #1;
+            assert (read_data == 5) else $fatal(1, "MINSTRETH write lost");
+        end
+
         // 先打开 MIE，验证 trap 保存到 MPIE，随后 MRET 能恢复原中断状态。
         write_csr(CSR_MSTATUS, xlen_t'(32'h1808));
         read_addr = CSR_MSTATUS; #1;
