@@ -3,6 +3,7 @@
 module ex_stage (
     input  logic                         clk,
     input  logic                         rst,
+    input  logic                         older_instruction_pending,
     input  logic                         mdu_operands_ready, // M-use
     input  logic                         advance, // M-use
     input  logic                         cancel, // M-use
@@ -40,6 +41,8 @@ module ex_stage (
     xlen_t csr_new_data;
     exception_t execute_exc;
     logic mdu_selected;
+    logic mdu_execution_stall;
+    logic counter_wait;
 
     // GPR 前递：MEM 比 WB 更新，因此 gpr_bypass 内部优先选择 MEM。
     gpr_bypass u_rs1_bypass (
@@ -121,7 +124,7 @@ module ex_stage (
         .clk, .rst, .cancel, .mdu_operands_ready, .advance,
         .packet_valid(in_packet.valid), .exception_valid(execute_exc.valid),
         .uop(in_packet.uop), .forwarded_rs1, .forwarded_rs2,
-        .selected(mdu_selected), .execution_stall,
+        .selected(mdu_selected), .execution_stall(mdu_execution_stall),
         .req_ready(mdu_req_ready), .req_valid(mdu_req_valid), .request(mdu_request)
     );
 
@@ -134,6 +137,16 @@ module ex_stage (
         .branch_target,
         .exception(execute_exc)
     );
+
+    // MINSTRET 的隐式退休增量不能由普通 CSR 写旁路表示，等较老指令全部退休后读取。
+    // 复用 EX_WAIT 保持本条与年轻指令；普通 CSR 仍使用原有前递，不增加等待。
+    always_comb begin
+        counter_wait = in_packet.valid && !execute_exc.valid && in_packet.uop.csr_valid &&
+                       ((in_packet.csr_addr == riscv_priv_pkg::CSR_MINSTRET) ||
+                        (in_packet.csr_addr == riscv_priv_pkg::CSR_MINSTRETH)) &&
+                       older_instruction_pending;
+        execution_stall = mdu_execution_stall || counter_wait;
+    end
 
     // 只为 EX 本级新发现的异常请求序列化，前级异常已经在 D1 处理。
     always_comb begin

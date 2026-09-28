@@ -135,7 +135,9 @@ CSR 旁路也不能用在途的零写入覆盖硬件 pending。
 机器中断按 MEI > MSI > MTI 优先；须同时满足全局 MIE、对应 mie 和 mip。
 基础语义参照 [RISC-V Machine-Level ISA](https://docs.riscv.org/reference/isa/v20260120/priv/machine.html)。
 
-检测到可服务中断后停止新取指、丢弃年轻 IF 响应，已进入流水的指令继续排空。
+检测到可服务中断后只停止新取指，保留已接受的 IF 请求/缓冲并允许它们继续推进。
+只有真正进入 Trap 的重定向才丢弃尚未入流水的旧响应；若中断提前撤销或被 CSR 屏蔽，
+继续原指令流，不能因提前清 IF 而跳过指令。已进入流水的指令继续排空。
 已接受的 Load/Store、MDU 必须完成；同步异常先提交。
 `interrupt_entry` 记录实际退休后继 PC，包括已跳转的分支/JAL/JALR；
 排空后将其写入 mepc，mcause[XLEN-1] 置 1，mtval 为 0，进入 mtvec。

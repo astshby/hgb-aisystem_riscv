@@ -178,12 +178,14 @@ module core (
         .fetch_request_enable
     );
 
+    // IRQ 排空只停新请求，保留已接受的 IF 包；中断撤销不能丢失已推进 PC 对应的指令。
+    // 真正进入 Trap 后，仍由 selected_redirect 杀死旧路径取指。
     if_stage u_if_stage (
         .clk,
         .rst,
         .fetch_request_enable(fetch_request_enable && !irq_pending),
         .out_ready(fetch_ready),
-        .flush(frontend_flush || irq_pending),
+        .flush(frontend_flush),
         .redirect(selected_redirect),
         .prediction,
         .out_packet(fetch_packet),
@@ -234,6 +236,7 @@ module core (
     ex_stage u_ex_stage (
         .clk,
         .rst,
+        .older_instruction_pending(ex_mem_q.valid || mem_wb_q.valid),
         .mdu_operands_ready,
         .advance(ex_stage_advance),
         .cancel(wb_redirect.valid),

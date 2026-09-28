@@ -26,6 +26,8 @@ ready-valid 存储器协议。
   MDU 请求接受后将指令元数据送入 EX/MEM。
 - MEM 发射一次 Load/Store 请求，或拼接已寄存的 MDU 结果；未就绪时保持流水。
 - WB 接收 Load/Store 完成响应，作为 GPR/CSR、计数器和 Trap 的架构提交点。
+- MINSTRET/H 在 EX 等较老 MEM/WB 指令退休后访问，保证隐式退休增量的程序顺序；
+  普通 CSR 仍使用前递。RV32 显式写任一半均抑制该指令对整个 MINSTRET 的增量。
 - 同步异常在发现时清除年轻指令，携带 metadata 到 WB 后精确提交。
 - JAL 只训练 BTB；JALR 训练 BTB；条件分支训练 BTB、PHT 和 GHR。
 

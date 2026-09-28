@@ -1,5 +1,35 @@
 # 设计调整记录
 
+## 2026-09-29（Asia/Shanghai）— 同步修复 IRQ 撤销与 MINSTRET
+
+- 按用户确认在两仓 TCM/MMIO、完整 AXI/DMA、Cache 三阶段同步同一 Core/TB 修复；
+  hgb 完整 S3 对应 soc/s3-dma-validation；main 与较早的 S3 单拍桥分支不动。
+- IRQ pending 仅停止新取指，保留已接受请求；真正 Trap 才清 IF，避免撤销/屏蔽后丢指令。
+- EX 对合法 MINSTRET/H 等待较老 MEM/WB 退休；普通 CSR 前递不变。RV32 显式写任一半
+  抑制整个 MINSTRET 的自身退休增量。非对齐访问仍精确触发异常，ma_data 继续 SKIP。
+- 新增退休计数参考模型，扩充中断撤销/CSR 屏蔽及同拍半宽写测试；保留注释与功能分块。
+- 每分支双位宽均 42 unit + 17 directed PASS、1 SKIP；Core-only ISA 58/78 PASS、
+  各 2 SKIP；SoC ISA 59/79 PASS、各 1 SKIP。C smoke、Core/SoC CoreMark 两模式、
+  外设软件均 PASS；S2 SoC TB 每位宽 3 PASS，S3/S4 为 5 PASS，DMA 两配置均 PASS。
+- 说明与完整验证边界见 understand/CPU_IRQ_COUNTER_FIX.md；更新硬件规划、外设契约。
+  本轮本地提交，不推送、不合并 main；没有实现 Cache 或改变 ISA 非对齐访问策略。
+
+## 2026-09-28（Asia/Shanghai）— Astra CPU 整体审核与 Cache 设计
+
+- 按用户要求由 Astra 只读审核 pre-SoC CPU 全路径，对照 rhbyv `3936a52`，
+  测试当前 `b30d8bc`；不回退 S0/S2 的错误响应、排序与中断接口。
+- 复现三项未修复问题：IRQ 撤销可能丢失指令、MINSTRET EX 读遗漏前序退休、
+  RV32 MINSTRET 半宽显式写未抑制整条计数器自身增量。
+- 两种 XLEN 的 `make test` 均 42 unit + 16 directed PASS、1 SKIP；
+  Core-only ISA 分别 58/58、78/78 PASS，各跳过 fence_i/ma_data。
+  Astra 额外 5 次临时诊断共 6 项失败检查；不将常规回归通过称为无缺陷。
+- 新增 `understand/CORE_ASTRA_REVIEW.md` 和 `understand/S4_CACHE_DESIGN.md`，
+  更新索引。建议先关闭 CPU 缺陷，再按 I$ → WT/NWA D$ 实施，各 4 KiB、
+  两路、32 B 行作为初始配置；明确真实 DDR 测试、FENCE.I、DMA 与错误回退。
+- 本轮仅文档修改，未修改 RTL/正式 TB/脚本、未实现 Cache、未提交或推送；
+  SoC 全套、CoreMark、多后端完整 CPU 矩阵、综合与上板未重跑。
+
+
 ## 2026-09-28（Asia/Shanghai）— S3 DMA 与仿真外存闭环
 
 - `soc_top` 加入 CPU I/D + DMA 三主端口互连；DMA 以独立主端搬运，寄存器仍为
