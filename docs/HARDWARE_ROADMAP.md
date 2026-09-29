@@ -26,6 +26,8 @@ ready-valid 存储器协议。
   MDU 请求接受后将指令元数据送入 EX/MEM。
 - MEM 发射一次 Load/Store 请求，或拼接已寄存的 MDU 结果；未就绪时保持流水。
 - WB 接收 Load/Store 完成响应，作为 GPR/CSR、计数器和 Trap 的架构提交点。
+- MINSTRET/H 在 EX 等较老 MEM/WB 指令退休后访问，保证隐式退休增量的程序顺序；
+  普通 CSR 仍使用前递。RV32 显式写任一半均抑制该指令对整个 MINSTRET 的增量。
 - 同步异常在发现时清除年轻指令，携带 metadata 到 WB 后精确提交。
 - JAL 只训练 BTB；JALR 训练 BTB；条件分支训练 BTB、PHT 和 GHR。
 
@@ -164,16 +166,22 @@ RV32 58/58、RV64 78/78，各明确跳过 `fence_i` 与 `ma_data`。六种 MDU �
 `2.897145 CoreMark/MHz`；RV64 28 次迭代/10854767 ticks，
 `2.579512 CoreMark/MHz`。这是仿真周期效率，FPGA 时序与板级频率仍待测量。
 
-## 无 Cache SoC：S0 → S2
+## 无 Cache SoC：S0 → S3
 
 - S0：读写完成响应、访存大小、access fault、FENCE/FENCE.I 与物理地址契约；
   见 [SoC 访存契约](SOC_BUS_CONTRACT.md)。
 - S1：Boot ROM、I/D-TCM、系统路由、统一存储器仿真与 CoreMark，已集成验证。
 - S2：两 UART、机器/通用 Timer 各一、三 GPIO、机器中断与外设验证，已实现。
   验收入口：`soc-test`、`soc-software`、`soc-riscv-tests`、`soc-coremark`。
-- S3：DDR 桥与 DMA。当前独立 AXI4 单笔桥已开始实现/验证；顶层外存、DMA 和三主仲裁尚未接入。
-  接口边界和后续顺序见 [外存与 DMA](SOC_EXTERNAL_MEMORY.md)。
-- S4：盘古 IP/引脚与板级闭环。各步骤独立交接。
+- S3：三主端口仲裁、单通道 DMA、可选外存窗口与 AXI4 单拍桥完成双位宽
+  模块、CPU 软件和既有 Core/SoC 回归。DDR3 控制器/PHY 未实现；外存仅是仿真模型。
+  `soc-dma-software` 覆盖 TCM/外存双向搬运、ID 7 中断、错误和外存取指。
+  接口边界见 [外存与 DMA](SOC_EXTERNAL_MEMORY.md)。
+- S4：`s4/cache` 保留两路阻塞式 I$/WT-NWA D$ 验收基线。
+- S5：`s5/cache-up` 升级 WB/WA D$，添加脏逐出、clean/flush/invalidate、DMA 交接与 FENCE.I 发布屏障；入口 `make cache-test`。
+  维护协议增加完成状态与错误报告，拒绝直接丢弃脏行；DMA 交接前后都需维护。
+  独立 DDR CoreMark、I/D/DMA 压力测试及性能优化仍待后续。
+  盘古与 Zynq 的 DDR3 IP、引脚、时钟及上板验证继续后推。
 
 ## 阶段 C：C 扩展
 

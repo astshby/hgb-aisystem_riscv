@@ -46,8 +46,10 @@ Core 与存储器的时序契约详见 [存储器握手解读](understand/MEMORY
 | `make coremark XLEN=32` | 执行 CoreMark 校准、performance 与 validation；不属于 `make test` |
 | `make mdu-backends XLEN=32` | 先运行正式 ISA 回归，再运行六种 MDU 配置各 5 项 M 整核测试和全部 UM |
 | `make soc-lint XLEN=32` | lint 可移植 SoC 顶层 |
-| `make soc-test XLEN=32` | 两种互连仲裁、ROM/TCM、外设 MMIO 与独立 AXI4 桥测试 |
+| `make cache-test XLEN=32` | I$/旧 WT D$/WB D$ 各四配置、维护控制器两配置及四组 DDR 集成，共 18 PASS；同样运行 XLEN=64 |
+| `make soc-test XLEN=32` | 两种互连仲裁、ROM/TCM、外设、DMA 与独立 AXI4 桥测试 |
 | `make soc-software XLEN=32` | C 程序验证全部设备 IRQ、MRET 和同步访问错误 |
+| `make soc-dma-software XLEN=32` | CPU C 程序验证 DMA、ID 7 IRQ、TCM/外存搬运和外存取指 |
 | `make soc-smoke XLEN=32` | ROM 启动、I/D-TCM 布局的裸机 C 冒烟 |
 | `make soc-riscv-tests XLEN=32` | 统一物理 I-TCM 执行 MI/UI/UM，包含 fence_i |
 | `make soc-coremark XLEN=32` | 在 I/D-TCM 上运行 CoreMark performance/validation |
@@ -137,6 +139,8 @@ Core-only 结果为 RV32 `58/58`（MI 10 + UI 40 + UM 8）、RV64 `78/78`
 ## SoC 镜像与测试
 
 `make soc-software` 使用 `tb/soc/irq_crt0.S` 和 `peripheral_smoke.c`；
+`make soc-dma-software` 使用同一启动环境和 `dma_smoke.c`，分别运行关闭外存与
+64 KiB AXI RAM 两种配置。后者是功能模型，并非真实 DDR3 时序。
 UART/GPIO 在 TB 引脚侧环回，软件实际配置设备、接收中断、claim/complete 并 MRET，
 不是绕过 UART 状态机或伪造 CSR。普通 `soc-smoke`/`soc-coremark` 不打开外设 IRQ。
 镜像测试均保留 tohost 被动监视；benchmark 字符输出仍是 RAM 镜像，不声称经过 UART。
@@ -258,3 +262,9 @@ vivado -mode batch -source scripts/vivado/program.tcl \
 接成零，工程尚未加载 BRAM IP 或 XDC；上述命令不能生成可运行的板级 CPU。
 后续需完成存储器适配、时钟、复位、引脚和实现报告。若接入 Zynq 的 PS DDR，
 须另定 PS 初始化与 PS–PL 端口方案；只用 PL 的首版不依赖 PS DDR。
+
+Cache 软件回归由 `run_icache_software.sh` 与 `run_dcache_software.sh` 驱动；后者同时
+运行 D$ 开/关，检查 dirty 可见性、clean/flush/invalidate、DMA 部分写失败。
+I$ 软件另注入 FENCE.I 自动写回错误，确认停取指且无年轻提交；不是以超时当 PASS。
+SoC benchmark harness 支持 `SOC_DCACHE_ENABLE=0/1`（默认 1），不同配置使用独立
+构建目录；`+FAULT_READ/+FAULT_WRITE` 仅在 AXI RAM 模型注入地址错误，不进入 RTL。
