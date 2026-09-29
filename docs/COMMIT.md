@@ -1,5 +1,12 @@
 # 设计调整记录
 
+## 2026-09-29（Asia/Shanghai）— hgb SoC 开发分支收敛
+
+- 将 `docs/soc-learning-map` 改名为 `SOC/all`。当前文件树沿用 S5，未改 `vsrc/`、`tb/`、`scripts/`、`benchmark/` 或 Makefile；旧 S2/S3/S4/S5 分支头与早期 MDU 分支头以仅记录历史的 merge 接入，合并前后文件树哈希相同。
+- hgb 保留 `main` 和 `SOC/all`；阶段差异改用可达的提交定位。rhbyv 的学习分支不动。`docs/` 仍有 28 个文件，README、正式接口和 understand 导读已改用当前分支与历史提交；两仓的 S3 完整 DMA 硬件、测试、脚本和 benchmark 内容一致。
+- `make test XLEN=32/64`：每种位宽 42 项单元 PASS、17 项整核定向 PASS、1 项不适用位宽 SKIP；`make cache-test XLEN=32/64`：各 18 PASS。Markdown 相对链接、文档文件数和旧分支提交可达性均检查通过。
+- 本轮未修改 RTL，因此未重跑 riscv-tests、CoreMark、SoC 软件测试或 FPGA 流程；这些验证结论仍以先前 S5 记录为准。
+
 ## 2026-09-29（Asia/Shanghai）— S5 WB/WA Cache 升级
 
 - 两仓从已保存的 S4 基线新建 `s5/cache-up`；S4 提交为 rhbyv `72a3235`、
