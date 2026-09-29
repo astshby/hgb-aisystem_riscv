@@ -177,7 +177,10 @@ RV32 58/58、RV64 78/78，各明确跳过 `fence_i` 与 `ma_data`。六种 MDU �
   模块、CPU 软件和既有 Core/SoC 回归。DDR3 控制器/PHY 未实现；外存仅是仿真模型。
   `soc-dma-software` 覆盖 TCM/外存双向搬运、ID 7 中断、错误和外存取指。
   接口边界见 [外存与 DMA](SOC_EXTERNAL_MEMORY.md)。
-- S4：从独立 `s4/cache` 分支实现两路组相联 I$/D$，定义 DMA 一致性维护并回归。
+- S4：`s4/cache` 保留两路阻塞式 I$/WT-NWA D$ 验收基线。
+- S5：`s5/cache-up` 升级 WB/WA D$，添加脏逐出、clean/flush/invalidate、DMA 交接与 FENCE.I 发布屏障；入口 `make cache-test`。
+  维护协议增加完成状态与错误报告，拒绝直接丢弃脏行；DMA 交接前后都需维护。
+  独立 DDR CoreMark、I/D/DMA 压力测试及性能优化仍待后续。
   盘古与 Zynq 的 DDR3 IP、引脚、时钟及上板验证继续后推。
 
 ## 阶段 C：C 扩展

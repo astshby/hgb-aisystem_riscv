@@ -1,5 +1,8 @@
 # DMA 搬运、进度与中断的完整路径
 
+> 本文保留 S3 无 Cache 验证与后续设计背景。当前已实现 S5 WB/WA D$；
+> DMA 交接前后必须按 [S5 维护协议](S5_CACHE_WRITEBACK.md) 执行，不能只等待 DONE。
+
 ## 谁是主端，谁是从端
 
 CPU 向 `0x1003_0000` 写寄存器时，走的是 CPU D 主端 → 互连 → DMA MMIO 从端。
