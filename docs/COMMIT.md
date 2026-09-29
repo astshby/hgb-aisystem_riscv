@@ -1,5 +1,49 @@
 # 设计调整记录
 
+## 2026-09-29（Asia/Shanghai）— S5 WB/WA Cache 升级
+
+- 两仓从已保存的 S4 基线新建 `s5/cache-up`；S4 提交为 rhbyv `72a3235`、
+  hgb `4f0ddcb`。不改 main/S2/S3，不删除分支。保留注释、功能分块和 S4 WT 回归参考。
+- D$ 改为两路阻塞式 write-back/write-allocate；Store hit 合并字节并置脏，
+  Store miss 先填行，脏 victim 全行写回成功后才替换。失败保留 valid/dirty/data。
+- 新增 `cache_writeback`、`dcache_meta_array`、`cache_maintenance_controller`，
+  `cache_pkg` 仅定义枚举；旧实现保留为 `dcache_wt`，SoC 不实例化旧策略。
+  共用 `cache_port/cache_refill` 增加维护归属和分配失败回退控制，I$ 保留原失效/排空机制。
+- `soc_info/soc_peripherals/soc_top` 接入异步 clean/flush/invalidate 命令、
+  busy/error/fatal 与真实故障地址。原 0x20 写 1 的软件必须升级为检查完成状态。
+  invalidate 拒绝脏行；不会替软件悄悄丢弃数据或覆盖 DMA 新结果。
+- FENCE.I 退休立即阻止新取指，自动 clean D$ 成功后恢复；失败 fail-stop 到复位。
+  普通逐出错误返回当前触发替换的访问错误，不宣称能追溯旧 Store 的精确异常。
+  无新机器检查 Trap、超时恢复或硬件 DMA 一致性；普通 FENCE 不清缓存。
+- 新增 WB 字节记分板 TB、维护控制器 TB 和 C 维护辅助头；更新 SoC MMIO TB、
+  改码/数据交接程序及缓存 runner。覆盖每个写回 beat 错误与重试、脏失效拒绝、
+  原 Store 回退、混合冲突、旧响应反压中的维护排队、FENCE.I 失败禁止年轻提交。
+- 两仓 README 分别维护，正式接口/目录/路线/测试文档同步。
+  学习文档新增 [S5 写回解读](understand/S5_CACHE_WRITEBACK.md)，S4 文档加历史版本说明。
+  没有修改 Core、MDU、vendor、只读 riscv-tests checkout、软件路线或 LICENSE。
+- 两仓均独立完成 RV32/RV64 完整回归，以下结果已逐项核对；中断的 hgb RV64 后半段已补跑通过。
+
+| 每仓每位宽的测试分类 | RV32 | RV64 |
+|---|---|---|
+| Cache 专项 | 18 PASS / 0 SKIP | 18 PASS / 0 SKIP |
+| Core 单元 | 42 PASS / 0 SKIP | 42 PASS / 0 SKIP |
+| Core 定向 | 17 PASS / 1 位宽 SKIP | 17 PASS / 1 位宽 SKIP |
+| Core-only riscv-tests | 58 PASS / 2 SKIP | 78 PASS / 2 SKIP |
+| SoC riscv-tests | 59 PASS / 1 SKIP | 79 PASS / 1 SKIP |
+| SoC 模块 / 外设 C / DMA C | 5 / 1 / 2 PASS | 5 / 1 / 2 PASS |
+| Core-only 与 SoC C smoke | 各 1 PASS | 各 1 PASS |
+| Core-only 与 SoC CoreMark | 各 performance/validation 2 PASS | 各 performance/validation 2 PASS |
+
+ISA 跳过项仍为 Core-only 的 fence_i/ma_data，SoC 仅 ma_data；无新增跳过。
+Core/SoC lint 通过，SoC 未报告 LATCH/UNOPTFLAT/MULTIDRIVEN。
+默认 m0d0、固定 32/29 次迭代，Core-only/TCM SoC 的 CoreMark/MHz 仍为
+`2.897145 / 2.579496`；这是基线保持，不是 WB DDR 性能结论。
+日志在各仓忽略的 `logs/s5-*`；rhbyv Cache 聚合日志为 `s5-cache32/64.log`。
+
+未运行：厂商综合/上板/DDR3 时序、DDR CoreMark、长时随机 I/D/DMA 压力、
+全 MDU 后端矩阵（本轮 MDU 未改）、AXI burst/多核/MMU/CMO 验证。
+远程 PR 尚未创建：环境无 gh 或可调用 GitHub PR 工具；不直接 push main、不自合并。
+
 ## 2026-09-29（Asia/Shanghai）— S4 验收基线
 
 - 用户确认 S4 完成，保存已同步、已双位宽验证的 I$/WT-NWA D$ 基线，再分支到 s5/cache-up。

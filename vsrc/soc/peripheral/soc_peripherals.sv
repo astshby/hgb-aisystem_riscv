@@ -14,7 +14,11 @@ module soc_peripherals #(
     input logic [31:0] gpio_in [3],
     output logic [31:0] gpio_out [3], gpio_oe [3],
     output logic irq_software, irq_timer, irq_external,
-    output logic dcache_invalidate,
+    output logic cache_command_valid,
+    output cache_pkg::cache_maint_op_e cache_command,
+    input logic cache_command_ready, cache_busy, cache_fatal,
+    input cache_pkg::cache_maint_error_e cache_error,
+    input core_types_pkg::xlen_t cache_fault_addr,
     output logic dma_req_valid,
     input logic dma_req_ready,
     output bus_types_pkg::bus_req_t dma_request,
@@ -74,7 +78,8 @@ module soc_peripherals #(
                .DCACHE_BYTES(DCACHE_BYTES), .DCACHE_LINE_BYTES(DCACHE_LINE_BYTES)) u_info (
         .clk, .rst, .req_valid(s_req_valid[13]), .req_ready(s_req_ready[13]),
         .request(s_request[13]), .rsp_valid(s_rsp_valid[13]),
-        .rsp_ready(s_rsp_ready[13]), .response(s_response[13]), .dcache_invalidate
+        .rsp_ready(s_rsp_ready[13]), .response(s_response[13]), .cache_command_valid, .cache_command,
+        .cache_command_ready, .cache_busy, .cache_fatal, .cache_error, .cache_fault_addr
     );
 
 endmodule

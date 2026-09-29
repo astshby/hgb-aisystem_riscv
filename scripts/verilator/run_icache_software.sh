@@ -24,3 +24,10 @@ if grep -Eq '(%Fatal|%Error|Assertion failed)' "${log}"; then
     exit 1
 fi
 grep -E '^(PASS soc-icache|CACHE )' "${log}"
+
+# 已退休 Store 的写回失败不能假装 FENCE.I 成功，观察停取指且无更年轻提交。
+fatal_log="${log%.log}-fatal.log"
+"${sim_dir}/V${bench_top}" +IMEM="${image_dir}/imem.hex" +DMEM="${image_dir}/dmem.hex" \
+    +TOHOST="${tohost_addr}" +CONSOLE="${console_addr}" +FAULT_WRITE=80000200 \
+    +EXPECT_CACHE_FATAL +TEST=soc-cache-fatal +MAX_CYCLES=2000000 >"${fatal_log}" 2>&1 || { tail -n 20 "${fatal_log}"; exit 1; }
+grep '^PASS soc-cache-fatal' "${fatal_log}"

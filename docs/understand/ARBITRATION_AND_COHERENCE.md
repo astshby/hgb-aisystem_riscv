@@ -1,5 +1,8 @@
 # 三主端口仲裁、TCM 与未来 Cache 一致性
 
+> 本文保留 S3 无 Cache 验证与后续设计背景。当前已实现 S5 WB/WA D$；
+> DMA 交接前后必须按 [S5 维护协议](S5_CACHE_WRITEBACK.md) 执行，不能只等待 DONE。
+
 ## 同一物理地址为何会竞争
 
 CPU 的 I 口、D 口与 DMA 是三个请求方。I-TCM、D-TCM 各是一块单端口 RAM bank，

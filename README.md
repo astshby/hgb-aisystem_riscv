@@ -18,8 +18,9 @@ Core 使用独立的指令和数据 ready/valid 接口，不直接实例化 FPGA
 - JAL 在 D1 解析；条件分支与 JALR 在 EX 解析。
 - `muldiv_unit` 独立于流水级：EX 内的 `ex_mdu` 发射请求，MEM 内的 `mem_mdu` 接收并拼接结果；package 仅保留类型与常量。
 - 三主端口互连和单通道 DMA 已接入 SoC；AXI4 单拍桥与可变延迟 RAM 完成外存仿真闭环。
-- DDR 已接入两路阻塞式 I$/D$（各默认 4 KiB/32 B 行）；I$ 支持 FENCE.I，D$ 使用 WT/NWA。
-- D$ 提供系统 MMIO 全失效，用于 DMA 成功或部分失败后的软件交接；TCM/MMIO 旁路。
+- DDR 已接入两路阻塞式 I$/D$（各默认 4 KiB/32 B 行）；D$ 使用 WB/WA，FENCE.I 等待脏代码发布后恢复取指。
+- D$ 提供 MMIO clean/flush/invalidate 及状态，DMA 使用显式所有权交接；TCM/MMIO 旁路。
+- 脏逐出失败保留缓存数据；FENCE.I 自动写回失败停取指直到复位，不宣称具备机器检查恢复。
 - CSR 在 EX 完成读改写与 WARL，WB 执行架构提交。
 - SoC：启动 ROM、I/D-TCM、2 路 UART、机器/通用 Timer、3 组 GPIO、外部中断汇聚与 DMA。
 - `mie/mip` 接入真实设备电平；中断排空流水，保存实际后继 PC 后进入 Direct `mtvec`。
@@ -30,7 +31,8 @@ Core 使用独立的指令和数据 ready/valid 接口，不直接实例化 FPGA
 - CoreMark 1.0 performance/validation CRC 均通过；默认 MDU 配置的固定迭代数结果：
   RV32 `2.897145`、RV64 `2.579496 CoreMark/MHz`（Verilator 周期成绩）。
 
-S3 DMA/外存功能仿真已完成；`s4/cache` 已加入 I$/D$、DDR 改码与 DMA 数据维护验证，
+S3 DMA/外存与 S4 WT/NWA Cache 保留验收基线；`s5/cache-up` 已升级 WB/WA 与维护协议，
+Cache 专项 RV32/RV64 各 18 PASS，设计见 [写回与数据交接](docs/understand/S5_CACHE_WRITEBACK.md)。
 独立 DDR CoreMark 和三主端口 Cache 压力测试仍待后续。盘古 676-200K Pro、Zynq-7020 的 DDR3 IP 和上板时序验证继续后推。
 软件栈和 AI 功能仍是独立后续目标；以上成绩不代表 FPGA Fmax。
 

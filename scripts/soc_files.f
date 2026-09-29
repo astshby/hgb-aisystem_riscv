@@ -1,4 +1,5 @@
 -f scripts/rtl_files.f
+vsrc/pkg/cache_pkg.sv
 vsrc/soc/bus/bus_interconnect.sv
 vsrc/soc/bus/local_to_axi.sv
 vsrc/soc/memory/tcm_controller.sv
@@ -22,5 +23,9 @@ vsrc/soc/cache/cache_data_array.sv
 vsrc/soc/cache/cache_meta_array.sv
 vsrc/soc/cache/cache_refill.sv
 vsrc/soc/cache/icache.sv
+vsrc/soc/cache/cache_writeback.sv
+vsrc/soc/cache/dcache_meta_array.sv
+vsrc/soc/cache/dcache_wt.sv
 vsrc/soc/cache/dcache.sv
+vsrc/soc/cache/cache_maintenance_controller.sv
 vsrc/soc/soc_top.sv

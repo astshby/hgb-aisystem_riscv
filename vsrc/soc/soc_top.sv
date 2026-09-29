@@ -55,7 +55,11 @@ module soc_top #(
     bus_rsp_t fetch_response;
     bus_req_t fetch_request, data_request;
     bus_rsp_t data_response;
-    logic dcache_invalidate;
+    logic cache_command_valid, cache_command_ready, cache_busy, cache_fatal, fetch_block, cache_imem_ready;
+    cache_pkg::cache_maint_op_e cache_command, maint_op;
+    cache_pkg::cache_maint_error_e cache_error, maint_error, cache_fault_code;
+    xlen_t cache_fault_addr, maint_fault_addr, backend_fault_addr;
+    logic maint_req_valid, maint_req_ready, maint_rsp_valid, maint_rsp_ready, cache_fault_valid;
     logic fence_i_commit;
     logic [14:0] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready;
     bus_req_t s_request [15];
@@ -95,16 +99,29 @@ module soc_top #(
     icache #(.ENABLE(ICACHE_ENABLE), .DDR_BYTES(DDR_BYTES),
              .CACHE_BYTES(ICACHE_BYTES), .LINE_BYTES(ICACHE_LINE_BYTES)) u_icache (
         .clk, .rst, .invalidate(fence_i_commit),
-        .req_valid(imem_req_valid), .req_ready(imem_req_ready), .request(fetch_request),
+        .req_valid(imem_req_valid && !fetch_block), .req_ready(cache_imem_ready), .request(fetch_request),
         .rsp_valid(imem_rsp_valid), .rsp_ready(imem_rsp_ready), .response(fetch_response),
         .mem_req_valid(m_req_valid[0]), .mem_req_ready(m_req_ready[0]), .mem_request(m_request[0]),
         .mem_rsp_valid(m_rsp_valid[0]), .mem_rsp_ready(m_rsp_ready[0]), .mem_response(m_response[0])
     );
 
-    // 数据缓存只覆盖 DDR；系统 MMIO 维护脉冲与 FENCE.I 分离，不暗改普通 FENCE 的语义。
+    // FENCE.I 先作废旧 I$，清脏数据期间不接受新取指；旧 IF 响应仍可排空。
+    assign imem_req_ready = cache_imem_ready && !fetch_block;
+    cache_maintenance_controller #(.ACTIVE(DCACHE_ENABLE && DDR_BYTES != 0)) u_cache_maintenance (
+        .clk, .rst, .fence_i_commit, .command_valid(cache_command_valid), .command_ready(cache_command_ready),
+        .command(cache_command), .busy(cache_busy), .fetch_block, .fatal(cache_fatal),
+        .error(cache_error), .fault_addr(cache_fault_addr),
+        .maint_req_valid, .maint_req_ready, .maint_op, .maint_rsp_valid, .maint_rsp_ready,
+        .maint_error, .maint_fault_addr, .cache_fault_valid, .cache_fault_code,
+        .cache_fault_addr(backend_fault_addr)
+    );
+
+    // 数据缓存只覆盖 DDR；系统 MMIO 与 FENCE.I 共用维护引擎，普通 FENCE 仍不执行 Cache flush。
     dcache #(.ENABLE(DCACHE_ENABLE), .DDR_BYTES(DDR_BYTES),
              .CACHE_BYTES(DCACHE_BYTES), .LINE_BYTES(DCACHE_LINE_BYTES)) u_dcache (
-        .clk, .rst, .invalidate(dcache_invalidate),
+        .clk, .rst, .maint_req_valid, .maint_req_ready, .maint_op, .maint_rsp_valid, .maint_rsp_ready,
+        .maint_error, .maint_fault_addr, .fault_valid(cache_fault_valid),
+        .fault_code(cache_fault_code), .fault_addr(backend_fault_addr),
         .req_valid(dmem_req_valid), .req_ready(dmem_req_ready), .request(data_request),
         .rsp_valid(dmem_rsp_valid), .rsp_ready(dmem_rsp_ready), .response(data_response),
         .mem_req_valid(m_req_valid[1]), .mem_req_ready(m_req_ready[1]), .mem_request(m_request[1]),
@@ -159,7 +176,8 @@ module soc_top #(
                       .DCACHE_LINE_BYTES(DCACHE_LINE_BYTES),
                       .UART_DIVISOR(UART_DIVISOR)) u_peripherals (
         .clk, .rst, .uart_rx, .uart_tx, .gpio_in, .gpio_out, .gpio_oe,
-        .irq_software, .irq_timer, .irq_external, .dcache_invalidate,
+        .irq_software, .irq_timer, .irq_external, .cache_command_valid, .cache_command,
+        .cache_command_ready, .cache_busy, .cache_fatal, .cache_error, .cache_fault_addr,
         .dma_req_valid(m_req_valid[2]), .dma_req_ready(m_req_ready[2]),
         .dma_request(m_request[2]), .dma_rsp_valid(m_rsp_valid[2]),
         .dma_rsp_ready(m_rsp_ready[2]), .dma_response(m_response[2]),

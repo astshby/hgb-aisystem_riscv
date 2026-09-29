@@ -7,6 +7,7 @@ module cache_refill #(
 ) (
     input logic clk, rst,
     input logic start_valid,
+    input logic fallback_enable,
     output logic start_ready,
     input bus_types_pkg::bus_req_t request,
     output logic done_valid,
@@ -30,7 +31,7 @@ module cache_refill #(
     bus_req_t request_q;
     bus_rsp_t response_q;
     logic [WORD_W-1:0] word_q;
-    logic installable_q;
+    logic installable_q, fallback_q;
     xlen_t beat_addr;
     localparam int BYTE_W = $clog2(WORD_BYTES);
 
@@ -61,10 +62,12 @@ module cache_refill #(
             request_q <= '0;
             response_q <= '0;
             installable_q <= 1'b0;
+            fallback_q <= 1'b0;
         end else begin
             case (state_q)
                 IDLE: if (start_valid) begin
                     request_q <= request;
+                    fallback_q <= fallback_enable;
                     word_q <= '0;
                     response_q <= '0;
                     installable_q <= 1'b0;
@@ -72,7 +75,10 @@ module cache_refill #(
                 end
                 SEND: if (mem_req_ready) state_q <= WAIT_DATA;
                 WAIT_DATA: if (mem_rsp_valid) begin
-                    if (mem_response.error != BUS_OK) state_q <= RETRY_SEND;
+                    if (mem_response.error != BUS_OK) begin
+                        response_q <= mem_response;
+                        state_q <= fallback_q ? RETRY_SEND : DONE;
+                    end
                     else begin
                         if (word_q == request_q.addr[BYTE_W +: WORD_W]) response_q <= mem_response;
                         if (word_q == WORD_W'(LINE_BYTES/WORD_BYTES-1)) begin

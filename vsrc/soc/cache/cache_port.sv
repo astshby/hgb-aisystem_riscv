@@ -7,6 +7,8 @@ module cache_port #(
     parameter int unsigned LINE_BYTES = 32
 ) (
     input logic clk, rst, invalidate,
+    input logic maintenance_active, maintenance_pending,
+    output logic idle,
     input logic req_valid,
     output logic req_ready,
     input bus_types_pkg::bus_req_t request,
@@ -59,18 +61,19 @@ module cache_port #(
     assign response = cached_q ? cache_response : (buffer_valid_q ? buffer_q : mem_response);
     assign response_fire = rsp_valid && rsp_ready;
     assign available = !active_q || (!cached_q && response_fire);
-    assign req_ready = !rst && !invalidate && available && (cacheable ? cache_req_ready : mem_req_ready);
+    assign idle = !active_q;
+    assign req_ready = !rst && !invalidate && !maintenance_active && !maintenance_pending && available && (cacheable ? cache_req_ready : mem_req_ready);
     assign request_fire = req_valid && req_ready;
-    assign cache_req_valid = !rst && !invalidate && available && req_valid && cacheable;
+    assign cache_req_valid = !rst && !invalidate && !maintenance_active && !maintenance_pending && available && req_valid && cacheable;
     assign cache_request = request;
     assign cache_rsp_ready = active_q && cached_q && rsp_ready;
 
     // 在途填行独占本主端口；一次只下发一笔子事务，响应握手不依赖 CPU 的反压。
-    assign mem_req_valid = active_q && cached_q ? refill_req_valid :
-                           (!rst && !invalidate && available && req_valid && !cacheable);
-    assign mem_request = active_q && cached_q ? refill_request : request;
-    assign refill_req_ready = active_q && cached_q && mem_req_ready;
-    assign refill_rsp_valid = active_q && cached_q && mem_rsp_valid;
+    assign mem_req_valid = (maintenance_active || (active_q && cached_q)) ? refill_req_valid :
+                           (!rst && !invalidate && !maintenance_active && !maintenance_pending && available && req_valid && !cacheable);
+    assign mem_request = (maintenance_active || (active_q && cached_q)) ? refill_request : request;
+    assign refill_req_ready = (maintenance_active || (active_q && cached_q)) && mem_req_ready;
+    assign refill_rsp_valid = (maintenance_active || (active_q && cached_q)) && mem_rsp_valid;
     assign refill_response = mem_response;
     assign mem_rsp_ready = 1'b1;
 

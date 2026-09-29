@@ -1,5 +1,8 @@
 # D$：写穿透、MMIO 旁路与 DMA 数据交接
 
+> 版本说明：本文保留 S4 实现及验证记录。S5 已采用 WB/WA、异步维护状态和 FENCE.I 发布屏障；
+> 当前软件交接与错误限制以 [S5 解读](S5_CACHE_WRITEBACK.md) 为准，不能照搬旧写穿透流程。
+
 2026-09-29（Asia/Shanghai）。本轮在 `s4/cache` 的 I$ 基础上加入两路阻塞式 D$。
 设计基线见 [S4 方案](S4_CACHE_DESIGN.md)，I$ 时序见 [I$ 解读](ICACHE_IMPLEMENTATION.md)。
 

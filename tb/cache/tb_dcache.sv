@@ -1,5 +1,5 @@
 // Module: tb_dcache
-// Description: Independent byte-memory scoreboard for WT/NWA, errors, maintenance and bypass.
+// Description: S4 reference byte-memory scoreboard for WT/NWA, errors, maintenance and bypass.
 module tb_dcache #(
     parameter bit ENABLE = 1'b1,
     parameter int CACHE_BYTES = 128,
@@ -28,7 +28,7 @@ module tb_dcache #(
     byte unsigned memory [8208];
     int cycles = 0, delay_q = 0, transfers = 0, checks = 0, writes = 0;
 
-    dcache #(.ENABLE(ENABLE), .CACHE_BYTES(CACHE_BYTES), .DDR_BYTES(DDR_BYTES)) dut (.*);
+    dcache_wt #(.ENABLE(ENABLE), .CACHE_BYTES(CACHE_BYTES), .DDR_BYTES(DDR_BYTES)) dut (.*);
     address_decode #(.DDR_BYTES(DDR_BYTES)) decoder (
         .request(saved_request), .target, .error(decoded_error)
     );

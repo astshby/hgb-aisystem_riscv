@@ -4,7 +4,7 @@ xlen="${1:-32}"
 export CCACHE_TEMPDIR="${PWD}/build/ccache-tmp"
 export CCACHE_DIR="${PWD}/build/ccache"
 mkdir -p "${CCACHE_TEMPDIR}" "${CCACHE_DIR}" logs
-for test_name in tb_icache tb_dcache; do
+for test_name in tb_icache tb_dcache tb_dcache_wb; do
     for config in small default disabled absent; do
         parameters=()
         case "${config}" in
@@ -25,6 +25,17 @@ for test_name in tb_icache tb_dcache; do
         fi
         grep "PASS ${test_name}" "${log}"
     done
+done
+for active in 1 0; do
+    out_dir="build/verilator/cache-rv${xlen}/maintenance-${active}"
+    log="logs/cache-rv${xlen}-maintenance-${active}.log"
+    mkdir -p "${out_dir}"
+    verilator -Wall -Wno-fatal --assert --timing --binary \
+        -DCORE_XLEN="${xlen}" -Mdir "${out_dir}" -f scripts/soc_files.f \
+        tb/cache/tb_cache_maintenance.sv -GACTIVE="${active}" \
+        --top-module tb_cache_maintenance >"${log}" 2>&1
+    "${out_dir}/Vtb_cache_maintenance" >>"${log}" 2>&1 || { tail -n 20 "${log}"; exit 1; }
+    grep "PASS tb_cache_maintenance" "${log}"
 done
 bash scripts/verilator/run_icache_software.sh "${xlen}"
 bash scripts/verilator/run_dcache_software.sh "${xlen}"

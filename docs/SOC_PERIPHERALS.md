@@ -152,17 +152,24 @@ MRET 恢复 MIE/MPIE 并从 mepc 继续。mtvec 仍仅支持 Direct 模式。
 | 偏移 | 寄存器 | 语义 |
 |---|---|---|
 | `0x00/04/08/0c` | XLEN/CLOCK_HZ/ITCM_BYTES/DTCM_BYTES | 原有只读信息 |
-| `0x20` | DCACHE_INVALIDATE | 写 bit 0=1 全失效，读恒 0；零值/零掩码无副作用 |
-| `0x24` | DCACHE_ENABLED | 只读 bit 0：D$ 开关开启且 DDR_BYTES 非零 |
+| `0x20` | DCACHE_COMMAND | 写 1=invalidate、2=clean、3=flush；读 0，写 0/零掩码无副作用 |
+| `0x24` | DCACHE_CAPS | bit 0=启用，bit 1=写回；当前有效配置返回 3，否则 0 |
 | `0x28/2c` | DCACHE_BYTES/LINE_BYTES | 只读配置容量，默认 4096/32 |
+| `0x30` | DCACHE_STATUS | bit 0=busy，1=error，2=fatal；[4:3] 错误码：0=无，1=写回错误，2=拒绝脏行失效 |
+| `0x34` | DCACHE_FAULT_ADDR | 只读，实际故障写回 beat/脏行的 32 位物理地址 |
 
 维护寄存器有效写掩码中的保留位非零返回 SLVERR，不触发维护；写只读寄存器报错。
-命令脉冲寄存一拍，清 valid 的沿不晚于该写响应的 CPU 消费沿。响应反压不会重复触发。
-这是项目自定义 MMIO 协议，不是 Zicbom 或普通 FENCE 的隐藏行为。
+控制器在请求接受沿入队，响应反压不重复执行；忙/致命错误时拒绝非零新命令。
+命令响应只表示入队，不是维护完成；软件轮询 STATUS，确认 busy=0 且 error=0。
+维护借用同一 D 主端口时，状态读也可能反压。无从端响应超时机制。
+新软件命令清除先前错误；自动 FENCE.I clean 不清历史错误记录。fatal 只能复位解除。
+这是项目 MMIO 协议，不是 Zicbom。旧版只写 1 不检查状态的维护代码需要升级。
 
-DMA 完成或报错后，CPU 读取可能被 DMA 修改的 DDR 前须写此命令；错误也可能已有
-部分写入。DMA 工作时不得访问或修改交接的缓存行。D$ 为写穿透，无 dirty/clean；
-FENCE.I 仅负责代码可见性，不代替 D$ 维护。
+clean 发布脏行并保留 valid；flush 发布后失效；invalidate 拒绝丢弃脏数据。
+写回失败保留原脏行，已完成的 beat 不回滚。DMA 交出目的区前先 flush，
+DONE/ERROR 后 invalidate 并确认成功；CPU→DMA 先 clean/flush。
+DMA 期间不能修改交接行；全局维护期间避免其他 DDR 写入，使用 TCM 栈。
+FENCE.I 自动 clean D$ 并失效 I$；失败停取指，CPU 不能继续跑软件错误处理程序。
 CLOCK_HZ 是平台参数，不是测出的 FPGA Fmax。
 
 `make soc-lint`、`soc-test`、`soc-software`、`soc-smoke`、

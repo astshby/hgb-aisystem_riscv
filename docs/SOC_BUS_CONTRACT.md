@@ -29,12 +29,14 @@ Package 只保存常量、枚举和结构体；访问判断在模块内完成。
 ## 排序与复位
 
 FENCE/FENCE.I 在 D1 序列化，清除年轻指令，等旧访存完成后在 WB 退休，
-从顺序 PC 恢复取指。当前 D$ 为写穿透且无写缓冲，保守地执行完整排序。
+从顺序 PC 恢复取指。普通 FENCE 只保证顺序，不要求写回脏行。
+SoC 在 FENCE.I 退休同拍阻止新取指，完成全 D$ clean 后恢复；失败则停取指直到复位。
 Core 输出退休事件 `fence_i_commit`：FENCE.I 清除 I$ valid、BTB/PHT 和待训练项，避免旧跳转被改成普通指令后仍沿旧预测取指。
 已接受的错误路径取指响应必须排空并丢弃，其访问错误不能变成有效 Trap。
 
 全系统复位清除 Core/本地响应状态，但不回滚 RAM 已发生的写入。
 外存桥必须协调复位和外部在途事务，不能只复位 CPU 后遗忘已接受请求。
+复位会清 D$ valid/dirty；若需保存已退休 Store，必须在复位前成功 flush。
 
 ## DDR 指令缓存
 
@@ -60,20 +62,28 @@ D$ 默认参数为 `DCACHE_ENABLE=1`、`DCACHE_BYTES=4096`、
 读 miss 填行；读 hit 返回完整对齐总线字，由原 Load 单元完成 lane/符号扩展。
 读填行失败，按原始地址与 size 回退一次，避免把扩宽读取错误误归给窄读。
 
-Store 命中或缺失都下传原始 addr/size/wdata/wstrb，等待真正的下层写响应：
-成功的命中写按 byte strobe 更新；失败则失效命中行。写缺失不分配、不读填行。
-不提前 ACK，不设 Store buffer 或 dirty。命中响应/填行与 I$ 类似，可反压保持。
+Store hit 按 byte strobe 修改缓存并置 dirty，不访问 DDR；Store miss 先读完整行再合并。
+零 strobe 为无副作用操作。所有 Store 都保留一次 CPU 响应；写回模式的完成不代表 DDR 已更新。
+脏 victim 逐 XLEN 字写回，整行成功才清 dirty/替换；任何 beat 错误均保留原 valid/dirty/data。
+写分配读失败则不安装部分行，只回退一次原 Store，按其真实写响应决定成功或 access fault。
 
-SoC 系统寄存器 `0x10040020` 写 1 执行全 D$ 失效，见
-[寄存器说明](SOC_PERIPHERALS.md)。维护不会取消在途事务或丢掉响应；
-粘滞 discard 防止旧填行/写命中在维护后恢复有效状态。
-CPU 自己的维护命令通过同一个阻塞 D 口进入，较老请求已完成；
-清 valid 与 MMIO 写响应消费有明确先后保证。
+替换时写回失败使**当前触发替换的访问**收到错误；架构 mtval 仍是当前请求地址，
+不是事后给较早退休 Store 精确报错。SoC 状态另存真实写回故障地址；数据仍可重试发布。
+无机器检查/异步总线异常协议。FENCE.I 自动 clean 失败采用 fail-stop，不伪装成功或继续执行旧代码。
 
-DMA 直接读写物理 DDR。CPU→DMA 依靠已完成写穿透及软件排序；
-DMA→CPU 必须等 DONE/ERROR，再全失效，才读目的区。失败时也可能已有部分写入。
-没有改动 DMA 地址许可，没有固定 uncached pool，也没有 cached/uncached 地址别名。
-TCM 始终旁路，无需 D$ 维护。普通 FENCE 只排序，FENCE.I 只维护指令视图。
+系统寄存器 `0x10040020` 写 1/2/3 为全局 invalidate/clean/flush，见
+[寄存器说明](SOC_PERIPHERALS.md)。MMIO 响应仅确认入队；必须查看状态，不能把入队当完成。
+维护等待旧 CPU 响应排空，然后借 D 主端口工作，不取消任何已接受事务。
+维护占用期间新 D 请求会被反压，包括状态读；当前是阻塞式实现，不保证软件超时可打断坏从端。
+
+invalidate 拒绝脏行并报错；clean 保留有效行；flush 成功发布脏数据再失效。
+失败允许已处理的行生效，未完成部分保持可重试，不承诺全缓存原子回滚。
+
+DMA 绕过缓存：CPU→DMA 先 clean/flush 并确认成功；交出 DMA 目的区前先 flush，
+DMA DONE/ERROR 后 invalidate 并确认成功再读取。DMA 期间不能访问交接行，
+也不要新建其他 DDR 脏行干扰全局 invalidate；TCM 代码/栈适合本阶段维护流程。
+错误 DMA 可能部分完成，维护步骤不能省略。DMA 写代码后还须 FENCE.I。
+没有硬件 snoop、固定 uncached pool 或 cached/uncached 别名；TCM/MMIO 始终旁路。
 
 ## 地址与访问属性
 

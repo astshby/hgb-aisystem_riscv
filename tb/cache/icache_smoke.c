@@ -2,6 +2,7 @@
  * Description: Real DDR execution, CPU/DMA self-modifying code and FENCE.I integration.
  */
 #include <stdint.h>
+#include "cache_maintenance.h"
 
 #define REG32(a) (*(volatile uint32_t *)(uintptr_t)(a))
 #define CODE 0x80000200u
@@ -28,7 +29,7 @@ int main(void)
     if (((int (*)(void))(uintptr_t)(CODE + 0x100))() != 16) return 8;
     if (function() != 37) return 9; /* 重新预热，即将由 CPU 改写的行。 */
 
-    /* 数据口采用写穿透，写完成后 DDR 已更新，但普通 FENCE 不负责 I$ 失效。 */
+    /* 写命中只更新 D$；普通 FENCE 不发布脏行，也不使 I$ 失效。 */
     REG32(CODE) = 0x02b00513u;
     __asm__ volatile("fence rw, rw" ::: "memory");
     if (REG32(CODE) != 0x02b00513u) return 2;
@@ -37,6 +38,7 @@ int main(void)
     if (function() != 43) return 4;
 
     /* 必须预热目的代码，再由 DMA 改写；首次执行新地址不能证明失效有效。 */
+    if (cache_maintain(CACHE_FLUSH)) return 10;
     replacement[0] = 0x03b00513u;
     replacement[1] = 0x00008067u;
     REG32(DMA) = (uint32_t)(uintptr_t)&replacement[0];
@@ -49,5 +51,7 @@ int main(void)
     if (REG32(DMA + 20) != sizeof(replacement)) return 6;
     __asm__ volatile("fence.i" ::: "memory");
     if (function() != 59) return 7;
+    if (cache_maintain(CACHE_INVALIDATE)) return 11;
+    if (REG32(CODE) != replacement[0]) return 12;
     return 0;
 }

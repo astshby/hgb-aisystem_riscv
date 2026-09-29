@@ -100,13 +100,14 @@ module tb_soc_benchmark #(
 
     // Cache 统计来自真实 DDR 取指事务，而非 TCM 软件是否 PASS。
     integer cache_hits = 0, ddr_fetches = 0, fence_commits = 0;
-    integer dcache_hits = 0, dcache_invalidations = 0;
+    integer dcache_hits = 0, dcache_commands = 0;
+    integer fatal_cycles = 0;
     always_ff @(posedge clk) begin
         if (!rst) begin
             if (dut.u_icache.touch && !dut.u_icache.install) cache_hits <= cache_hits + 1;
             if (ddr_req_valid && ddr_req_ready && ddr_request.execute) ddr_fetches <= ddr_fetches + 1;
             if (dut.u_dcache.touch && !dut.u_dcache.install) dcache_hits <= dcache_hits + 1;
-            if (dut.dcache_invalidate) dcache_invalidations <= dcache_invalidations + 1;
+            if (dut.cache_command_valid && dut.cache_command_ready) dcache_commands <= dcache_commands + 1;
             if (dut.fence_i_commit) fence_commits <= fence_commits + 1;
         end
     end
@@ -149,7 +150,19 @@ module tb_soc_benchmark #(
                 $display("COMMIT pc=%h inst=%h rd=%0d we=%0b data=%h exc=%0b",
                          commit_pc, commit_inst, commit_rd, commit_rd_we,
                          commit_rd_data, commit_exception);
+            if ($test$plusargs("EXPECT_CACHE_FATAL") && dut.cache_fatal) begin
+                assert (dut.fetch_block && !dut.imem_req_ready && !commit_valid &&
+                        dut.cache_error == cache_pkg::CACHE_WRITEBACK_ERROR &&
+                        dut.cache_fault_addr == XLEN'(fault_write_addr) && fence_commits != 0)
+                    else $fatal(1, "FENCE.I writeback failure did not stop younger execution");
+                fatal_cycles++;
+                if (fatal_cycles == 32) begin
+                    $display("PASS soc-cache-fatal RV%0d cycles=%0d fault=%h", XLEN, cycles, dut.cache_fault_addr);
+                    completed = 1; break;
+                end
+            end
             if (test_done) begin
+                assert (!$test$plusargs("EXPECT_CACHE_FATAL")) else $fatal(1, "missing expected cache failure");
                 assert (test_pass)
                     else $fatal(1, "FAIL %s code=%0d pc=%h inst=%h",
                                 test_name, test_code, commit_pc, commit_inst);
@@ -161,11 +174,11 @@ module tb_soc_benchmark #(
                              cache_hits, ddr_fetches, fence_commits);
                 end
                 if ($test$plusargs("DCACHE_CHECKS")) begin
-                    assert ((!DCACHE_ENABLE || dcache_hits >= 8) && dcache_invalidations >= 2)
-                        else $fatal(1, "missing D-cache coverage hits=%0d invalidations=%0d",
-                                    dcache_hits, dcache_invalidations);
-                    $display("DCACHE enabled=%0d hits=%0d invalidations=%0d",
-                             DCACHE_ENABLE, dcache_hits, dcache_invalidations);
+                    assert ((!DCACHE_ENABLE || dcache_hits >= 8) && dcache_commands >= 2)
+                        else $fatal(1, "missing D-cache coverage hits=%0d commands=%0d",
+                                    dcache_hits, dcache_commands);
+                    $display("DCACHE enabled=%0d hits=%0d commands=%0d",
+                             DCACHE_ENABLE, dcache_hits, dcache_commands);
                 end
                 $display("PASS %s RV%0d cycles=%0d", test_name, XLEN, cycles);
                 completed = 1'b1;

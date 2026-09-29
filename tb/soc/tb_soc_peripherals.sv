@@ -13,9 +13,13 @@ module tb_soc_peripherals;
     logic [31:0] gpio_in [3] = '{default:'0};
     logic [31:0] gpio_out [3], gpio_oe [3];
     logic irq_software, irq_timer, irq_external;
-    logic dcache_invalidate;
+    logic cache_command_valid, cache_command_ready = 1;
+    cache_pkg::cache_maint_op_e cache_command;
+    logic cache_busy = 0, cache_fatal = 0;
+    cache_pkg::cache_maint_error_e cache_error = cache_pkg::CACHE_OK;
+    xlen_t cache_fault_addr = '0;
     int invalidations = 0;
-    always_ff @(posedge clk) if (!rst && dcache_invalidate) invalidations <= invalidations + 1;
+    always_ff @(posedge clk) if (!rst && cache_command_valid && cache_command_ready) invalidations <= invalidations + 1;
     logic [14:4] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready;
     bus_req_t s_request [4:14], request;
     bus_rsp_t s_response [4:14], response;
@@ -39,7 +43,8 @@ module tb_soc_peripherals;
     assign s_response[14] = '0;
     soc_peripherals #(.UART_DIVISOR(8)) dut (
         .clk, .rst, .uart_rx, .uart_tx, .gpio_in, .gpio_out, .gpio_oe,
-        .irq_software, .irq_timer, .irq_external, .dcache_invalidate,
+        .irq_software, .irq_timer, .irq_external, .cache_command_valid, .cache_command, .cache_command_ready,
+        .cache_busy, .cache_fatal, .cache_error, .cache_fault_addr,
         .dma_req_valid, .dma_req_ready, .dma_request,
         .dma_rsp_valid, .dma_rsp_ready, .dma_response,
         .s_req_valid(s_req_valid[13:4]), .s_req_ready(s_req_ready[13:4]),
@@ -264,9 +269,23 @@ module tb_soc_peripherals;
         assert (value == 0) else $fatal(1, "invalidate command is not persistent state");
         wr(SOC_BASE + 32'h20, 1, 0);
         wr(SOC_BASE + 32'h20, 0);
-        wr(SOC_BASE + 32'h20, 2, 4'hf, BUS_SLVERR);
+        wr(SOC_BASE + 32'h20, 4, 4'hf, BUS_SLVERR);
         wr(SOC_BASE + 32'h24, 1, 4'hf, BUS_SLVERR);
         assert (invalidations == 1) else $fatal(1, "masked/invalid write triggered maintenance");
+        wr(SOC_BASE + 32'h20, 2);
+        wr(SOC_BASE + 32'h20, 3);
+        assert (invalidations == 3) else $fatal(1, "clean/flush command missing");
+        cache_command_ready = 0; cache_busy = 1;
+        wr(SOC_BASE + 32'h20, 2, 4'hf, BUS_SLVERR);
+        rd(SOC_BASE + 32'h30, value);
+        assert (value == 1 && invalidations == 3) else $fatal(1, "busy command accepted");
+        cache_busy = 0; cache_fatal = 1; cache_error = cache_pkg::CACHE_WRITEBACK_ERROR;
+        cache_fault_addr = xlen_t'(32'h80000118);
+        rd(SOC_BASE + 32'h30, value, 3);
+        assert (value == 14) else $fatal(1, "cache error status");
+        rd(SOC_BASE + 32'h34, value);
+        assert (value == 32'h80000118) else $fatal(1, "cache fault address");
+        wr(SOC_BASE + 32'h30, 0, 4'hf, BUS_SLVERR);
         $display("PASS tb_soc_peripherals RV%0d transfers=%0d", XLEN, checks);
         $finish;
     end

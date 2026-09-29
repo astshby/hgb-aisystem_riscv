@@ -1,5 +1,8 @@
 # S4 Cache：Astra 复核与最简实现设计
 
+> 版本说明：本文保留 S4 实现及验证记录。S5 已采用 WB/WA、异步维护状态和 FENCE.I 发布屏障；
+> 当前软件交接与错误限制以 [S5 解读](S5_CACHE_WRITEBACK.md) 为准，不能照搬旧写穿透流程。
+
 > 2026-09-28（Asia/Shanghai）初始设计；2026-09-29 更新实施状态：
 > 两路 I$/D$ 已实现并接入 SoC；D$ 采用 WT/NWA 与 MMIO 全失效。
 > DMA 数据采用显式维护方案，不限制为固定 uncached pool。见 [D$ 实现解读](DCACHE_IMPLEMENTATION.md)。
