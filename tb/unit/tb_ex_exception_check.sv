@@ -30,7 +30,7 @@ module tb_ex_exception_check;
         in_packet.exc.cause = EXC_BREAKPOINT;
         in_packet.exc.tval = xlen_t'(32'h44);
         in_packet.uop.csr_valid = 1'b1;
-        in_packet.csr_addr = CSR_MIE;
+        in_packet.csr_addr = 12'h7c0;
         #1;
         assert (exception.valid && exception.cause == EXC_BREAKPOINT &&
                 exception.tval == xlen_t'(32'h44))
@@ -39,9 +39,9 @@ module tb_ex_exception_check;
         // 未实现的 CSR 访问按照 RISC-V 规则产生非法指令异常。
         in_packet = '0;
         in_packet.valid = 1'b1;
-        in_packet.inst = 32'h3040_2073;
+        in_packet.inst = 32'h7c00_2073;
         in_packet.uop.csr_valid = 1'b1;
-        in_packet.csr_addr = CSR_MIE;
+        in_packet.csr_addr = 12'h7c0;
         #1;
         assert (exception.valid && exception.cause == EXC_ILLEGAL_INST &&
                 exception.tval == xlen_t'(in_packet.inst))

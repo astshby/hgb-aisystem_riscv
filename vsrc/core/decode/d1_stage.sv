@@ -47,10 +47,11 @@ module d1_stage (
         .exception(decoded_exc)
     );
 
-    // 译码异常和 MRET 都要先清除年轻指令，再等待 WB 完成 Trap/返回。
+    // 译码异常、MRET 和 FENCE 先清除年轻指令，再等待 WB 完成 Trap/返回/排序。
     always_comb begin
         serialize_req = in_packet.valid &&
-                        (decoded_exc.valid || (uop.sys_op == SYS_MRET));
+                        (decoded_exc.valid || (uop.sys_op == SYS_MRET) ||
+                         (uop.sys_op == SYS_FENCE) || (uop.sys_op == SYS_FENCE_I));
     end
 
     // JAL 控制：JAL 不进入 GHR，但需要写入 BTB；真正推进时由 core 放行更新。

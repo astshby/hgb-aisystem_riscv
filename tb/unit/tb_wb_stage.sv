@@ -24,6 +24,9 @@ module tb_wb_stage;
     xlen_t commit_rd_data;
     logic commit_exception;
 
+    logic dmem_rsp_error = 1'b0;
+    mem_wb_t commit_packet;
+
     wb_stage dut (.*);
 
     initial begin
@@ -86,6 +89,32 @@ module tb_wb_stage;
             else $fatal(1, "faulting load response handling");
         assert (!gpr_write.valid && !csr_write.valid && commit_exception)
             else $fatal(1, "faulting load architectural effects");
+
+        // Store 请求被接受不等于完成；错误响应也只能退休一次，且不写寄存器。
+        in_packet = '0;
+        in_packet.valid = 1'b1;
+        in_packet.uop.mem_write = 1'b1;
+        in_packet.result = xlen_t'(32'h1000_0000);
+        dmem_rsp_valid = 1'b0;
+        #1;
+        assert (wait_for_response && dmem_rsp_ready && !commit_valid)
+            else $fatal(1, "Store retired before write response");
+        dmem_rsp_valid = 1'b1;
+        dmem_rsp_error = 1'b1;
+        #1;
+        assert (commit_valid && commit_exception && !gpr_write.valid &&
+                commit_packet.exc.cause == EXC_STORE_ACCESS_FAULT &&
+                commit_packet.exc.tval == in_packet.result)
+            else $fatal(1, "Store access fault metadata");
+        in_packet.uop.mem_write = 1'b0;
+        in_packet.uop.mem_read = 1'b1;
+        in_packet.uop.gpr_write = 1'b1;
+        in_packet.rd = 5'd3;
+        #1;
+        assert (commit_exception && !gpr_write.valid &&
+                commit_packet.exc.cause == EXC_LOAD_ACCESS_FAULT)
+            else $fatal(1, "Load error wrote GPR");
+        dmem_rsp_error = 1'b0;
 
         // 穷举有效位、异常、Load 与返回组合，检查精简后的提交/等待互斥关系。
         for (int bits = 0; bits < 32; bits++) begin

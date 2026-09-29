@@ -1,6 +1,6 @@
 // Module: sim_dmem
 // Description: Non-synthesizable one-cycle byte-write data memory model.
-// 数据mem，与指令imem类似，但是数据需要写入(读取有两次握手，rsp+req，但是写入仅仅握手一次)
+// 数据存储模型支持字节写；读写都具有请求和完成响应，响应必须保持到接收。
 module sim_dmem #(
     parameter int unsigned DEPTH_WORDS = 4096
 ) (
@@ -31,7 +31,9 @@ module sim_dmem #(
                 rsp_valid <= 1'b0;
 
             if (req_valid && req_ready) begin
-                // 写入没有涉及rsp握手，rsp_ready读取后自动发出
+                // 请求只执行一次；Store 在写入沿后给出完成响应，允许 WB 确认退休。
+                rsp_valid <= 1'b1;
+                rsp_rdata <= '0;
                 if (req_write) begin
                     for (byte_idx = 0; byte_idx < DBUS_BYTES; byte_idx = byte_idx + 1) begin
                         if (req_wstrb[byte_idx])
@@ -40,7 +42,6 @@ module sim_dmem #(
                     end
                 end
                 else begin
-                    rsp_valid <= 1'b1;
                     rsp_rdata <= mem[req_addr[$clog2(DBUS_BYTES) +: $clog2(DEPTH_WORDS)]]; //64/32的地址处理,给出的地址都是相对字节位
                 end
             end

@@ -42,8 +42,8 @@ package core_types_pkg;
     typedef enum logic [1:0] { MEM_BYTE, MEM_HALF, MEM_WORD, MEM_DWORD } mem_size_e;
     typedef enum logic [2:0] { WB_NONE, WB_ALU, WB_LOAD, WB_SEQ_PC, WB_CSR } wb_sel_e;//SEQ_PC：顺序PC写回（j）
     typedef enum logic [1:0] { CSR_RW, CSR_RS, CSR_RC } csr_cmd_e;
-    typedef enum logic [1:0] { SYS_NONE, SYS_ECALL, SYS_EBREAK, SYS_MRET } sys_op_e;//涉及特权指令：ecall，ebreak，M级别的reset，none，一般指令是none
-                                                                                    //ecall，ebreak，mret都涉及csr的写入/读取，一定注意！
+    typedef enum logic [2:0] { SYS_NONE, SYS_ECALL, SYS_EBREAK, SYS_MRET, SYS_FENCE, SYS_FENCE_I } sys_op_e;//涉及特权指令：ecall，ebreak，M级别的reset，none，一般指令是none
+                                                                                    //ecall，ebreak，mret都涉及csr的写入/读取；FENCE 系列只负责排序/取指同步。
 
     // 乘除法请求状态寄存器，用于提交乘除法运算（由于乘除法跨周期，便于管理寄存器与连线，alu与branch就没必要的了）
     typedef struct packed {

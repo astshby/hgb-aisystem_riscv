@@ -1,5 +1,257 @@
 # 设计调整记录
 
+## 2026-09-29（Asia/Shanghai）— hgb SoC 开发分支收敛
+
+- 将 `docs/soc-learning-map` 改名为 `SOC/all`。当前文件树沿用 S5，未改 `vsrc/`、`tb/`、`scripts/`、`benchmark/` 或 Makefile；旧 S2/S3/S4/S5 分支头与早期 MDU 分支头以仅记录历史的 merge 接入，合并前后文件树哈希相同。
+- hgb 保留 `main` 和 `SOC/all`；阶段差异改用可达的提交定位。rhbyv 的学习分支不动。`docs/` 仍有 28 个文件，README、正式接口和 understand 导读已改用当前分支与历史提交；两仓的 S3 完整 DMA 硬件、测试、脚本和 benchmark 内容一致。
+- `make test XLEN=32/64`：每种位宽 42 项单元 PASS、17 项整核定向 PASS、1 项不适用位宽 SKIP；`make cache-test XLEN=32/64`：各 18 PASS。Markdown 相对链接、文档文件数和旧分支提交可达性均检查通过。
+- 本轮未修改 RTL，因此未重跑 riscv-tests、CoreMark、SoC 软件测试或 FPGA 流程；这些验证结论仍以先前 S5 记录为准。
+
+## 2026-09-29（Asia/Shanghai）— S5 WB/WA Cache 升级
+
+- 两仓从已保存的 S4 基线新建 `s5/cache-up`；S4 提交为 rhbyv `72a3235`、
+  hgb `4f0ddcb`。不改 main/S2/S3，不删除分支。保留注释、功能分块和 S4 WT 回归参考。
+- D$ 改为两路阻塞式 write-back/write-allocate；Store hit 合并字节并置脏，
+  Store miss 先填行，脏 victim 全行写回成功后才替换。失败保留 valid/dirty/data。
+- 新增 `cache_writeback`、`dcache_meta_array`、`cache_maintenance_controller`，
+  `cache_pkg` 仅定义枚举；旧实现保留为 `dcache_wt`，SoC 不实例化旧策略。
+  共用 `cache_port/cache_refill` 增加维护归属和分配失败回退控制，I$ 保留原失效/排空机制。
+- `soc_info/soc_peripherals/soc_top` 接入异步 clean/flush/invalidate 命令、
+  busy/error/fatal 与真实故障地址。原 0x20 写 1 的软件必须升级为检查完成状态。
+  invalidate 拒绝脏行；不会替软件悄悄丢弃数据或覆盖 DMA 新结果。
+- FENCE.I 退休立即阻止新取指，自动 clean D$ 成功后恢复；失败 fail-stop 到复位。
+  普通逐出错误返回当前触发替换的访问错误，不宣称能追溯旧 Store 的精确异常。
+  无新机器检查 Trap、超时恢复或硬件 DMA 一致性；普通 FENCE 不清缓存。
+- 新增 WB 字节记分板 TB、维护控制器 TB 和 C 维护辅助头；更新 SoC MMIO TB、
+  改码/数据交接程序及缓存 runner。覆盖每个写回 beat 错误与重试、脏失效拒绝、
+  原 Store 回退、混合冲突、旧响应反压中的维护排队、FENCE.I 失败禁止年轻提交。
+- 两仓 README 分别维护，正式接口/目录/路线/测试文档同步。
+  学习文档新增 [S5 写回解读](understand/S5_CACHE_WRITEBACK.md)，S4 文档加历史版本说明。
+  没有修改 Core、MDU、vendor、只读 riscv-tests checkout、软件路线或 LICENSE。
+- 两仓均独立完成 RV32/RV64 完整回归，以下结果已逐项核对；中断的 hgb RV64 后半段已补跑通过。
+
+| 每仓每位宽的测试分类 | RV32 | RV64 |
+|---|---|---|
+| Cache 专项 | 18 PASS / 0 SKIP | 18 PASS / 0 SKIP |
+| Core 单元 | 42 PASS / 0 SKIP | 42 PASS / 0 SKIP |
+| Core 定向 | 17 PASS / 1 位宽 SKIP | 17 PASS / 1 位宽 SKIP |
+| Core-only riscv-tests | 58 PASS / 2 SKIP | 78 PASS / 2 SKIP |
+| SoC riscv-tests | 59 PASS / 1 SKIP | 79 PASS / 1 SKIP |
+| SoC 模块 / 外设 C / DMA C | 5 / 1 / 2 PASS | 5 / 1 / 2 PASS |
+| Core-only 与 SoC C smoke | 各 1 PASS | 各 1 PASS |
+| Core-only 与 SoC CoreMark | 各 performance/validation 2 PASS | 各 performance/validation 2 PASS |
+
+ISA 跳过项仍为 Core-only 的 fence_i/ma_data，SoC 仅 ma_data；无新增跳过。
+Core/SoC lint 通过，SoC 未报告 LATCH/UNOPTFLAT/MULTIDRIVEN。
+默认 m0d0、固定 32/29 次迭代，Core-only/TCM SoC 的 CoreMark/MHz 仍为
+`2.897145 / 2.579496`；这是基线保持，不是 WB DDR 性能结论。
+日志在各仓忽略的 `logs/s5-*`；rhbyv Cache 聚合日志为 `s5-cache32/64.log`。
+
+未运行：厂商综合/上板/DDR3 时序、DDR CoreMark、长时随机 I/D/DMA 压力、
+全 MDU 后端矩阵（本轮 MDU 未改）、AXI burst/多核/MMU/CMO 验证。
+远程 PR 尚未创建：环境无 gh 或可调用 GitHub PR 工具；不直接 push main、不自合并。
+
+## 2026-09-29（Asia/Shanghai）— S4 验收基线
+
+- 用户确认 S4 完成，保存已同步、已双位宽验证的 I$/WT-NWA D$ 基线，再分支到 s5/cache-up。
+- 本次仅整理本地提交，不改 S4 行为；测试结果复用下方 D$ 交付记录与现有日志。
+- main、S2、S3 不变；S5 的写回/写分配、DMA 与维护协议变更另行记录。
+
+## 2026-09-29（Asia/Shanghai）— WT/NWA D$ 与显式 DMA 数据维护
+
+- 在两仓当前 s4/cache 上继续实现，不动 main、S2、S3；保留上一轮 I$ 未提交成果、
+  现有注释和功能分块。Core 流水、load-use、MDU、非对齐异常策略不变。
+- 新增 vsrc/soc/cache/dcache.sv：两路阻塞式，默认 4 KiB/32 B 行。
+  Load 分配填行；Store 全部等待真实下层响应，成功命中按 byte strobe 更新，
+  错误命中失效，写缺失不分配。没有 dirty、Store buffer 或提前 ACK。
+- cache_port 增加数据访问模式；cache_data_array 支持字宽/字节掩码；
+  cache_refill 按 I$ 的 4 B 或 D$ 的 XLEN 填行，失败仍只回退一次原始请求。
+  I$ 算法与 FENCE.I 语义不变。soc_top/soc_peripherals 连接 D$ 与维护信号。
+- soc_info 在既有系统窗口新增 0x20 全失效、0x24 启用状态、0x28/2c 容量/行大小。
+  绝对地址 0x10040020 写 1，读恒 0；命令寄存一拍，失效不晚于写响应消费，
+  反压不重复副作用。DMA 等 DONE/ERROR 后失效再读数据，不限制 DMA 的合法地址，
+  不使用固定 uncached pool。普通 FENCE/FENCE.I 不充当 D$ invalidate。
+- 新增 tb/cache/tb_dcache.sv、dcache_smoke.c、run_dcache_software.sh。
+  更新 Cache runner、benchmark 构建参数/独立目录、SoC harness 的故障注入与计数，
+  外设 TB 验证新寄存器的掩码、非法写和响应反压。修正参数矩阵脚本后逐项核对实际配置。
+- 两仓独立运行 RV32/RV64：Cache 各 11 PASS、0 SKIP（I$/D$ 各 4 配置 + 3 软件）；
+  D$ 四配置检查数 RV32 为 111/111/13/13，RV64 为 112/112/14/14。
+  覆盖原样 Store 载荷、所有宽度/lane、NWA、延迟/错误写、部分副作用、每个填行错误、
+  扩宽失败窄读成功、在途/安装沿失效、旁路交接与协调复位。
+- DDR 软件以 D$ 开/关分别验证 CPU→DMA WT 可见性、预热目的区更新、第二笔 AXI 写错
+  后的部分完成与全失效，并访问独立 DDR 区域与 DMA 竞争；开启各观察 30 hit、2 次维护。
+- 每仓每位宽完整回归：42 unit + 17 directed PASS、1 位宽 SKIP；
+  Core-only ISA 58/58、78/78 PASS，各跳过 fence_i/ma_data；
+  SoC ISA 59/59、79/79 PASS，各仅跳过 ma_data。
+  SoC 模块各 5 PASS（外设 TB 91/93 次传输），外设 C 各 1 PASS，DMA DDR=0/65536 各 2 PASS；
+  Core/SoC C smoke 与 CoreMark performance/validation 均 PASS。
+- TCM/Core-only CoreMark 仍为 RV32 2.897145、RV64 2.579496 CoreMark/MHz，
+  不作为 DDR Cache 性能结论。DDR CoreMark、三主持续压力、完整 mdu-backends 矩阵、
+  BRAM/综合/FPGA 时序未运行；保留既有非致命 lint 告警。
+- 两仓独立更新 README 和维护文档；hgb 新增 understand/DCACHE_IMPLEMENTATION.md，
+  更新 I$ 解读、Cache 设计状态与索引。理解与历史记录不复制到 rhbyv。
+  当前仍是工作区交接，没有 Git commit/push/PR。
+
+## 2026-09-29（Asia/Shanghai）— 两路 I$ 首版与 DDR 改码验证
+
+- 在两仓既有 `s4/cache` 分支实现 I$ 交付，不回改 S2/S3/main；六级流水、load-use、
+  MDU 边界和非对齐异常策略不变。D$ 仍未实现，后续按 WT/NWA 与 DMA 契约推进。
+- 新增 `vsrc/soc/cache/{cache_port,cache_data_array,cache_meta_array,cache_refill,icache}.sv`：
+  默认 4 KiB、两路、32 B 行、同步数据 RAM、一位 LRU；只缓存合法且整行位于 DDR 的取指。
+  RV32/RV64 均发 8 笔 4 B 填行请求，部分失败不安装，按原请求仅回退一次。
+- Core 只导出 `fence_i_commit`；更新 wrappers/TB 接线，SoC 搬迁原 I 响应缓冲至
+  cache_port，保留 TCM 旁路交接和断环。FENCE.I 清 valid，旧填行粘滞 discard 并排空，
+  不复位状态机丢失旧响应；普通 FENCE/分支不失效 I$。保留原注释与功能分块。
+- 新增 `tb/cache/tb_icache.sv`、`icache_smoke.c` 和两个 runner；更新 Makefile、
+  soc_files、SoC harness 的缓冲检查与被动统计。每位宽 Cache 5 PASS、0 SKIP：
+  四种配置单测 + AXI DDR 的分支循环、CPU/DMA 修改预热函数、FENCE.I 集成。
+  单测检查数 RV32 为 59/59/10/10，RV64 为 60/60/11/11；
+  软件每位宽观察 99 hit、40 笔 DDR 取指、4 次 FENCE.I。
+- 两仓均独立执行 RV32/RV64 完整回归：各 42 unit + 17 directed PASS，1 位宽 SKIP；
+  Core-only ISA 为 58/58、78/78 PASS，各 2 SKIP（fence_i、ma_data）；
+  SoC ISA 为 59/59、79/79 PASS，各 1 SKIP（ma_data）。
+  SoC 模块各 5 PASS，外设软件各 1 PASS，DMA 的 DDR=0/65536 各 2 PASS；
+  Core/SoC C smoke、CoreMark performance/validation 均 PASS。
+- 默认 m0d0 的 TCM/Core-only CoreMark 周期成绩未退化：RV32 2.897145、
+  RV64 2.579496 CoreMark/MHz。它们不是 DDR Cache 跑分。
+  未运行 DDR CoreMark、完整 mdu-backends 矩阵、厂商综合、BRAM 映射或上板；
+  lint 存在既有非致命告警，不宣称零告警。
+- 两仓 README 各自更新功能入口，维护硬件目录/契约/规划/工作流；
+  仅 hgb 新增 `understand/ICACHE_IMPLEMENTATION.md` 并更新设计稿与索引。
+  hgb 的 LICENSE、软件路线和两仓 AGENTS 保持不变。当前为工作区交接，
+  尚未 Git commit、push 或创建 PR。
+
+## 2026-09-29（Asia/Shanghai）— 同步修复 IRQ 撤销与 MINSTRET
+
+- 按用户确认在两仓 TCM/MMIO、完整 AXI/DMA、Cache 三阶段同步同一 Core/TB 修复；
+  hgb 完整 S3 对应 soc/s3-dma-validation；main 与较早的 S3 单拍桥分支不动。
+- IRQ pending 仅停止新取指，保留已接受请求；真正 Trap 才清 IF，避免撤销/屏蔽后丢指令。
+- EX 对合法 MINSTRET/H 等待较老 MEM/WB 退休；普通 CSR 前递不变。RV32 显式写任一半
+  抑制整个 MINSTRET 的自身退休增量。非对齐访问仍精确触发异常，ma_data 继续 SKIP。
+- 新增退休计数参考模型，扩充中断撤销/CSR 屏蔽及同拍半宽写测试；保留注释与功能分块。
+- 每分支双位宽均 42 unit + 17 directed PASS、1 SKIP；Core-only ISA 58/78 PASS、
+  各 2 SKIP；SoC ISA 59/79 PASS、各 1 SKIP。C smoke、Core/SoC CoreMark 两模式、
+  外设软件均 PASS；S2 SoC TB 每位宽 3 PASS，S3/S4 为 5 PASS，DMA 两配置均 PASS。
+- 说明与完整验证边界见 understand/CPU_IRQ_COUNTER_FIX.md；更新硬件规划、外设契约。
+  本轮本地提交，不推送、不合并 main；没有实现 Cache 或改变 ISA 非对齐访问策略。
+
+## 2026-09-28（Asia/Shanghai）— Astra CPU 整体审核与 Cache 设计
+
+- 按用户要求由 Astra 只读审核 pre-SoC CPU 全路径，对照 rhbyv `3936a52`，
+  测试当前 `b30d8bc`；不回退 S0/S2 的错误响应、排序与中断接口。
+- 复现三项未修复问题：IRQ 撤销可能丢失指令、MINSTRET EX 读遗漏前序退休、
+  RV32 MINSTRET 半宽显式写未抑制整条计数器自身增量。
+- 两种 XLEN 的 `make test` 均 42 unit + 16 directed PASS、1 SKIP；
+  Core-only ISA 分别 58/58、78/78 PASS，各跳过 fence_i/ma_data。
+  Astra 额外 5 次临时诊断共 6 项失败检查；不将常规回归通过称为无缺陷。
+- 新增 `understand/CORE_ASTRA_REVIEW.md` 和 `understand/S4_CACHE_DESIGN.md`，
+  更新索引。建议先关闭 CPU 缺陷，再按 I$ → WT/NWA D$ 实施，各 4 KiB、
+  两路、32 B 行作为初始配置；明确真实 DDR 测试、FENCE.I、DMA 与错误回退。
+- 本轮仅文档修改，未修改 RTL/正式 TB/脚本、未实现 Cache、未提交或推送；
+  SoC 全套、CoreMark、多后端完整 CPU 矩阵、综合与上板未重跑。
+
+
+## 2026-09-28（Asia/Shanghai）— S3 DMA 与仿真外存闭环
+
+- `soc_top` 加入 CPU I/D + DMA 三主端口互连；DMA 以独立主端搬运，寄存器仍为
+  MMIO 从端。DMA 只访问 TCM/已启用外存，任意错位和尾数可逐字节复制；
+  完成字节数仅在成功写响应后增加。无效范围/重叠启动前拒绝；读写错误不回滚。
+- IRQ 控制器新增 DMA 源 ID 7，状态采用 W1C 电平中断。DDR 窗口默认关闭，
+  启用容量时由可综合本地端口接外部；仿真 harness 接单拍 AXI 桥与反压/故障 RAM。
+  没有实现 DDR3 控制器、PHY、Cache、FPGA 综合或上板。
+- `tb_dma_fabric` 验证跨 TCM/外存搬运、持续 CPU D 竞争、IRQ claim/complete、
+  故障、非法命令、协调复位及复位后恢复；两种 XLEN 均 PASS。
+  `soc-dma-software` 在 RV32/RV64 的无外存与 64 KiB 外存两种配置均 PASS：
+  TCM 搬运、双向外存搬运、ID 7 handler、配置错误和外存取指。
+- 原有 `make soc-test soc-lint` 两种 XLEN 均 PASS；完整 `make test`、
+  Core-only ISA `58/58` 与 `78/78`、SoC ISA `59/59` 与 `79/79`、C smoke、
+  CoreMark performance/validation 均通过。Core-only 跳过 `fence_i/ma_data`，
+  SoC 仅跳过 `ma_data`。S3 不把仿真 RAM 当作 DDR3 性能结果。
+- 同步硬件文档并新增 `understand/` 三篇专题解读；下一步从 `s4/cache`
+  独立分支研究两路组相联 Cache 与 DMA 一致性。板级 DDR3 验证后推。
+
+## 2026-09-28（Asia/Shanghai）— S3 起步：独立 AXI4 单笔桥
+
+- 两仓从各自 S2 提交（rhbyv 58358a1 / hgb de67bbb）新开 soc/s3-axi-dma；
+  S2 与 S1 检查点均保留。S2 分支已推送，未自合并 main。
+- 新增 local_to_axi：32 位物理地址、XLEN 数据、固定 ID=0、单笔在途/单 beat；
+  本地接受后寄存，AW/W 独立握手，B/R 完成后保持本地响应。无新增 Core 时延，
+  因为本轮尚未接到 SoC 顶层，也没有打开 DDR/DMA 地址窗口。
+- 拒绝非法本地格式与高地址截断；窄访问不改 byte lane；传播 SLVERR/DECERR，
+  不发独占，异常多 beat 读排空到 RLAST。复位要求与外部从端协调，不假装可取消已接受写入。
+- 新增 tb_local_to_axi 并纳入 soc-test，覆盖 35/51 次完成、每位宽 4 种协调复位，
+  AW/W 先后、最早/延迟响应、反压、所有对齐 lane、错误和非法请求无副作用。
+- rhbyv 重新执行双位宽 test、riscv-tests 和 soc-test：
+  各 42 unit PASS、16 directed PASS / 1 位宽 SKIP；
+  ISA 58/78 PASS，各 2 SKIP（fence_i、ma_data），原 SoC 三流程与新增 AXI 流程均 PASS。
+  hgb 同步后独立运行两位宽 soc-test，结果一致。
+- 本轮未重复运行 CoreMark：新增桥未接入已测的 Core/SoC 执行路径；S2 的四组
+  performance/validation 结果仍作为该未改路径的基线，而非外存性能。
+  DMA、三主仲裁、DDR 顶层/模型、burst 和板级验证均未完成，见 SOC_EXTERNAL_MEMORY.md。
+- README 各自同步入口；完整记录仅在 hgb。当前无 GitHub CLI/API 凭据，无法自动创建 PR；
+  分支推送后由维护者通过比较入口创建/审阅，不把“已推送”说成“PR 已提交”。
+
+## 2026-09-28（Asia/Shanghai）— S2 外设、中断与完整 SoC 验收
+
+- 完成 S1 顶层集成：ROM 跳转、共享物理 I/D-TCM、专用链接布局、SoC ISA/C/CoreMark harness。
+  同 bank 跨 owner 交接隔一拍，SoC D 优先及 I 响应旁路缓冲切断真实组合环；
+  独立互连仍可选原有轮询模式，不改变 Core-only 的单周期存储路径。
+- S2 新增 UART ×2、机器/通用 Timer 各一、GPIO ×3、SoC 信息寄存器和六源中断汇聚。
+  MMIO 接受沿产生一次副作用，响应可反压；设备边界与只读/W1C 寄存器见 SOC_PERIPHERALS.md。
+- Core 实现 mie/mip、机器软件/定时器/外部中断；停止新取指并排空已入流水的操作。
+  新增 next_pc 与 interrupt_entry，保存已退休分支/JAL/JALR 的实际后继；不取消已接受访存。
+  同步异常优先；MRET 恢复，mtvec 仅 Direct，中断不计入 MINSTRET。未声称完整 PLIC。
+- 新增中断单元/七场景整核 TB、外设握手 TB 和真正运行 C handler 的软硬件闭环；
+  旧 TB 适配 IRQ 输入，CSR 测试不再把已实现的 MIE 当作非法地址。
+- rhbyv 双位宽完整回归：各 42 unit PASS、16 directed PASS / 1 位宽 SKIP；
+  Core-only ISA 58/78 PASS、各 2 SKIP（fence_i、ma_data）；
+  SoC ISA 59/79 PASS、各 1 SKIP（ma_data），FAIL 0。
+- SoC 三项 TB 均 PASS：轮询和 CPU 仲裁各 46/55 checks，外设 82/84 transfers。
+  C 外设中断测试 3625/4169 周期；Core-only C smoke 3317/358，SoC C smoke 3323/364。
+  六 MDU 后端矩阵另跑 RV32 78 / RV64 108 checks PASS。
+- Core-only 与 SoC 均独立运行 CoreMark performance/validation、CRC 均正确：
+  默认 m0d0、BTB64，RV32 32 次 / 11045355 ticks / 2.897145 CoreMark/MHz，
+  RV64 28 次 / 10854767 ticks / 2.579512 CoreMark/MHz。ROM 启动多 6 拍但不在计时区间。
+- hgb 同步后源码/测试/脚本/benchmark 与 rhbyv 逐目录一致；独立复跑两位宽
+  soc-test、soc-software、soc-riscv-tests，结果相同；未声称 hgb 重跑全部 CoreMark。
+- 用户已明确允许 README 功能与入口更新：两仓各自维护，保留 hgb 许可证及软件规划；
+  解读和历史记录仅写入 hgb。未运行厂商综合或上板；DMA/DDR/Cache 留待后续。
+  S1 独立检查点继续保留，不自合并 main。
+
+## 2026-09-27（Asia/Shanghai）— S1 基础设施检查点（尚未完成顶层集成）
+
+- 新增双主端口互连、同步逐字节写 TCM、ROM 复位跳转模块；每主端口最多一笔在途，
+  同 bank 轮询、不同 bank 并行；反压时保持响应和仲裁选择，允许 IF 撤回未接受请求。
+- 修正 ROM RV32 子字读取与类型包导入；保留模块头、中文协议注释和功能分块。
+- 新增 `tb_soc_fabric` 和 `make soc-test`，两仓分别验证 RV32 46 / RV64 55 项检查 PASS。
+- rhbyv 原有回归：每种位宽 41 unit PASS、15 directed PASS / 1 位宽 SKIP；
+  ISA RV32 58 PASS、RV64 78 PASS，各跳过 fence_i、ma_data，FAIL 0。
+  同步后 vsrc、tb、scripts 逐目录一致；hgb 未独立重跑整套 Core 回归。
+- 这是用户要求的可回退检查点，不宣称完整 S1：SoC 顶层、专用镜像、SoC CoreMark 尚未接入。
+  本次未重新跑 CoreMark、厂商综合或 FPGA；README、许可证和软件路线图保持原样。
+- 后续先补齐 SoC 集成，再继续 S2 外设及机器中断；不包含 DMA/DDR 实现。
+
+## 2026-09-27（Asia/Shanghai）— S0 访存完成、访问错误与排序契约
+
+- Core 新增访问大小和 I/D 响应错误；Store 与 Load 都在 WB 接收一次完成响应。
+  WB 输出补充总线异常后的提交包，错误访问不写寄存器，年轻 MEM 不产生副作用。
+- IF 携带取指错误及 PC；D1 优先保留访问错误。FENCE/FENCE.I 在 D1 序列化，
+  排空旧访存后从 WB 顺序 PC 恢复；FENCE.I 清除旧 BTB/PHT 与待训练项。
+- 新增三个 SoC package（无函数）、地址译码和错误从设备；DDR 默认为关闭。
+  TCM、外设及中断尚未接入，不能把 S0 说成完整 SoC。
+- 新增地址/错误握手单元与统一内存整核测试，覆盖延迟写响应、三类访问错误、
+  阻止年轻 Store、自修改代码及已训练的旧 BTB；同步旧 TB 的新接口与 Store ack。
+- rhbyv 最终 RTL 回归：双位宽各 41 unit PASS、15 directed PASS / 1 SKIP；
+  ISA RV32 58 PASS、RV64 78 PASS，各 SKIP fence_i、ma_data，FAIL 0；
+  六后端矩阵分别 78/108 PASS，C smoke 为 3317/358 周期。
+- CoreMark m0d0、BTB64，固定 RV32 32 迭代、RV64 28 迭代：
+  performance 分别 11045355/10854767 ticks，2.897145/2.579512 CoreMark/MHz；
+  performance/validation CRC 均正确，与 S0 修改前的同参数基线完全一致。
+- hgb 同步后的 vsrc、tb、scripts、benchmark 与已测 rhbyv 快照逐目录比较一致；
+  本轮未重复声称在 hgb 独立执行完整回归。未执行 FPGA 综合、时序或上板。
+- 同步接口规范、硬件路线、目录和握手说明；README 功能简介更新暂被自动审核阻止，
+  已请求维护者明确确认，尚未修改 README。
+
 ## 2026-09-27（Asia/Shanghai）— MDU 跨级实例与 MEM 内部拼包
 
 - 以维护者修改并验证的 rhbyv 工作区为硬件同步来源；不在 package 中定义函数。

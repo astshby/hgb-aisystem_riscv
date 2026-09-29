@@ -117,6 +117,29 @@ module tb_sim_memory_handshake;
         assert (dmem_rsp_valid && dmem_rsp_rdata == xlen_t'(32'h4444_4444))
             else $fatal(1, "DMEM replacement response");
 
+        // 写请求也只有一次完成响应；反压期间不能重复写或丢失确认。
+        @(posedge clk);
+        @(negedge clk);
+        dmem_rsp_ready = 1'b0;
+        dmem_req_valid = 1'b1;
+        dmem_req_write = 1'b1;
+        dmem_req_addr = '0;
+        dmem_req_wdata = xlen_t'(32'h0000_aa00);
+        dmem_req_wstrb = DBUS_BYTES'(2);
+        @(posedge clk);
+        @(negedge clk);
+        dmem_req_valid = 1'b0;
+        repeat (3) begin
+            #1;
+            assert (dmem_rsp_valid && !dmem_req_ready && dmem_rsp_rdata == '0 &&
+                    u_dmem.mem[0] == xlen_t'(32'h3333_aa33))
+                else $fatal(1, "Store response or byte enable");
+            @(negedge clk);
+        end
+        dmem_rsp_ready = 1'b1;
+        @(posedge clk);
+        @(negedge clk);
+        assert (!dmem_rsp_valid) else $fatal(1, "Store response repeated");
         $display("PASS tb_sim_memory_handshake RV%0d", XLEN);
         $finish;
     end

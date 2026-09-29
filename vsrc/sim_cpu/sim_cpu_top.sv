@@ -44,6 +44,7 @@ module sim_cpu_top #(
 
     // .name是sv特性，可以用 .* 替代（原理：扫描已有同名信号并直接连接，没有的不连接）
     core u_core (
+        .irq_software(1'b0), .irq_timer(1'b0), .irq_external(1'b0),
         .clk,
         .rst,
         .imem_req_valid,
@@ -51,15 +52,18 @@ module sim_cpu_top #(
         .imem_req_ready,
         .imem_rsp_valid,
         .imem_rsp_data,
+        .imem_rsp_error(1'b0),
         .imem_rsp_ready,
         .dmem_req_valid,
         .dmem_req_write,
+        .dmem_req_size(),
         .dmem_req_addr,
         .dmem_req_wdata,
         .dmem_req_wstrb,
         .dmem_req_ready,
         .dmem_rsp_valid,
         .dmem_rsp_rdata,
+        .dmem_rsp_error(1'b0),
         .dmem_rsp_ready,
         .commit_valid,
         .commit_pc,
@@ -67,7 +71,8 @@ module sim_cpu_top #(
         .commit_rd,
         .commit_rd_we,
         .commit_rd_data,
-        .commit_exception
+        .commit_exception,
+        .fence_i_commit()
     );
     // 等价于 core u_core ( .* );
 

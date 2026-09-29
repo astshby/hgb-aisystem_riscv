@@ -19,6 +19,7 @@ module cpu_top (
 
     // // 当前不完整1'b0是初始化，（）是空信号
     core u_core (
+        .irq_software(1'b0), .irq_timer(1'b0), .irq_external(1'b0),
         .clk,
         .rst,
         .imem_req_valid,
@@ -26,15 +27,18 @@ module cpu_top (
         .imem_req_ready(1'b0),
         .imem_rsp_valid(1'b0),
         .imem_rsp_data('0),
+        .imem_rsp_error(1'b0),
         .imem_rsp_ready(),
         .dmem_req_valid,
         .dmem_req_write,
+        .dmem_req_size(),
         .dmem_req_addr,
         .dmem_req_wdata,
         .dmem_req_wstrb,
         .dmem_req_ready(1'b0),
         .dmem_rsp_valid(1'b0),
         .dmem_rsp_rdata('0),
+        .dmem_rsp_error(1'b0),
         .dmem_rsp_ready(),
         .commit_valid(),
         .commit_pc(),
@@ -42,6 +46,7 @@ module cpu_top (
         .commit_rd(),
         .commit_rd_we(),
         .commit_rd_data(),
-        .commit_exception()
+        .commit_exception(),
+        .fence_i_commit()
     );
 endmodule

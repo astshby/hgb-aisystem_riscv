@@ -1,12 +1,14 @@
 // Module: wb_stage
-// Description: Accepts load responses, writes architectural state, and emits commit trace.
-// load在wb阶段进行响应
+// Description: Accepts read/write responses, qualifies precise faults, and emits commit trace.
+// Load/Store 均在 WB 等待一次完成响应；总线错误在退休边界转换为精确异常。
 module wb_stage (
     input  pipeline_pkg::mem_wb_t       in_packet,
     input  logic                        dmem_rsp_valid,
     input  core_types_pkg::xlen_t       dmem_rsp_rdata,
+    input  logic                        dmem_rsp_error,
+    output pipeline_pkg::mem_wb_t       commit_packet,
     output logic                        dmem_rsp_ready,
-    output logic                        wait_for_response, //等待load响应
+    output logic                        wait_for_response, //等待读/写完成响应
     output pipeline_pkg::gpr_forward_t  gpr_write, // GPR 写口同时作为 WB 前递来源
     output pipeline_pkg::csr_forward_t  csr_write, // 已完整且无异常的 CSR 提交通道
     output logic                        commit_valid,
@@ -19,7 +21,7 @@ module wb_stage (
 );
     import core_types_pkg::*;
 
-    logic load_response_needed; // load是否在wb阶段接收数据
+    logic memory_response_needed; // 当前有效 Load/Store 是否需要在 WB 接收完成响应
     logic packet_complete;
     logic normal_commit;
     xlen_t load_data;
@@ -34,16 +36,29 @@ module wb_stage (
         .load_data
     );
 
-    // dmem响应处理与packet完成：当需要但是没返回才暂停，包完成时不需要/握手成功
+    // 数据响应只属于最老的 WB 访存；读写都必须等响应，不因请求接收而提前退休。
     always_comb begin
-        load_response_needed = in_packet.valid && in_packet.uop.mem_read &&
+        memory_response_needed = in_packet.valid &&
+                               (in_packet.uop.mem_read || in_packet.uop.mem_write) &&
                                !in_packet.exc.valid;
-        dmem_rsp_ready = load_response_needed;
+        dmem_rsp_ready = memory_response_needed;
 
-        wait_for_response = load_response_needed && !dmem_rsp_valid;
+        wait_for_response = memory_response_needed && !dmem_rsp_valid;
         packet_complete = !wait_for_response;
+    end
+
+    // 继承早期异常；仅已真实发出的访问可将错误响应转换为 access fault。
+    always_comb begin
+        commit_packet = in_packet;
+        commit_packet.valid = in_packet.valid && packet_complete;
+        if (memory_response_needed && dmem_rsp_valid && dmem_rsp_error) begin
+            commit_packet.exc.valid = 1'b1;
+            commit_packet.exc.cause = in_packet.uop.mem_write ?
+                riscv_priv_pkg::EXC_STORE_ACCESS_FAULT : riscv_priv_pkg::EXC_LOAD_ACCESS_FAULT;
+            commit_packet.exc.tval = in_packet.result;
+        end
         // D1 已将非法指令转换为异常；异常提交仍有效，但不能写架构寄存器。
-        normal_commit = in_packet.valid && packet_complete && !in_packet.exc.valid;
+        normal_commit = commit_packet.valid && !commit_packet.exc.valid;
     end
 
     // WB写回，GPR 写口同时作为 WB 前递来源；x0 不产生真实写入。
@@ -75,6 +90,6 @@ module wb_stage (
         commit_rd = in_packet.rd;
         commit_rd_we = gpr_write.valid;
         commit_rd_data = writeback_data;
-        commit_exception = commit_valid && in_packet.exc.valid; // 包含 D1 检出的非法指令
+        commit_exception = commit_valid && commit_packet.exc.valid; // 包含早期异常与 WB 检出的总线访问错误
     end
 endmodule

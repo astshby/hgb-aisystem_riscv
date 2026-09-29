@@ -10,6 +10,7 @@ module tb_ex_stage;
 
     logic clk = 1'b0;
     logic rst = 1'b1;
+    logic older_instruction_pending = 1'b0;
     logic mdu_operands_ready = 1'b0;
     logic advance = 1'b0;
     logic cancel = 1'b0;
@@ -168,6 +169,26 @@ module tb_ex_stage;
         #1;
         assert (out_packet.valid && !execution_stall && out_packet.result == xlen_t'(9))
             else $fatal(1, "ordinary ALU path changed");
+        // 退休计数需等较老指令，普通 CSR 与已有异常不能误进入此等待。
+        @(negedge clk);
+        in_packet = '0;
+        in_packet.valid = 1'b1;
+        in_packet.uop.csr_valid = 1'b1;
+        in_packet.csr_addr = CSR_MINSTRET;
+        older_instruction_pending = 1'b1;
+        #1;
+        assert (execution_stall && !out_packet.valid) else $fatal(1, "MINSTRET did not wait");
+        older_instruction_pending = 1'b0;
+        #1;
+        assert (!execution_stall && out_packet.valid) else $fatal(1, "MINSTRET wait stuck");
+        older_instruction_pending = 1'b1;
+        in_packet.csr_addr = CSR_MSCRATCH;
+        #1;
+        assert (!execution_stall) else $fatal(1, "ordinary CSR unnecessarily stalled");
+        in_packet.csr_addr = CSR_MINSTRET;
+        in_packet.exc.valid = 1'b1;
+        #1;
+        assert (!execution_stall) else $fatal(1, "exception incorrectly waited for counter");
         $display("PASS tb_ex_stage RV%0d", XLEN);
         $finish;
     end

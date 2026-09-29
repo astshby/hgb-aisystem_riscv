@@ -23,17 +23,20 @@ ready-valid 存储器协议。
 - D1 完成译码、立即数、非法/SYSTEM 分类、早期异常和 JAL 解析。
 - D2 读取双端口 GPR，并准备执行操作数。
 - EX 统一处理 GPR/CSR 前递、ALU、分支、JALR、CSR 读改写和动态异常；
-  MDU 请求被接收后将指令元数据送入 EX/MEM。
-- MEM 发射一次 Load/Store 请求，或将寄存的 MDU 结果与元数据汇合；
-  请求未 ready 或运算结果未就绪时保持流水。
-- WB 接收 Load 响应，作为 GPR/CSR、计数器和 Trap 的架构提交点。
+  MDU 请求接受后将指令元数据送入 EX/MEM。
+- MEM 发射一次 Load/Store 请求，或拼接已寄存的 MDU 结果；未就绪时保持流水。
+- WB 接收 Load/Store 完成响应，作为 GPR/CSR、计数器和 Trap 的架构提交点。
+- MINSTRET/H 在 EX 等较老 MEM/WB 指令退休后访问，保证隐式退休增量的程序顺序；
+  普通 CSR 仍使用前递。RV32 显式写任一半均抑制该指令对整个 MINSTRET 的增量。
 - 同步异常在发现时清除年轻指令，携带 metadata 到 WB 后精确提交。
 - JAL 只训练 BTB；JALR 训练 BTB；条件分支训练 BTB、PHT 和 GHR。
 
 当前 RTL 支持 RV32IM/RV64IM、六种 Zicsr、ECALL、EBREAK、MRET、机器模式同步异常、
-`mstatus/misa/mtvec/mscratch/mepc/mcause/mtval/mcycle/minstret`；RV32 还可通过
-`mcycleh/minstreth` 原子读取完整 64 位计数。FENCE 在当前
-单核无 Cache 平台中按无副作用指令处理；FENCE.I 尚无真实 I/D 同步结构。
+`mstatus/misa/mie/mip/mtvec/mscratch/mepc/mcause/mtval/mcycle/minstret`；RV32 还可通过
+`mcycleh/minstreth` 配合高低高重读获取完整 64 位计数。FENCE/FENCE.I 已实现
+序列化、旧访存排空与顺序 PC 恢复；FENCE.I 另清除旧预测并丢弃旧取指响应。
+SoC 已集成 ROM、I/D-TCM、UART/Timer/GPIO 与机器中断，上游 `fence_i` 已在统一地址路径通过。
+中断排空流水后保存实际后继 PC；CSR/外设和限制见 [SoC 外设接口](SOC_PERIPHERALS.md)。
 
 ## SystemVerilog 规则
 
@@ -67,7 +70,8 @@ ready-valid 存储器协议。
 | `ex_exception_check` | 继承异常、CSR 权限、访存与控制目标对齐检查 |
 | `mem_stage` | 内部汇合 M 结果、请求侧访存握手和 MEM 前递，不等待 Load 返回 |
 | `wb_stage` | 响应侧握手、写回数据和真实 commit 许可 |
-| `trap_controller` | 由最老 commit 产生 Trap/MRET 状态与重定向 |
+| `trap_controller` | 由最老 commit 或排空中断产生 Trap/MRET/FENCE 状态与重定向 |
+| `interrupt_entry` | 排空判定和退休后继 PC 记录，不打断已接受的访存 |
 | `hazard_unit` | 判断数据尚不可用的 load-use 依赖 |
 | `pipeline_ctrl` | 按指令年龄仲裁 HOLD/CLEAR/ADVANCE 和 redirect |
 | `serialize_controller` | 异常/MRET 排空时停止取指，并区分 WB 完成与较老控制流取消 |
@@ -161,6 +165,23 @@ RV32 58/58、RV64 78/78，各明确跳过 `fence_i` 与 `ma_data`。六种 MDU �
 默认 m0d0、BTB 64，固定同一迭代数对比：RV32 32 次迭代/11045355 ticks，
 `2.897145 CoreMark/MHz`；RV64 28 次迭代/10854767 ticks，
 `2.579512 CoreMark/MHz`。这是仿真周期效率，FPGA 时序与板级频率仍待测量。
+
+## 无 Cache SoC：S0 → S3
+
+- S0：读写完成响应、访存大小、access fault、FENCE/FENCE.I 与物理地址契约；
+  见 [SoC 访存契约](SOC_BUS_CONTRACT.md)。
+- S1：Boot ROM、I/D-TCM、系统路由、统一存储器仿真与 CoreMark，已集成验证。
+- S2：两 UART、机器/通用 Timer 各一、三 GPIO、机器中断与外设验证，已实现。
+  验收入口：`soc-test`、`soc-software`、`soc-riscv-tests`、`soc-coremark`。
+- S3：三主端口仲裁、单通道 DMA、可选外存窗口与 AXI4 单拍桥完成双位宽
+  模块、CPU 软件和既有 Core/SoC 回归。DDR3 控制器/PHY 未实现；外存仅是仿真模型。
+  `soc-dma-software` 覆盖 TCM/外存双向搬运、ID 7 中断、错误和外存取指。
+  接口边界见 [外存与 DMA](SOC_EXTERNAL_MEMORY.md)。
+- S4：`s4/cache` 保留两路阻塞式 I$/WT-NWA D$ 验收基线。
+- S5：`s5/cache-up` 升级 WB/WA D$，添加脏逐出、clean/flush/invalidate、DMA 交接与 FENCE.I 发布屏障；入口 `make cache-test`。
+  维护协议增加完成状态与错误报告，拒绝直接丢弃脏行；DMA 交接前后都需维护。
+  独立 DDR CoreMark、I/D/DMA 压力测试及性能优化仍待后续。
+  盘古与 Zynq 的 DDR3 IP、引脚、时钟及上板验证继续后推。
 
 ## 阶段 C：C 扩展
 

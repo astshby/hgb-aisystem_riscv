@@ -22,6 +22,7 @@ module tb_if_stage;
     logic imem_rsp_valid;
     logic [31:0] imem_rsp_data;
     logic imem_rsp_ready;
+    logic imem_rsp_error = 1'b0;
 
     always #5 clk = ~clk;
     if_stage dut (.*);
@@ -88,6 +89,7 @@ module tb_if_stage;
         redirect.valid = 1'b0;
         imem_rsp_valid = 1'b1;
         imem_rsp_data = 32'hdead_beef;
+        imem_rsp_error = 1'b1; // 错误路径的访问错误必须和响应一起丢弃。
         #1;
         assert (imem_rsp_ready && !out_packet.valid)
             else $fatal(1, "killed response handling");
@@ -112,6 +114,21 @@ module tb_if_stage;
         assert (imem_rsp_ready && !out_packet.valid)
             else $fatal(1, "serialization killed response");
 
+        // 先消费被取消的响应，再允许目标路径发出新请求。
+        @(posedge clk);
+        @(negedge clk);
+        imem_rsp_valid = 1'b0;
+        fetch_request_enable = 1'b1;
+        @(posedge clk);
+        @(negedge clk);
+        // 目标路径的错误必须保留原请求 PC，不能被无效指令译码覆盖。
+        imem_rsp_valid = 1'b1;
+        imem_rsp_error = 1'b1;
+        #1;
+        assert (out_packet.valid && out_packet.exc.valid &&
+                out_packet.exc.cause == riscv_priv_pkg::EXC_INST_ACCESS_FAULT &&
+                out_packet.exc.tval == out_packet.pc)
+            else $fatal(1, "fetch access fault metadata");
         $display("PASS tb_if_stage RV%0d", XLEN);
         $finish;
     end

@@ -24,6 +24,8 @@ module tb_mem_stage;
     gpr_forward_t gpr_forward;
     csr_forward_t csr_forward;
 
+    mem_size_e dmem_req_size;
+
     mem_stage dut (.*);
 
     initial begin

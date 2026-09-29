@@ -29,9 +29,9 @@ module tb_csr_access_check;
         address = CSR_MVENDORID; #1;
         assert (implemented && read_only && !illegal) else $fatal(1, "MVENDORID read");
         address = CSR_MIE; #1;
-        assert (!implemented && illegal) else $fatal(1, "MIE is reserved for interrupt stage");
+        assert (implemented && !illegal) else $fatal(1, "MIE implemented");
         address = CSR_MIP; #1;
-        assert (!implemented && illegal) else $fatal(1, "MIP is reserved for interrupt stage");
+        assert (implemented && !illegal) else $fatal(1, "MIP implemented");
         address = CSR_MCYCLEH;
         write_intent = 1'b1; #1;
         if (XLEN == 32)

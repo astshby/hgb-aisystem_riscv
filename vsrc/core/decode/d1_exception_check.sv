@@ -12,12 +12,16 @@ module d1_exception_check (
 
     // D1 按优先级记录最早发现的异常，后续流水级只允许补充而不能覆盖。
     always_comb begin
-        exception = '0;
+        exception = in_packet.exc;
         if (in_packet.valid) begin
             if (in_packet.pc[1:0] != 2'b00) begin
                 exception.valid = 1'b1;
                 exception.cause = EXC_INST_ADDR_MISALIGNED;
                 exception.tval = in_packet.pc;
+            end
+            else if (in_packet.exc.valid) begin
+                // IF 已经报告的访问错误优先于无效返回数据的译码结果。
+                exception = in_packet.exc;
             end
             else if (uop.illegal) begin
                 exception.valid = 1'b1;

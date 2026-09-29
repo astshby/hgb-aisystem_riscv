@@ -7,7 +7,7 @@ module pipeline_ctrl (
     input  pipeline_pkg::redirect_t d1_redirect,
     input  logic                    ex_serialize_req, // EX 阶段发现需要按序提交的异常
     input  logic                    d1_serialize_req, // D1 阶段发现译码异常或 MRET，内化到流水线中直接处理
-    input  logic                    wb_wait, // WB 阶段由于取不到load的值而阻塞
+    input  logic                    wb_wait, // WB 阶段等待 Load 数据或 Store 完成响应
     input  logic                    mem_request_stall, // MEM 中的 M 指令请求未被接收，或由于 dmem 未就绪而阻塞
     input  logic                    mem_result_stall, // MEM 中的 M 指令已发射但结果未返回。
     input  logic                    execution_stall, // EX 操作数或 MDU 接收端尚未就绪。
@@ -25,7 +25,7 @@ module pipeline_ctrl (
     typedef enum logic [3:0] {
         CTRL_NONE,
         CTRL_WB_REDIRECT,
-        CTRL_WB_WAIT,        // WB 阶段由于取不到load的值而阻塞
+        CTRL_WB_WAIT,        // WB 阶段等待 Load 数据或 Store 完成响应
         CTRL_MEM_WAIT,       // 请求未被接收，或 M 结果尚未就绪
         CTRL_EX_REDIRECT,
         CTRL_EX_SERIALIZE,   // 序列化相对最低的：前面好的指令必须处理完

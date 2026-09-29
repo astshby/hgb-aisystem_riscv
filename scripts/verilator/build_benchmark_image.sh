@@ -7,6 +7,10 @@ shift 2
 
 tool_root="${RISCV_TOOL_ROOT:-/opt/riscv/bin}"
 tool_prefix="${tool_root}/riscv64-unknown-elf-"
+linker=benchmark/bsp/link.ld
+imem_base=0
+dmem_base=0
+imem_word_bytes=4
 imem_depth=32768
 dmem_bytes=131072
 
@@ -16,6 +20,14 @@ if [[ "${xlen}" == "32" ]]; then
 else
     march="rv64im_zicsr"
     mabi="lp64"
+fi
+if [[ "${SOC:-0}" == "1" ]]; then
+    linker=benchmark/bsp/link_soc.ld
+    imem_base=0x01000000
+    dmem_base=0x01100000
+    imem_word_bytes=$((xlen / 8))
+    imem_depth=$((65536 / imem_word_bytes))
+    dmem_bytes=65536
 fi
 dmem_word_bytes=$((xlen / 8))
 dmem_depth=$((dmem_bytes / dmem_word_bytes))
@@ -27,7 +39,7 @@ mkdir -p "${output_dir}"
     -fno-pie -fno-tree-loop-distribute-patterns -mstrict-align \
     -nostdlib -nostartfiles -static -no-pie \
     -I benchmark/bsp \
-    -Wl,--no-relax -Wl,-T,benchmark/bsp/link.ld \
+    -Wl,--no-relax -Wl,-T,"${linker}" \
     -Wl,-Map,"${output_dir}/program.map" \
     "$@" -o "${output_dir}/program.elf"
 
@@ -44,9 +56,9 @@ fi
     "${output_dir}/program.elf" "${output_dir}/dmem.vhex"
 python3 scripts/verilator/verilog_hex_to_mem.py \
     "${output_dir}/imem.vhex" "${output_dir}/imem.hex" \
-    --word-bytes 4 --depth "${imem_depth}"
+    --word-bytes "${imem_word_bytes}" --depth "${imem_depth}" --base "${imem_base}"
 python3 scripts/verilator/verilog_hex_to_mem.py \
     "${output_dir}/dmem.vhex" "${output_dir}/dmem.hex" \
-    --word-bytes "${dmem_word_bytes}" --depth "${dmem_depth}"
+    --word-bytes "${dmem_word_bytes}" --depth "${dmem_depth}" --base "${dmem_base}"
 "${tool_prefix}objdump" -d "${output_dir}/program.elf" >"${output_dir}/program.dump"
 "${tool_prefix}size" "${output_dir}/program.elf"

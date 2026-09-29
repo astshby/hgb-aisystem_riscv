@@ -4,20 +4,25 @@ module core (
     // 端口声明中使用包类型时需要写完整包名
     input  logic                              clk,
     input  logic                              rst,
+    // 中断输入须与 clk 同步；异步引脚同步由 SoC 外设负责。
+    input  logic                              irq_software, irq_timer, irq_external,
     output logic                              imem_req_valid,
     output logic [core_config_pkg::XLEN-1:0]  imem_req_addr,
     input  logic                              imem_req_ready,
     input  logic                              imem_rsp_valid,
     input  logic [31:0]                       imem_rsp_data,
+    input  logic                              imem_rsp_error,
     output logic                              imem_rsp_ready,
     output logic                              dmem_req_valid,
     output logic                              dmem_req_write,
+    output core_types_pkg::mem_size_e         dmem_req_size,
     output logic [core_config_pkg::XLEN-1:0]  dmem_req_addr,
     output logic [core_config_pkg::XLEN-1:0]  dmem_req_wdata,
     output logic [core_config_pkg::DBUS_BYTES-1:0] dmem_req_wstrb,
     input  logic                              dmem_req_ready,
     input  logic                              dmem_rsp_valid,
     input  logic [core_config_pkg::XLEN-1:0]  dmem_rsp_rdata,
+    input  logic                              dmem_rsp_error,
     output logic                              dmem_rsp_ready,
     // commit 用于退休统计、差分测试和波形调试。
     output logic                              commit_valid,
@@ -26,7 +31,9 @@ module core (
     output logic [core_config_pkg::GPR_ADDR_W-1:0] commit_rd,
     output logic                              commit_rd_we,
     output logic [core_config_pkg::XLEN-1:0]  commit_rd_data,
-    output logic                              commit_exception
+    output logic                              commit_exception,
+    // 仅在无异常 FENCE.I 退休时失效外部指令缓存；普通 FENCE 不触发。
+    output logic                              fence_i_commit
 );
     import core_config_pkg::*;
     import core_types_pkg::*;
@@ -45,6 +52,7 @@ module core (
     d2_ex_t d2_packet;
     ex_mem_t ex_packet;
     mem_wb_t mem_packet;
+    mem_wb_t commit_packet; // WB 补充总线异常后，交给 Trap 和架构提交。
 
     // 预测、重定向与错误路径清理。
     pred_info_t prediction;
@@ -58,6 +66,7 @@ module core (
     pred_update_t ex_update;
     pred_update_t predictor_update;
     logic predictor_overflow;
+    logic predictor_reset;
     logic d1_flush;
 
     // GPR 读写和前递。
@@ -73,7 +82,10 @@ module core (
     logic trap_enter;
     logic mret_commit;
     xlen_t trap_pc;
-    exc_cause_e trap_cause;
+    xlen_t trap_cause;
+    logic irq_pending, interrupt_take;
+    irq_cause_e irq_cause;
+    xlen_t interrupt_pc;
     xlen_t trap_tval;
     logic retire_valid;
     xlen_t mtvec;
@@ -123,10 +135,15 @@ module core (
         ex_update.valid = ex_update_raw.valid && (pipeline_actions.ex_mem == PIPE_ADVANCE);
     end
 
+    // FENCE.I 同时清除旧代码的 BTB/PHT 状态，避免代码改写后继续沿旧预测取指。
+    assign fence_i_commit = commit_valid && !commit_exception &&
+                            (commit_packet.uop.sys_op == SYS_FENCE_I);
+    assign predictor_reset = rst || fence_i_commit;
+
     // 预测器裁决
     predictor_update_arbiter u_predictor_update_arbiter (
         .clk,
-        .rst,
+        .rst(predictor_reset),
         .d1_flush,
         .d1_update,
         .ex_update,
@@ -137,7 +154,7 @@ module core (
     // 分支预测器
     predictor u_predictor (
         .clk,
-        .rst,
+        .rst(predictor_reset),
         .lookup_pc(imem_req_addr),
         .prediction,
         .update(predictor_update)
@@ -153,7 +170,7 @@ module core (
 `endif
 
     // 各功能单元与流水级连线。
-    // WB Trap/MRET 正常完成序列化；更老的 D1/EX 控制流重定向取消错误路径序列化。
+    // WB Trap/MRET/FENCE 正常完成序列化；更老的 D1/EX 控制流重定向取消错误路径序列化。
     serialize_controller u_serialize_controller (
         .clk,
         .rst,
@@ -164,10 +181,12 @@ module core (
         .fetch_request_enable
     );
 
+    // IRQ 排空只停新请求，保留已接受的 IF 包；中断撤销不能丢失已推进 PC 对应的指令。
+    // 真正进入 Trap 后，仍由 selected_redirect 杀死旧路径取指。
     if_stage u_if_stage (
         .clk,
         .rst,
-        .fetch_request_enable,
+        .fetch_request_enable(fetch_request_enable && !irq_pending),
         .out_ready(fetch_ready),
         .flush(frontend_flush),
         .redirect(selected_redirect),
@@ -178,6 +197,7 @@ module core (
         .imem_req_ready,
         .imem_rsp_valid,
         .imem_rsp_data,
+        .imem_rsp_error,
         .imem_rsp_ready
     );
 
@@ -219,6 +239,7 @@ module core (
     ex_stage u_ex_stage (
         .clk,
         .rst,
+        .older_instruction_pending(ex_mem_q.valid || mem_wb_q.valid),
         .mdu_operands_ready,
         .advance(ex_stage_advance),
         .cancel(wb_redirect.valid),
@@ -241,6 +262,7 @@ module core (
     csr_file u_csr_file (
         .clk,
         .rst,
+        .irq_software, .irq_timer, .irq_external, .irq_pending, .irq_cause,
         .read_addr(d2_ex_q.csr_addr),
         .read_data(csr_committed_data),
         .write_valid(wb_csr_write.valid),
@@ -277,6 +299,7 @@ module core (
         .result_stall(mem_result_stall),
         .dmem_req_valid,
         .dmem_req_write,
+        .dmem_req_size,
         .dmem_req_addr,
         .dmem_req_wdata,
         .dmem_req_wstrb,
@@ -290,6 +313,8 @@ module core (
         .in_packet(mem_wb_q),
         .dmem_rsp_valid,
         .dmem_rsp_rdata,
+        .dmem_rsp_error,
+        .commit_packet,
         .dmem_rsp_ready,
         .wait_for_response(wb_wait),
         .gpr_write(wb_gpr_write),
@@ -303,9 +328,17 @@ module core (
         .commit_exception
     );
 
+    interrupt_entry u_interrupt_entry (
+        .clk, .rst, .irq_pending,
+        .pipeline_busy(if_d1_q.valid || d1_d2_q.valid || d2_ex_q.valid ||
+                       ex_mem_q.valid || mem_wb_q.valid),
+        .retire_valid, .commit_packet, .wb_redirect, .interrupt_take, .interrupt_pc
+    );
+
     trap_controller u_trap_controller (
-        .commit_packet(mem_wb_q),
+        .commit_packet,
         .commit_valid,
+        .interrupt_take, .interrupt_pc, .interrupt_cause(irq_cause),
         .mtvec,
         .mepc,
         .trap_enter,

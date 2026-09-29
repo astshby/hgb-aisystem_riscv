@@ -15,7 +15,10 @@ module tb_trap_controller;
     logic trap_enter;
     logic mret_commit;
     xlen_t trap_pc;
-    exc_cause_e trap_cause;
+    xlen_t trap_cause;
+    logic interrupt_take = 0;
+    xlen_t interrupt_pc = '0;
+    irq_cause_e interrupt_cause = IRQ_M_TIMER;
     xlen_t trap_tval;
     logic retire_valid;
     redirect_t redirect;
@@ -55,6 +58,14 @@ module tb_trap_controller;
         commit_packet.uop.sys_op = SYS_NONE;
         #1;
         assert (!redirect.valid && retire_valid) else $fatal(1, "normal retirement");
+        commit_valid = 1'b0;
+        interrupt_take = 1'b1;
+        interrupt_pc = xlen_t'(32'h500);
+        #1;
+        assert (trap_enter && !retire_valid && !mret_commit && redirect.pc == mtvec &&
+                trap_pc == interrupt_pc && trap_tval == 0 &&
+                trap_cause == ((xlen_t'(1) << (core_config_pkg::XLEN-1)) | xlen_t'(7)))
+            else $fatal(1, "drained interrupt entry");
         $display("PASS tb_trap_controller");
         $finish;
     end

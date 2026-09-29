@@ -49,6 +49,14 @@ module tb_csr_bypass;
         assert (bypass_data == committed_data)
             else $fatal(1, "all bypass addresses mismatch");
 
+        read_addr = CSR_MIP;
+        mem_forward.addr = CSR_MIP;
+        wb_forward.addr = CSR_MIP;
+        mem_forward.data = '0;
+        wb_forward.data = '0;
+        committed_data = xlen_t'(32'h888);
+        #1;
+        assert (bypass_data == committed_data) else $fatal(1, "MIP must ignore CSR write forwarding");
         $display("PASS tb_csr_bypass RV%0d", core_config_pkg::XLEN);
         $finish;
     end

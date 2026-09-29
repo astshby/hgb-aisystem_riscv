@@ -1,6 +1,9 @@
 # Cache、TCM、DMA 与系统总线：设计草案
 
-> 2026-09-25；仅供架构评审。当前 RTL 尚无 Cache、TCM、DMA 或系统互连，两块板均未上板。
+> 2026-09-25 的历史架构草案；以下“当前/未来”表述保留当日语境，不代表最新状态。
+> S3 已实现 TCM、三主互连、DMA 与仿真外存；当前行为见
+> [DMA 路径](DMA_DATA_PATH.md)、[AXI 与 DDR3 边界](AXI_DDR_BOUNDARY.md) 和
+> [仲裁与一致性](ARBITRATION_AND_COHERENCE.md)。两块板仍未上板。
 
 ## 设计边界
 

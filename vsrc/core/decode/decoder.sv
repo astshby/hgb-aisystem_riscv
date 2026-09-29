@@ -329,9 +329,13 @@ module decoder (
             end
             // 内存排序与取指同步指令
             OPCODE_MISC_MEM: begin
-                if ((funct3 == F3_MISC_MEM_FENCE) ||
-                    (funct3 == F3_MISC_MEM_FENCE_I))
+                if (funct3 == F3_MISC_MEM_FENCE) begin
+                    uop.sys_op = SYS_FENCE;
                     uop.illegal = 1'b0;
+                end else if (funct3 == F3_MISC_MEM_FENCE_I) begin
+                    uop.sys_op = SYS_FENCE_I;
+                    uop.illegal = 1'b0;
+                end
             end
             default: ;
         endcase

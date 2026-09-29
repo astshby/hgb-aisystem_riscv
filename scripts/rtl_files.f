@@ -3,6 +3,9 @@ vsrc/pkg/riscv_unpriv_pkg.sv
 vsrc/pkg/riscv_priv_pkg.sv
 vsrc/pkg/core_types_pkg.sv
 vsrc/pkg/pipeline_pkg.sv
+vsrc/pkg/soc_config_pkg.sv
+vsrc/pkg/soc_addr_pkg.sv
+vsrc/pkg/bus_types_pkg.sv
 vsrc/core/csr/csr_exec.sv
 vsrc/core/csr/csr_access_check.sv
 vsrc/core/csr/csr_warl.sv
@@ -49,4 +52,7 @@ vsrc/core/writeback/trap_controller.sv
 vsrc/core/control/hazard_unit.sv
 vsrc/core/control/pipeline_ctrl.sv
 vsrc/core/control/serialize_controller.sv
+vsrc/core/control/interrupt_entry.sv
 vsrc/core/core.sv
+vsrc/soc/bus/address_decode.sv
+vsrc/soc/bus/bus_error_slave.sv
