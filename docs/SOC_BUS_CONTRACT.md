@@ -1,5 +1,7 @@
 # SoC 访存接口契约
 
+本文以 s5/cache-up 的源码为参照；切换到较早分支时请先读 [分支文档说明](README.md)，判断该分支实际实例化的模块。
+
 ## 实现边界
 
 Core 保持 IF/D1/D2/EX/MEM/WB 六级。`vsrc/soc/bus/` 提供物理地址检查和错误响应；
@@ -129,6 +131,63 @@ I/D-TCM 是两个独立 bank，而非两份不相干的指令/数据镜像：两
 `boot_rom` 提供从复位地址 0 跳转到 `0x0100_0000` 的两条指令，剩余内容为 NOP。
 它不是镜像下载器；TCM 初始化由仿真加载或平台初始化提供。
 `soc_top` 已连接 Core；benchmark 使用 I-TCM 代码、D-TCM 数据的专用链接布局。
+
+
+## 接口从 Core 到外存的层次
+
+Core 有两组独立的本地请求/响应线：I 口发送 PC，只读 32 位指令；D 口发送地址、访问大小、写数据和字节使能。两组线不附带事务 ID，因此各自最多有一笔已接受而尚未消费响应的事务。soc_top 把它们分别包装成 bus_req_t，前往 I$ 和 D$。只有通过完整地址与权限检查、整行位于已启用 DDR 的访问才进入 Cache；ROM、TCM、MMIO 以及 DDR 尾部不足整行的访问保持旁路。
+
+| 位置 | 请求方 | 接收方 | 接口里要跟踪的内容 |
+|---|---|---|---|
+| Core I 口 | if_stage | icache/cache_port | PC、取指有效位、请求接受沿；返回 32 位指令与错误 |
+| Core D 口 | mem_stage | dcache/cache_port | XLEN 地址、1/2/4/8 字节大小、wdata、wstrb、读写；WB 接收响应 |
+| 互连主端口 0/1/2 | I$、D$、DMA | bus_interconnect | 完整 bus_req_t；主端口各一笔在途 |
+| 互连从端口 0..14 | bus_interconnect | ROM、TCM、外设、DDR | 请求选路、接受时的 owner、响应反压 |
+| SoC 外存端口 | 从端口 14 | 外部桥或平台适配 | ddr_req/rsp ready-valid，仍是本地协议 |
+
+bus_req_t 的 write、execute、size、addr、wdata、wstrb 是同一次请求的载荷；bus_rsp_t 只有对齐 XLEN 宽 rdata 与 BUS_OK/DECERR/SLVERR。valid/ready 在结构体之外。这里的地址始终保持 XLEN 宽，地址译码再检查 32 位物理空间；RV64 高位非零的访问不能仅截低 32 位后命中设备。DDR_BYTES=0 时从端口 14 不对外发请求，相关访问走错误从端口。DDR_BYTES>0 仅打开窗口；外部控制器、PHY 和实际 DDR 仍需平台提供。
+
+读源码可沿 [soc_top](../vsrc/soc/soc_top.sv) → [cache_port](../vsrc/soc/cache/cache_port.sv) → [bus_interconnect](../vsrc/soc/bus/bus_interconnect.sv) → [address_decode](../vsrc/soc/bus/address_decode.sv) 走一遍。设备实例和中断线在 [外设连接说明](SOC_PERIPHERALS.md)。
+
+## 一笔请求在时钟上的位置
+
+以下 E0、E1 是上升沿，不是“等待一拍”的固定性能承诺。以同步 TCM 且响应端已经准备好为例：
+
+| 时刻 | I 口 | D 口 |
+|---|---|---|
+| E0 前 | IF 给出 req_valid/PC；接受方给出 req_ready | MEM 给出 req_valid、地址、size 和写掩码 |
+| E0 | 两边均为 1 才接受；IF 保存这次请求的 PC 与预测快照 | MEM 请求被接受，访问元数据可进入 MEM/WB |
+| E0 后 | 从端完成同步读取并寄存响应；RV64 取指 lane 用 E0 锁存的地址 | Load/Store 的 rsp_valid 才表示返回或写完成 |
+| E1 | IF 与响应握手；D1 能接收就直通，否则进入 IF buffer | WB 与响应握手；Load 选择字节/符号扩展，Store 确认完成 |
+| 更长延迟 | I$ 缺失或外存等待时，IF 保留请求归属 | D$ 缺失或外存等待时，WB 保留旧指令，年轻流水停住 |
+
+req_ready 只表示本级接受请求。Store 的写响应可以晚很多拍；写回 D$ 的 Store 响应又只表示新值已保存在脏行。rsp_valid=1 而 rsp_ready=0 时，响应的值与错误必须保持。已接受的请求不能因为 IF 改变 PC 或 D 口进入等待而重新发射。允许旧响应被消费与新请求同沿交接的地方会同时更新 owner；阻塞 Cache 命中路径没有承诺这种连续吞吐。
+
+例子：RV64 向基址加 4 执行 SW。MEM 的 wdata 放在 XLEN 数据总线高 32 位，wstrb 选中高四个字节；一次 LW 返回包含该八字节对齐字的 XLEN rdata，WB 再按地址低位选出高半字并按指令做符号扩展。RV64 取指同样可能在八字节字的高 32 位，因此 soc_top 的 fetch_lane_q 必须在请求接受沿记录 lane；用响应返回时正在变化的 PC 选 lane 会拿错指令。
+
+## 反压、撤回和响应归属
+
+IF 能撤回尚未被互连接受的错误路径请求。若请求已接受，重定向只标记该响应为旧路径；响应仍要被接收并排空，不能进入 D1，也不能产生旧路径的取指异常。if_stage 的 request_q、request_killed_q、buffer_q 分别保存已接受请求、杀死标记和已返回而未交给 D1 的包。I 口旁路处还有一个响应缓冲，用于切断共享 bank 到 IF 的组合反压。
+
+互连按目标分别保存 busy 和 owner。响应回到请求接受沿记录的 owner，不能用响应当拍的地址再译码。两个不同 TCM bank 可以并行；多个主端访问同一 bank 时仲裁。SoC 实例使能 DATA_PRIORITY：CPU D 相对 CPU I 优先，同时通过轮转让 DMA 获得同目标机会；CPU I 与别的 owner 交接隔一拍，以免 IF 可撤回的 valid 与 D-ready 形成组合环。通用互连的默认配置和 SoC 实例配置需要分开看。从端反压时互连锁住已选主端，直到请求被接受或允许的 IF 撤回发生。
+
+## 从总线错误到架构异常
+
+address_decode 用 65 位扩展地址和访问末端检查整个访问范围。未映射、32 位物理空间外或未实例化的目标返回 DECERR；已命中目标但大小、对齐、执行/写权限不合法返回 SLVERR。错误从端也要给出一次响应，不能永远保持 req_ready=0。外设再检查寄存器偏移及写权限；不合法的寄存器访问返回 SLVERR。外部 AXI 桥把 R/B 通道错误带回本地响应。
+
+IF 将取指错误与请求 PC 一起带入流水。D 口错误在 WB 根据当前有效 Load/Store 转换为 access fault，mtval 为该指令的原始有效地址；出现早期异常时不会再发出这笔 D 请求。WB 未等到要求的响应就保持等待，不能让年轻 MEM 访问越过老指令。写响应报错不撤销已由外设或前几个 DMA beat 产生的副作用。写回缓存逐出失败属于当前触发替换的访问错误，真实故障 victim beat 地址另记在 SoC 状态寄存器。
+
+## Cache、DMA 与指令可见性
+
+普通 FENCE 排空较老访存，不要求写回 D$ 脏行。FENCE.I 在 WB 正常退休时清 I$ 与预测状态；SoC 在同一事件阻止新取指，等待 D$ 全 clean 成功后再放行。旧 I 响应依然要排空。自动 clean 失败时取指持续停止，直到系统复位；当前没有异步机器检查恢复通道。
+
+DMA 是互连的第三主端，不经过 CPU 的 D$。CPU 向 DMA 提供 DDR 源数据之前应 clean/flush 并确认成功；DMA 将写 DDR 目的区之前，应先 flush 该区已有脏数据；DMA DONE/ERROR 后 invalidate 并确认成功再由 CPU 读取。当前维护扫描整个 D$，不是按地址的 CMO。DMA 改写可执行代码后还要 FENCE.I。维护命令的 MMIO 写响应只确认入队，完成与错误在 SoC 状态寄存器检查；维护与该 MMIO 请求共用 D 主端口，因此不可能扣住原写响应等待 clean 完成。
+
+## 复位与验证边界
+
+复位清 Core、互连及 Cache 的在途控制状态，TCM 数据 RAM 不清零。D$ 的 valid/dirty 会清除；若需保存已退休 Store 的脏数据，复位前须成功 flush。已发送到外部 AXI 的事务需要桥、互连和从端协调复位，仅复位 Core 不具备回滚能力。当前没有实板 DDR3/PHY 时序数据，仿真 RAM 的延迟不代表板级性能。
+
+建议按故障范围选择入口：接口和反压用 make test XLEN=32/64 中的 tb_soc_bus_contract、tb_core_bus_contract；仲裁、MMIO、副作用用 make soc-test XLEN=32/64；缓存状态、DMA 交接、FENCE.I 用 make cache-test XLEN=32/64；完整软件中断与 ISA 行为分别用 make soc-software、make soc-riscv-tests。修改接口字段时同时检查两种 XLEN、高位地址、错误返回、保持响应及复位中的旧事务。
 
 ## 验证
 

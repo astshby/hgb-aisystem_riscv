@@ -74,23 +74,13 @@ RISC-V 工具链默认位于 `/opt/riscv/bin`。`make test` 包含 lint、单元
 - `scripts/`：Verilator、工具链和 Vivado Tcl 工作流。
 - `benchmark/`：裸机 BSP、C 冒烟程序、固定 CoreMark 源码和本地 port。
 
+## 阅读 SoC 前
+
+先从 [理解文档导读](docs/understand/README.md) 依次读 [M 扩展](docs/understand/M_EXTENSION.md)、[CSR、异常和中断](docs/understand/CSR_TRAPS_AND_INTERRUPTS.md)、[I/D 访存握手](docs/understand/MEMORY_HANDSHAKE.md)。它们解释 EX/MEM 的 M 结果汇合、WB 精确提交，以及请求接受沿与响应返回沿的区别。再沿 [SoC 源码导读](docs/understand/SOC_SOURCE_WALKTHROUGH.md) 查各分支的模块和测试。旧分支同样保留完整文档，但未必已有 S5 的硬件；先核对 [分支范围](docs/README.md)。
+
 ## 文档
 
-- [SoC 访存契约](docs/SOC_BUS_CONTRACT.md)
-- [SoC 外设与中断接口](docs/SOC_PERIPHERALS.md)
-- [外存与 DMA 接入边界](docs/SOC_EXTERNAL_MEMORY.md)
-- [项目目录说明](docs/PROJECT_STRUCTURE.md)
-- [硬件目标与阶段规划](docs/HARDWARE_ROADMAP.md)
-- [软件开发目标](docs/SOFTWARE_ROADMAP.md)
-- [仿真与 FPGA 工作流](docs/SIMULATION_AND_FPGA.md)
-- [D$ 写穿透与 DMA 数据维护](docs/understand/DCACHE_IMPLEMENTATION.md)
-- [两路 I$ 实现与握手](docs/understand/ICACHE_IMPLEMENTATION.md)
-- [DMA 搬运与中断时序](docs/understand/DMA_DATA_PATH.md)
-- [AXI、外存模型与 DDR3 板级边界](docs/understand/AXI_DDR_BOUNDARY.md)
-- [多主仲裁与未来 Cache 一致性](docs/understand/ARBITRATION_AND_COHERENCE.md)
-- [BRAM、Cache 与存储器握手](docs/understand/MEMORY_HANDSHAKE.md)
-- [软件测试栈与硬件交互解读](docs/understand/SOFTWARE_TEST_STACK_GUIDE.md)
-- [CoreMark 与性能指标解读](docs/understand/COREMARK_AND_PERFORMANCE.md)
-- [阶段修改记录](docs/COMMIT.md)
-- [贡献与 Agent 规则](AGENTS.md)
-- [Cache、TCM、DMA 与系统总线设计](docs/understand/THINKING.md)
+- [文档入口与分支范围](docs/README.md)、[理解文档导读](docs/understand/README.md)
+- [SoC 访存契约](docs/SOC_BUS_CONTRACT.md)、[外设连接图与寄存器](docs/SOC_PERIPHERALS.md)、[AXI/DDR 边界](docs/SOC_EXTERNAL_MEMORY.md)
+- [项目目录说明](docs/PROJECT_STRUCTURE.md)、[硬件目标](docs/HARDWARE_ROADMAP.md)、[软件开发目标](docs/SOFTWARE_ROADMAP.md)、[仿真与 FPGA 工作流](docs/SIMULATION_AND_FPGA.md)
+- [历史修改记录](docs/COMMIT.md)、[贡献与 Agent 规则](AGENTS.md)
