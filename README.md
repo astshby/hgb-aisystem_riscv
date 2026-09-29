@@ -31,7 +31,7 @@ Core 使用独立的指令和数据 ready/valid 接口，不直接实例化 FPGA
 - CoreMark 1.0 performance/validation CRC 均通过；默认 MDU 配置的固定迭代数结果：
   RV32 `2.897145`、RV64 `2.579496 CoreMark/MHz`（Verilator 周期成绩）。
 
-S3 DMA/外存与 S4 WT/NWA Cache 保留验收基线；`s5/cache-up` 已升级 WB/WA 与维护协议，
+S3 DMA/外存与 S4 WT/NWA Cache 的验收提交保留在 Git 历史；`SOC/all` 使用 S5 的 WB/WA 与维护协议，
 Cache 专项 RV32/RV64 各 18 PASS，设计见 [写回与数据交接](docs/understand/S5_CACHE_WRITEBACK.md)。
 独立 DDR CoreMark 和三主端口 Cache 压力测试仍待后续。盘古 676-200K Pro、Zynq-7020 的 DDR3 IP 和上板时序验证继续后推。
 软件栈和 AI 功能仍是独立后续目标；以上成绩不代表 FPGA Fmax。
@@ -76,7 +76,7 @@ RISC-V 工具链默认位于 `/opt/riscv/bin`。`make test` 包含 lint、单元
 
 ## 阅读 SoC 前
 
-先从 [理解文档导读](docs/understand/README.md) 依次读 [M 扩展](docs/understand/M_EXTENSION.md)、[CSR、异常和中断](docs/understand/CSR_TRAPS_AND_INTERRUPTS.md)、[I/D 访存握手](docs/understand/MEMORY_HANDSHAKE.md)。它们解释 EX/MEM 的 M 结果汇合、WB 精确提交，以及请求接受沿与响应返回沿的区别。再沿 [SoC 源码导读](docs/understand/SOC_SOURCE_WALKTHROUGH.md) 查各分支的模块和测试。旧分支同样保留完整文档，但未必已有 S5 的硬件；先核对 [分支范围](docs/README.md)。
+先从 [理解文档导读](docs/understand/README.md) 依次读 [M 扩展](docs/understand/M_EXTENSION.md)、[CSR、异常和中断](docs/understand/CSR_TRAPS_AND_INTERRUPTS.md)、[I/D 访存握手](docs/understand/MEMORY_HANDSHAKE.md)。它们解释 EX/MEM 的 M 结果汇合、WB 精确提交，以及请求接受沿与响应返回沿的区别。再沿 [SoC 源码导读](docs/understand/SOC_SOURCE_WALKTHROUGH.md) 查历史阶段的模块和测试。hgb 的 `main` 仍是 Core/M 基线；`SOC/all` 的源码与阶段提交对应关系见 [文档入口](docs/README.md)。
 
 ## 文档
 

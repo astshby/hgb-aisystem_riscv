@@ -1,19 +1,19 @@
 # 从分支差异读 SoC 源码
 
-本篇给出实践顺序：先确认分支已经有哪些模块，再跟一次总线请求，最后按修改类型找到测试。正式地址和握手定义在 [SoC 访存契约](../SOC_BUS_CONTRACT.md)，图和从端编号在 [外设接口](../SOC_PERIPHERALS.md)。以下分支说明来自实际 Git 树；hgb 与 rhbyv 的早期 S3 分支名称相似，内容不同。
+本篇给出实践顺序：先确认阶段提交有哪些模块，再跟一次总线请求，最后按修改类型找到测试。正式地址和握手定义在 [SoC 访存契约](../SOC_BUS_CONTRACT.md)，图和从端编号在 [外设接口](../SOC_PERIPHERALS.md)。hgb 的旧阶段分支已并入 `SOC/all` 并删除分支名，下面用可达的提交定位；rhbyv 仍保留学习分支。
 
 ## 先确认当前代码处在哪个阶段
 
-| 仓库与分支 | 可以在 vsrc/soc 中找到 | 这时还没有什么 |
+| hgb 历史提交 / rhbyv 分支 | 可以在 vsrc/soc 中找到 | 这时还没有什么 |
 |---|---|---|
-| 两仓 main | 主要是 Core 与 M 扩展 | soc_top 和完整 SoC |
-| 两仓 SOC/tmc-mmio | soc_top、ROM、I/D-TCM、互连、MMIO、IRQ | DMA 主端、AXI 桥、Cache |
-| hgb soc/s3-axi-dma | local_to_axi、可选 DDR 本地端口 | 完整 dma_controller；此分支只是 S3 早期检查点 |
-| hgb soc/s3-dma-validation、rhbyv soc/s3-axi-dma | dma_controller/engine/regs、第三主端、AXI 仿真路径 | I$/D$ |
-| 两仓 s4/cache | I$、WT/NWA D$、系统全失效命令 | D$ dirty、clean、flush |
-| 两仓 s5/cache-up | WB/WA D$、写回引擎、维护控制器 | 真实 DDR3 控制器/PHY、MMU、硬件一致性 |
+| `9427fe5` / main | 主要是 Core 与 M 扩展 | soc_top 和完整 SoC |
+| `de67bbb` / SOC/tmc-mmio | soc_top、ROM、I/D-TCM、互连、MMIO、IRQ | DMA 主端、AXI 桥、Cache |
+| `a2f7726` / 无对应学习分支 | local_to_axi、可选 DDR 本地端口 | 完整 dma_controller；这是 S3 早期检查点 |
+| `f714fba` / soc/s3-axi-dma | dma_controller/engine/regs、第三主端、AXI 仿真路径 | I$/D$ |
+| `4f0ddcb` / s4/cache | I$、WT/NWA D$、系统全失效命令 | D$ dirty、clean、flush |
+| `909ac2d` / s5/cache-up | WB/WA D$、写回引擎、维护控制器 | 真实 DDR3 控制器/PHY、MMU、硬件一致性 |
 
-当前文档分支 docs/soc-learning-map 从 S5 继续，没有改变 RTL。切换历史分支时，先运行 git branch --show-current，然后查看 git ls-tree -r --name-only HEAD vsrc/soc 和对应 docs/README.md。若只想比较，不必切换工作树：git diff main..SOC/tmc-mmio -- vsrc/soc 能看到最初接入；git diff s4/cache..s5/cache-up -- vsrc/soc/cache 展示写回升级。历史文档可能描述下一步设计，判断“已经实现”时以该分支的实例和测试文件为准。
+当前 `SOC/all` 沿用 S5 源码，文档整理没有改变 RTL。查看历史文件可用 `git show f714fba:vsrc/soc/soc_top.sv`，文件清单用 `git ls-tree -r --name-only f714fba vsrc/soc`。比较阶段差异可运行 `git diff 9427fe5..de67bbb -- vsrc/soc` 和 `git diff 4f0ddcb..909ac2d -- vsrc/soc/cache`。历史文档可能描述下一步设计，判断“已经实现”时以该提交的实例和测试文件为准。
 
 ## 在 S2 找到物理地址与设备
 
@@ -27,7 +27,7 @@
 
 CPU 写 DMA_BASE 的 SRC/DST/LENGTH/CTRL，走 CPU D 主端到 s12 的 dma_regs；dma_regs 把 start_valid 和源、目的、长度交给 dma_engine。dma_engine 读一个源 beat，等响应后写目的 beat，写完成才增加 BYTES。它发出的事务从 m2 重新进入互连，可能再次争用 CPU 正在使用的 I/D-TCM 或 DDR。寄存器从端与搬运主端不能合并成一条普通 MMIO 连接。
 
-去 dma_smoke.c 看启动、IRQ_EN、ID 7 的 handler 和部分错误读取；去 tb_dma_fabric.sv 看交错与 backpressure。hgb 的 soc/s3-axi-dma 只有 AXI 桥，此时应先读 local_to_axi.sv、tb_local_to_axi.sv；若要读完整 DMA，请切到 soc/s3-dma-validation。rhbyv 的 soc/s3-axi-dma 已包含完整 DMA。对应入口为 make soc-dma-software XLEN=32/64 和 make soc-test XLEN=32/64。
+去 dma_smoke.c 看启动、IRQ_EN、ID 7 的 handler 和部分错误读取；去 tb_dma_fabric.sv 看交错与 backpressure。hgb 的 `a2f7726` 只有 AXI 桥，此时先读 local_to_axi.sv、tb_local_to_axi.sv；完整 DMA 从 `f714fba` 读取。rhbyv 的 soc/s3-axi-dma 已包含完整 DMA。对应入口为 make soc-dma-software XLEN=32/64 和 make soc-test XLEN=32/64。
 
 外存边界只有本地 ddr_req/rsp；仿真顶层在该端口外接 local_to_axi 与 axi_memory_model。打开 DDR_BYTES 决定物理窗口和 Cache 能否工作，不会自动生成 FPGA DDR 控制器。AXI 桥只发单 beat，并保留 B/R 错误；板级控制器/PHY、时钟、复位和约束另做。
 

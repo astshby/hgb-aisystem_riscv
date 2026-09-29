@@ -1,6 +1,6 @@
 # 理解与学习文档
 
-本目录按“先掌握 Core 中发生什么，再接 SoC 的真实设备，最后沿源码验证”组织。理论文档描述当前 s5/cache-up 的实现边界；历史分支文档保留当时实现的语义。切换分支先看 [文档与分支范围](../README.md)：文档在旧分支也齐全，不代表旧分支的 RTL 有最新 Cache 或 DMA。
+本目录按“先掌握 Core 中发生什么，再接 SoC 的真实设备，最后沿源码验证”组织。理论文档描述当前 `SOC/all` 中的 S5 实现；历史阶段的语义见 [源码范围](../README.md)。hgb 旧阶段分支删除后仍可从提交读取，rhbyv 保留阶段分支供切换学习。
 
 ## 进入 SoC 前
 
@@ -29,18 +29,18 @@ M 模块位于 Core 的 execute/M_extension，算法后端内的寄存器不算�
 
 S4 的 WT/NWA [D$ 写穿透实现](DCACHE_IMPLEMENTATION.md) 与 [S4 设计复核](S4_CACHE_DESIGN.md) 保留作为历史比较。S5 的 Store 可以先退休而 DDR 仍是旧值；判断 DMA 能否读到 CPU 最新数据，应读 S5 的维护契约。普通 FENCE、FENCE.I、DMA DONE 和 D$ 维护分别有不同职责，见上述正式契约与写回解读。
 
-## SoC 的实践：每个分支能读到什么
+## SoC 的实践：阶段提交对应哪些源码
 
-| 阶段 | rhbyv 分支 / hgb 分支 | 优先看哪些源码和测试 |
+| 阶段 | rhbyv 学习分支 / hgb 历史提交 | 优先看哪些源码和测试 |
 |---|---|---|
-| Core + M | main / main | core.sv、ex_mdu、csr_file、if_stage、mem_stage；make test、make riscv-tests |
-| S2 ROM、TCM、MMIO、IRQ | SOC/tmc-mmio / SOC/tmc-mmio | soc_top、address_decode、tcm_controller、soc_peripherals、irq_controller；tb_soc_fabric、tb_soc_peripherals、soc-software |
-| S3 AXI 早期检查点 | hgb 的 soc/s3-axi-dma | local_to_axi、tb_local_to_axi；该分支没有完整 DMA |
-| S3 完整 DMA | rhbyv 的 soc/s3-axi-dma / hgb 的 soc/s3-dma-validation | dma_controller/engine/regs、tb_dma_fabric、dma_smoke.c；soc-dma-software |
-| S4 缓存首版 | s4/cache / s4/cache | icache、旧 dcache、tb_icache、tb_dcache；WT/NWA 与全失效 |
-| S5 写回升级 | s5/cache-up / s5/cache-up | dcache_meta_array、cache_writeback、cache_maintenance_controller、tb_dcache_wb；WB/WA 与 FENCE.I clean |
+| Core + M | main / `9427fe5` | core.sv、ex_mdu、csr_file、if_stage、mem_stage；make test、make riscv-tests |
+| S2 ROM、TCM、MMIO、IRQ | SOC/tmc-mmio / `de67bbb` | soc_top、address_decode、tcm_controller、soc_peripherals、irq_controller；tb_soc_fabric、tb_soc_peripherals、soc-software |
+| S3 AXI 早期检查点 | hgb `a2f7726` | local_to_axi、tb_local_to_axi；当时没有完整 DMA |
+| S3 完整 DMA | soc/s3-axi-dma / `f714fba` | dma_controller/engine/regs、tb_dma_fabric、dma_smoke.c；soc-dma-software |
+| S4 缓存首版 | s4/cache / `4f0ddcb` | icache、旧 dcache、tb_icache、tb_dcache；WT/NWA 与全失效 |
+| S5 写回升级 | s5/cache-up / `909ac2d` | dcache_meta_array、cache_writeback、cache_maintenance_controller、tb_dcache_wb；WB/WA 与 FENCE.I clean |
 
-按文件走的一次实操见 [从分支差异读 SoC 源码](SOC_SOURCE_WALKTHROUGH.md)。其中分别跟 CPU 访问 MMIO、DMA 从配置寄存器成为第三主端、DDR Cache 缺失与中断清除。遇到“代码和文档说法不同”，先确认当前 Git 分支，再看该分支的 soc_top 实例和 source list；旧分支的文档包括后续设计参照。
+按文件走的一次实操见 [从分支差异读 SoC 源码](SOC_SOURCE_WALKTHROUGH.md)。其中分别跟 CPU 访问 MMIO、DMA 从配置寄存器成为第三主端、DDR Cache 缺失与中断清除。遇到“代码和文档说法不同”，先确认当前 Git 分支或历史提交，再看对应的 soc_top 实例和 source list；后期写成的文档可能包含该阶段尚未实现的功能。
 
 ## 按现象找入口
 
@@ -55,4 +55,4 @@ S4 的 WT/NWA [D$ 写穿透实现](DCACHE_IMPLEMENTATION.md) 与 [S4 设计复�
 
 改一个设备时同时检查地址常量、目标编码、互连 PRESENT、soc_top 或 soc_peripherals 的从端连线、寄存器语义、IRQ 源与测试。改访存协议时分别列出 req_fire、rsp_fire、旧响应 owner、错误地址及复位处置；RV32 和 RV64 都要走。实践文档中列的命令只在其阶段已有模块时执行。参考设计草案在 [THINKING](THINKING.md)，Cache 接入前的 [Core 审核](CORE_ASTRA_REVIEW.md) 记录历史意见；当前功能和已验证范围以代码、正式契约和对应测试为准。
 
-本次整理只改变文档。历史记录 [COMMIT.md](../COMMIT.md) 保持原文；新增讲解归入 understand，硬件目标归入 roadmap，软件栈计划仍在 [软件路线](../SOFTWARE_ROADMAP.md)。
+分支整理记录见 [COMMIT.md](../COMMIT.md)；新增讲解归入 understand，硬件目标归入 roadmap，软件栈计划仍在 [软件路线](../SOFTWARE_ROADMAP.md)。
