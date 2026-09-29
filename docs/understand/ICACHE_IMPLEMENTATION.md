@@ -1,5 +1,8 @@
 # 两路 I$：从请求接受到 FENCE.I 失效
 
+> 版本说明：本文保留 S4 实现及验证记录。S5 已采用 WB/WA、异步维护状态和 FENCE.I 发布屏障；
+> 当前软件交接与错误限制以 [S5 解读](S5_CACHE_WRITEBACK.md) 为准，不能照搬旧写穿透流程。
+
 2026-09-29（Asia/Shanghai）。本轮交付既定 Cache 计划的 I$ 部分。
 本文保留 I$ 首次交付时的时序说明；随后已加入 D$，当前数据路径与 DMA 规则见
 [D$ 实现解读](DCACHE_IMPLEMENTATION.md)。写回、AXI burst、MMU、板级 DDR3 仍未实现。

@@ -46,7 +46,7 @@ Core 与存储器的时序契约详见 [存储器握手解读](understand/MEMORY
 | `make coremark XLEN=32` | 执行 CoreMark 校准、performance 与 validation；不属于 `make test` |
 | `make mdu-backends XLEN=32` | 先运行正式 ISA 回归，再运行六种 MDU 配置各 5 项 M 整核测试和全部 UM |
 | `make soc-lint XLEN=32` | lint 可移植 SoC 顶层 |
-| `make cache-test XLEN=32` | I$/D$ 各四配置单测及三组 DDR 软件集成，共 11 PASS；同样运行 XLEN=64 |
+| `make cache-test XLEN=32` | I$/旧 WT D$/WB D$ 各四配置、维护控制器两配置及四组 DDR 集成，共 18 PASS；同样运行 XLEN=64 |
 | `make soc-test XLEN=32` | 两种互连仲裁、ROM/TCM、外设、DMA 与独立 AXI4 桥测试 |
 | `make soc-software XLEN=32` | C 程序验证全部设备 IRQ、MRET 和同步访问错误 |
 | `make soc-dma-software XLEN=32` | CPU C 程序验证 DMA、ID 7 IRQ、TCM/外存搬运和外存取指 |
@@ -264,6 +264,7 @@ vivado -mode batch -source scripts/vivado/program.tcl \
 须另定 PS 初始化与 PS–PL 端口方案；只用 PL 的首版不依赖 PS DDR。
 
 Cache 软件回归由 `run_icache_software.sh` 与 `run_dcache_software.sh` 驱动；后者同时
-运行 D$ 开/关，注入 DMA 第二笔 AXI 写错误，检查部分完成后数据维护。
+运行 D$ 开/关，检查 dirty 可见性、clean/flush/invalidate、DMA 部分写失败。
+I$ 软件另注入 FENCE.I 自动写回错误，确认停取指且无年轻提交；不是以超时当 PASS。
 SoC benchmark harness 支持 `SOC_DCACHE_ENABLE=0/1`（默认 1），不同配置使用独立
 构建目录；`+FAULT_READ/+FAULT_WRITE` 仅在 AXI RAM 模型注入地址错误，不进入 RTL。

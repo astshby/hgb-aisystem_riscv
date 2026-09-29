@@ -182,6 +182,17 @@ RESULT 保存结果。表中的响应握手按上升沿计，计算延迟与连�
 在 E0 后已经有效，可于 E1 与元数据一起进入 MEM/WB，不再先复制到 EX/MEM 的结果寄存器。
 多拍后端仍按表中的 `rsp_valid` 时间交付；结果寄存和算法时序没有变成组合零周期。
 
+
+## 从 M 阶段继续读 SoC
+
+M 扩展位于 Core 内部，不单独访问 SoC 总线。一个 MUL 的操作数来自寄存器或前递，EX 的请求握手沿锁存这两个值；EX/MEM 保存该指令的 PC、rd 和操作类型，mem_mdu 在 MEM 与完成结果会合。结果进入 WB 并正常退休后，若下一条 Store 使用它作为地址或数据，Store 才会由 MEM 发出 D 口请求。中间若发生较老 WB Trap，MDU 被取消，不应让错误路径的乘除结果在后来复活。
+
+同一规则影响中断响应时间：机器中断 pending 时停止新取指，但已有 MDU 运算继续按流水顺序排空，interrupt_entry 直到流水空闲才进入 mtvec。若使用移位除法，当前指令可能需要几十拍；这里不能把“中断电平已经到来”理解为“下一拍立刻进入 handler”。后续 [CSR 与中断解读](CSR_TRAPS_AND_INTERRUPTS.md) 接着说明恢复 PC 和 mip/mie 的关系。
+
+读代码时可做一个具体练习：在 tb_core_m_wait 或 tb_core_m_forward 找一条依赖 M 结果的后续指令，记录 EX 的 req_valid/ready、EX/MEM 中元数据、MEM 的 rsp_valid/ready、WB 的 commit_pc。然后换用 MUL_IMPL=1、DIV_IMPL=1 重跑同一场景。结果值应该相同，完成拍数和可能的流水停顿则随算法改变。若仅改算法后端，先跑部件 TB 与 mdu-backends；若改 EX/MEM 交界、取消或前递，还要跑两种 XLEN 的整核和 ISA 测试。
+
+这一阶段的 CoreMark/MHz 使用仿真周期数与固定迭代次数计算。某个乘法器迭代更少，不等于该配置在 FPGA 的关键路径更短；还要看综合后 DSP、LUT、目标时钟和真实 DDR/Cache 工作集。TCM 上的 CoreMark 成绩也不能用来判断 S5 写回 Cache 的收益。性能计数器中的 MCYCLE/MINSTRET 与异常/IRQ 的关系见 CSR 文档；它们属于另一条提交路径。
+
 ## 配置与验证
 
 ```bash

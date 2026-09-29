@@ -51,8 +51,9 @@ CPU 配置 DMA，等待 ID 7 中断，校验数据，再从 DMA 写入的外存�
   同时对齐时按 XLEN 字搬运。重叠、零长度和越界在启动前拒绝。
 - AXI 仿真 RAM 可注入延迟和读写错误。实板仍需盘古 DDR3 控制器/PHY、时钟复位、
   跨时钟域与真实容量配置，并实测读写反压、错误和时序；Zynq 适配随后进行。
-- 当前 DDR 已有 I$/D$，D$ 为 WT/NWA、无写缓冲。
-  DMA 更新数据后须等 DONE/ERROR，再写 SoC 全失效命令；更新代码还需 FENCE.I。
+- 当前 DDR 已有 I$/D$，D$ 为 WB/WA，脏逐出按 XLEN 字串行写回。
+  DMA 交出目的区前须 flush；DONE/ERROR 后 invalidate 并检查状态；发布 CPU 数据先 clean/flush，更新代码还需 FENCE.I。
+  FENCE.I 自动 clean 失败会停取指；普通逐出失败保留脏行并返回当前请求错误。
   进一步的 burst、4 KiB 拆分与吞吐优化不是 S3 保证。
 
 I$/D$ 已加入，MMU 尚未实现。一致性不由 AXI4 自动提供。

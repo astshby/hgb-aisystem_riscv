@@ -55,7 +55,8 @@ rhbyv-cpu-forlinux/
 ### 可移植 SoC
 
 `vsrc/soc/soc_top.sv` 连接 Core、ROM、I/D-TCM、三主端口互连、I$/D$、DMA 和外设集群。
-`cache/` 分离端口路由、同步数据阵列、tag/LRU、填行和 I$/D$ 控制；仅缓存 DDR，D$ 采用 WT/NWA。
+`cache/` 分离端口路由、同步数据阵列、tag/valid/dirty/LRU、填行、写回和维护控制；
+仅缓存 DDR，D$ 采用 WB/WA，`dcache_wt` 保留旧 WT/NWA 单测参考，不接入 SoC。
 `common/soc_info.sv` 另提供 D$ 能力查询与全失效命令，便于 DMA 软件交接。
 `bus/` 负责地址、仲裁、错误响应及本地到 AXI4 单拍桥；`memory/` 提供同步 TCM 与启动 ROM；
 `dma/` 包含引擎、MMIO 寄存器和控制封装；`common/` 提供 MMIO 端点与输入同步器；
@@ -74,7 +75,7 @@ rhbyv-cpu-forlinux/
 - `unit/`：当前 42 项，包含 MEM 结果拼包、六种 MDU 配置、8 位算法穷举与 SRT 组件验证。
 - `core/`：18 项短程序流程，每种 XLEN 为 17 PASS、1 非适用位宽 SKIP；覆盖基础/M 指令、访存等待、MDU 前递与寄存边界、预测、CSR、Trap 和序列化取消。
 - `soc/`：互连、ROM/TCM、外设、DMA、AXI4 单拍桥与外存模型 TB；SoC 镜像 harness、C 中断/DMA 程序及启动汇编。
-- `cache/`：I$/D$ 各四种配置单测；DDR 循环、CPU/DMA 改码、数据搬运及部分失败维护的 C 测试。
+- `cache/`：I$/旧 WT D$/WB D$ 各四配置单测、维护控制器两配置，以及 DDR 改码、DMA 交接与写回失败测试。
 - `benchmark/`：运行 ELF 镜像的长程序 harness，被动镜像字符 Store 并监视 `tohost`。
 - `common/rv_asm_pkg.sv`：为整核定向测试生成具名 32 位指令编码。
 - `common/muldiv_checker.sv`：乘法、除法和统一 MDU 共用的独立算术/协议参考检查器。
