@@ -1,5 +1,8 @@
 # SoC 与外设接口
 
+软件适配补充：`rt-thread-port` 的 [RT-Thread BSP](RT_THREAD_PORT.md) 基于本文寄存器
+实现 tick、UART 和 GPIO；没有更改本文所述 RTL 接口，也不把精简 IRQ 汇聚当成完整 PLIC。
+
 以下连线和寄存器描述对应 `SOC/all` 的 S5 `soc_top`；历史阶段的连接范围见 [源码范围](README.md)。
 
 ## 实现范围与层次

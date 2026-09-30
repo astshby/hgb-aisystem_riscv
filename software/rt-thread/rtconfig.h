@@ -1,0 +1,33 @@
+#ifndef HGB_RTCONFIG_H
+#define HGB_RTCONFIG_H
+#define RT_USING_NANO
+#define RT_CPUS_NR 1
+#define RT_USING_HOOK
+#define RT_NAME_MAX 16
+#define RT_ALIGN_SIZE 16
+#define RT_THREAD_PRIORITY_MAX 32
+#define RT_TICK_PER_SECOND 1000
+#define RT_IDLE_HOOK_LIST_SIZE 4
+#define IDLE_THREAD_STACK_SIZE 2048
+#define RT_USING_OVERFLOW_CHECK
+#define RT_USING_DEBUG
+#define RT_DEBUGING_ASSERT
+#define RT_BACKTRACE_LEVEL_MAX_NR 16
+#define RT_USING_SEMAPHORE
+#define RT_USING_MUTEX
+#define RT_USING_HEAP
+#define RT_USING_SMALL_MEM
+#define RT_USING_SMALL_MEM_AS_HEAP
+#define RT_USING_DEVICE
+#define RT_USING_CONSOLE
+#define RT_CONSOLEBUF_SIZE 128
+#define RT_USING_SERIAL
+#define RT_USING_SERIAL_V1
+#define RT_SERIAL_RB_BUFSZ 64
+#define RT_USING_PIN
+#define ARCH_RISCV
+#if __riscv_xlen == 64
+#define ARCH_CPU_64BIT
+#endif
+/* 单核 IM 平台：原子操作由内核关中断实现，不生成 A/F/C 指令。 */
+#endif

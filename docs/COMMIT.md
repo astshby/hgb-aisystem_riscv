@@ -1,5 +1,36 @@
 # 设计调整记录
 
+## 2026-09-30（Asia/Shanghai）— RT-Thread 首版软件 BSP 与 DMA 热代码
+
+- Ubuntu 仓库 `/home/yukino/projects/hgb-aisystem_riscv`，分支 `rt-thread-port`，
+  基于 `9c7cbb4`；main 未修改。本次未提交、推送、开 PR 或合并。
+- 新增 `software/rt-thread/`、`scripts/rt-thread/`、`tb/soc/tb_rt_thread.sv`；
+  Makefile 增加 `rt-thread-fetch/rt-thread`，忽略规则放行 software，关联文档同步。
+  未改 `vsrc/`、既有 testbench、benchmark、只读 RT-Thread 依赖。
+- 官方依赖 v5.2.2：`ddf52e2cdd977f14fc04035c88672ac204aec713`。单核 M 模式
+  Nano 无 libc 配置加 serial-v1/pin 设备框架；不启用 A/C/F、WFI、SMP、POSIX 或 FinSH。
+- 使用硬件 DMA 将 D-TCM `0x0110c000` 的 `.hot` 装载到 I-TCM `0x0100e000`，
+  包含 Direct trap、IRQ 分派、线程切换/关中断；检查完成和内容后 FENCE.I，再设 mtvec。
+  两端 TCM 旁路 cache。保留原 ROM 跳转和预装冷代码约定，不冒充板级下载器。
+- BSP 实现 MTIME tick、IRQ claim/complete、UART0/1 与三组 GPIO。serial-v1 的
+  配置错误被上游忽略，故新增 BSP 入口预检；不改上游代码。无上下拉/电平 IRQ/UART DMA。
+- 最终 `make rt-thread XLEN=32/64 CROSS_COMPILE=/usr/bin/riscv64-linux-gnu- OPT_FAST=-O0`
+  均通过：每种位宽 1 个镜像检查 PASS、5 组软件检查 PASS、1 个 SoC 完成 PASS、
+  1 个被动硬件契约 PASS（8 条 PASS，无 SKIP；不是 8 个独立仿真）。
+  RV32 1,339,863 周期、DMA 984 字节、热区退休 22,381 条、trap 39 次；
+  RV64 1,348,230 周期、DMA 976 字节、热区退休 21,672 条、trap 39 次。
+  覆盖线程寄存器/64 位高半部、时间片、timer/semaphore、双 UART 环回、三组 GPIO
+  边沿/解绑；TB 检查热区初始零、DMA 字节/地址/成功响应、禁止 CPU 代拷、FENCE.I
+  后执行、真实 trap 与 bank 接受请求后下一拍响应。
+- 固件 text/data/bss：RV32 `32212/5531/13136` 字节；RV64 `32532/6083/15408` 字节。
+  工具为 GCC 11.4、Verilator 5.052；上游少量 signedness warning 保留，不宣称零警告。
+- 适配前基线已验证：每位宽 42 unit PASS、17 directed PASS/1 SKIP；每位宽
+  soc-test 5 条 PASS，外设裸机各 1 PASS，DMA 软件各 2 PASS（无 DDR/64 KiB DDR）。
+  本轮只新增独立 BSP，未修改共享 C runtime/ISA/CSR/RTL/内存时序或 benchmark 支持，
+  未重跑完整基线、riscv-tests、CoreMark、Cache 专项。未做 DMA 故障注入、
+  FPGA 综合/BRAM 推断/时序/上板；不能以此次仿真替代这些结果。
+- 详细地址表、接口限制及复现命令见 [RT_THREAD_PORT.md](RT_THREAD_PORT.md)。
+
 ## 2026-09-29（Asia/Shanghai）— hgb SoC 开发分支收敛
 
 - 将 `docs/soc-learning-map` 改名为 `SOC/all`。当前文件树沿用 S5，未改 `vsrc/`、`tb/`、`scripts/`、`benchmark/` 或 Makefile；旧 S2/S3/S4/S5 分支头与早期 MDU 分支头以仅记录历史的 merge 接入，合并前后文件树哈希相同。
