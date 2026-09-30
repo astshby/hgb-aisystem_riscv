@@ -1,5 +1,10 @@
 # RISC-V Edge-AI SoC 软件开发目标（参考稿）
 
+2026-09-30 实施进度：`rt-thread-port` 已接入固定版本 RT-Thread v5.2.2 的单核
+Nano 配置和 serial/pin 设备框架；RV32/RV64 完成抢占/上下文、tick、UART/GPIO、
+DMA 装载 I-TCM 热代码的 SoC 仿真。默认是自检应用，未含 FinSH/POSIX/文件系统，
+也未上板。具体边界、地址和命令见 [RT-Thread BSP](RT_THREAD_PORT.md)。下文保留长期参考目标。
+
 > 面向 2026 紫光同创赛题一。  
 > 当前比赛硬件目标：盘古 676 200K 级 FPGA 平台 + 自研 RV64 RISC-V CPU；Zynq-7020/Vivado 可继续作为熟悉的早期验证平台，但不作为最终比赛平台。  
 > 当前定位：先建立可运行、可调试、可测试的软件栈，再逐步加入 AI Runtime 与 Agent Runtime。  

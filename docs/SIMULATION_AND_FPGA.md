@@ -1,5 +1,13 @@
 # 项目仿真与上板说明
 
+## RT-Thread 专用分支验证
+
+在 `rt-thread-port` 上运行 `make rt-thread-fetch`，然后执行
+`make rt-thread XLEN=32 CROSS_COMPILE=riscv64-linux-gnu- OPT_FAST=-O0` 和
+对应的 `XLEN=64`。这是独立 BSP 自检，不改变下面的原有回归入口。
+它检查 DMA 真实装载、TCM bank 一周期响应和内核/外设；详细依赖及未上板限制见
+[RT-Thread 适配](RT_THREAD_PORT.md)。
+
 ## 环境与入口
 
 所有命令从仓库根目录运行。主要工具为 Verilator 和 RISC-V GNU 工具链，不使用

@@ -4,7 +4,9 @@
 
 本项目按“可移植 Core、仿真平台、FPGA 平台”分层。当前 A5 基线加 B 阶段基础 M，
 已完成六级 RV32IM/RV64IM、Zicsr、机器模式同步异常/中断、裸机 C 与 CoreMark 仿真闭环；
-可移植 SoC 已含 TCM、UART/Timer/GPIO。已接入 DDR 两路 I$/D$；板级 IP、C 扩展和操作系统支持仍待实现。平台目标为
+可移植 SoC 已含 TCM、UART/Timer/GPIO。已接入 DDR 两路 I$/D$；板级 IP、C 扩展仍待实现。
+`rt-thread-port` 新增 `software/rt-thread/` BSP、`scripts/rt-thread/` 构建工具和
+`tb/soc/tb_rt_thread.sv` 被动检查器，支持双位宽 RT-Thread SoC 仿真；见 [适配说明](RT_THREAD_PORT.md)。平台目标为
 Zynq-7020 和紫光同创盘古 676-200K Pro，详见 [平台适配](PLATFORM_ADAPTATION.md)。
 
 ```text

@@ -34,7 +34,9 @@ Core 使用独立的指令和数据 ready/valid 接口，不直接实例化 FPGA
 S3 DMA/外存与 S4 WT/NWA Cache 的验收提交保留在 Git 历史；`SOC/all` 使用 S5 的 WB/WA 与维护协议，
 Cache 专项 RV32/RV64 各 18 PASS，设计见 [写回与数据交接](docs/understand/S5_CACHE_WRITEBACK.md)。
 独立 DDR CoreMark 和三主端口 Cache 压力测试仍待后续。盘古 676-200K Pro、Zynq-7020 的 DDR3 IP 和上板时序验证继续后推。
-软件栈和 AI 功能仍是独立后续目标；以上成绩不代表 FPGA Fmax。
+`rt-thread-port` 已新增 RT-Thread v5.2.2 首版 BSP：RV32/RV64 的调度、机器 tick、
+UART0/1、三组 GPIO，以及 DMA 装载 I-TCM 中断/切换热代码均完成 SoC 仿真。
+详见 [移植、TCM 布局与复现命令](docs/RT_THREAD_PORT.md)。尚未上板，AI 功能仍是后续目标；以上成绩不代表 FPGA Fmax。
 
 ## 快速验证
 
@@ -73,6 +75,7 @@ RISC-V 工具链默认位于 `/opt/riscv/bin`。`make test` 包含 lint、单元
 - `tb/`：单元、整核和上游 riscv-tests 适配测试。
 - `scripts/`：Verilator、工具链和 Vivado Tcl 工作流。
 - `benchmark/`：裸机 BSP、C 冒烟程序、固定 CoreMark 源码和本地 port。
+- `software/rt-thread/`：独立 RT-Thread BSP、DMA 启动与自检；依赖固定在忽略的 `build/` 中。
 
 ## 阅读 SoC 前
 

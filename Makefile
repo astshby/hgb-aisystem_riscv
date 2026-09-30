@@ -66,3 +66,10 @@ vivado-project:
 
 clean:
 	rm -rf build logs vivado-workspace
+
+.PHONY: rt-thread-fetch rt-thread
+rt-thread-fetch:
+	bash scripts/rt-thread/fetch.sh
+
+rt-thread:
+	bash scripts/rt-thread/run.sh $(XLEN)
