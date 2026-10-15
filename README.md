@@ -90,5 +90,5 @@ RISC-V 工具链默认位于 `/opt/riscv/bin`。`make test` 包含 lint、单元
 - [文档入口与分支范围](docs/README.md)、[理解文档导读](docs/understand/README.md)
 - [SoC 访存契约](docs/SOC_BUS_CONTRACT.md)、[外设连接图与寄存器](docs/SOC_PERIPHERALS.md)、[AXI/DDR 边界](docs/SOC_EXTERNAL_MEMORY.md)
 - [项目目录说明](docs/PROJECT_STRUCTURE.md)、[硬件目标](docs/HARDWARE_ROADMAP.md)、[软件开发目标](docs/SOFTWARE_ROADMAP.md)、[仿真与 FPGA 工作流](docs/SIMULATION_AND_FPGA.md)
-- [RT-Thread DDR CoreMark 目标与进度](docs/FPGA_DEMO_REPORT.md)、[MES2L676-200HP 上板与报告](docs/FPGA_DEMO_REPORT.md)
+- [FPGA demo：目标、实现、时序与综合报告](docs/FPGA_DEMO_REPORT.md)
 - [历史修改记录](docs/COMMIT.md)、[贡献与 Agent 规则](AGENTS.md)

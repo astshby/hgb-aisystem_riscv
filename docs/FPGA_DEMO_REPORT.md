@@ -128,10 +128,40 @@ validation 使用 `RT_COREMARK_MODE=validation` 并选择对应 ELF；RV64 使�
 
 ## 本次提交验证
 
-提交验证仍在进行；发布前会用干净克隆的最终提交重新运行上述命令，并填写确切结果。
+干净检出 `eacc4ab0449e0f13da5c0421532c1e8baf724989` 的直接综合通过：回执
+`source_clean=true`；从零编译生产 loader、生成 IP、暂存 164 HDL，169 项实际字节哈希和
+两个 TCM 各 64 KiB/16 DRM 的完整初值均通过。综合为 16,331 LUT、12,377 FF、34 DRM、4 APM、
+77 IO、0 latch。之后的提交只更新 Markdown，综合输入保持逐字节一致。
+实测环境为 Windows PowerShell、PDS 2025.2-ads build 211867、Ubuntu-22.04、Python 3.10.12、
+`riscv64-linux-gnu-gcc` 11.4.0；回归使用 Verilator 5.052。HMIC 包 SHA-256：
+`971bc31b3f93e1eabed841787e1bf592a06b8e79fb5689b8ce8e1bd9f4910d1f`。
 
-日常双位宽回归仍遵循根 AGENTS：显式 `MUL_IMPL=0 DIV_IMPL=1`，运行 test、riscv-tests、
-benchmark-smoke、coremark 的 RV32/RV64；ISA 克隆、裸机工具链及 RT-Thread v5.2.2 的安装/版本要求见
+以下是本次实际运行结果，均显式 `MUL_IMPL=0 DIV_IMPL=1`；PASS 按用例/模式计，
+不把汇总行重复计数，除表内 SKIP 外均为 0 SKIP。
+
+| 验证 | RV32 PASS / SKIP | RV64 PASS / SKIP |
+|---|---:|---:|
+| `make test` | 43 unit + 17 directed / 1 | 43 unit + 17 directed / 1 |
+| 核心 `riscv-tests` | 58 / 2 | 78 / 2 |
+| 裸机 `benchmark-smoke` / CoreMark | 1 + 2 模式 / 0 | 1 + 2 模式 / 0 |
+| SoC directed / Cache | 5 + 18 / 0 | 5 + 18 / 0 |
+| SoC `riscv-tests` | 59 / 1 | 79 / 1 |
+| 外设软件 / DMA 软件 / SoC smoke | 1 + 2 + 1 / 0 | 1 + 2 + 1 / 0 |
+| SoC CoreMark | 2 模式 / 0 | 2 模式 / 0 |
+| UART loader | 1 build + 2 runtime / 0 | 1 build + 2 runtime / 0 |
+| 基本 RT-Thread | 7 / 0 | 7 / 0 |
+| RT-Thread DDR CoreMark | 2 模式 / 0 | 2 模式 / 0 |
+| 独立原生 DDR bridge | 1 / 0 | 1 / 0 |
+
+位宽 SKIP 为非适用 RV32/RV64 指令用例；核心 ISA 跳过 `fence_i`、`ma_data`，SoC 只跳过 `ma_data`。
+主机 loader 协议 19 PASS/0 SKIP；文件字节、TCM 单比特、错误实际时钟三项负向门槛 3 PASS/0 SKIP。
+RT DDR 四组短时 CRC 通过，实际 DMA 为 RV32 984 B、RV64 976 B；分别观察到 36,528–47,360 次
+DDR 取指和 4,249–4,289 次 UART TX 边沿。它们采用数字 AXI RAM，不是物理 DDR3；本次未重跑
+完整 UART 下载 RT-Thread 的四组驻留两轮测试，其旧基线记录保留在 COMMIT。
+本次未运行独立 `soc-lint`/`mdu-backends`（共享 unit 已覆盖后端）、新 P&R、门级/ILA、烧写、
+真实 DDR/UART、正式十秒板上成绩或实测功耗。新综合的非致命告警保留在 `logs/synthesis.log`。
+
+日常命令、ISA 克隆、工具链和 RT-Thread v5.2.2 依赖要求见
 [仿真工作流](SIMULATION_AND_FPGA.md) 和 [RT-Thread 移植](RT_THREAD_PORT.md)。
 
 ## 后续计划

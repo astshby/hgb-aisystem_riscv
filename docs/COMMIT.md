@@ -5,7 +5,7 @@
 - 按用户要求从最新 `origin/main`（PR #5 合并提交 `c2818ca`）新建 `codex/pango-reproducible-synthesis`，移入已评审的 `b8fbbb9` 产品基线；原分支和四份未提交文档逐字保存，未在 main 修改或 push。100 MHz 失败实验及下一轮 20 文件建议未恢复为产品代码。
 - 两份重复板级报告合并为 `docs/FPGA_DEMO_REPORT.md`，统一目标、实现、改动文件、时序优化/回退、资源功耗、复现命令及实板缺口；保留原架构文档/阶段历史并更新链接。
 - 新增 PowerShell 综合入口、WSL 参数调用辅助、固定 200HP HMIC_S 1.10 IDF 和综合/manifest 校验。隔离提取用户提供的 IP 包，不依赖历史生成目录；WSL 构建生产 loader 并暂存到 Windows 原生目录，原生 PDS 综合后才执行严格双 TCM INIT 与 34 BRAM/4 DSP/0 latch 门槛。修正 FDC 按实际字节计算哈希，增加实际 125 MHz/1000 Mbps 配置检查。新构建入口不需要 Windows Python，不运行 P&R/bitstream/JTAG。
-- 工作树新目录重建通过：164 HDL、169 项文件字节哈希，RV32 综合 16,331 LUT/12,377 FF/34 DRM/4 APM/77 IO/0 latch，双 TCM 各 16 DRM、64 KiB 初值全量通过。manifest 字节篡改、TCM 单比特篡改、错误实际时钟三项负向验证均按预期拒绝，3 PASS/0 SKIP。干净克隆复建和双宽度回归的最终结果在发布前补入统一报告。
+- 工作树新目录重建通过：164 HDL、169 项文件字节哈希，RV32 综合 16,331 LUT/12,377 FF/34 DRM/4 APM/77 IO/0 latch，双 TCM 各 16 DRM、64 KiB 初值全量通过。manifest 字节篡改、TCM 单比特篡改、错误实际时钟三项负向验证均按预期拒绝，3 PASS/0 SKIP。干净克隆 `eacc4ab` 复建通过且 `source_clean=true`，其后仅修改 Markdown；完整双位宽回归通过：每宽度 43 unit + 17 directed PASS/1 位宽 SKIP，核心 ISA 58/78 PASS 各 2 SKIP，SoC ISA 59/79 PASS 各 1 SKIP；裸机/SoC CoreMark 各两模式、SoC directed 各 5、Cache 各 18、外设/DMA 软件各 1/2、基本 RT 各 7、UART loader 各 1 build + 2 runtime、RT DDR 四组、主机协议 19 和独立 bridge 双宽度均通过，其余 0 SKIP。确切范围及未运行项见统一报告。
 - 100 MHz 实验 post-route 20,331 LUT/12,752 FF/34 DRM/4 APM，SoC/DDR WNS −11.147/−1.362 ns，已归档恢复；其映射代次例外和 reset recovery/removal 问题仍未解决。报告不把实验改进当成本 PR 的已采用时序优化，没有新实板或正式成绩。
 
 ## 2026-10-15（Asia/Shanghai）— 第六轮 execute-only fabric 实验，改善但未收敛并恢复七文件
