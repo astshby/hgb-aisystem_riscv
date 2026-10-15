@@ -1,5 +1,36 @@
 # RT-Thread 首版 BSP（rt-thread-port）
 
+MES2L676-200HP 的后续板级集成见 [Pango 进度](FPGA_DEMO_REPORT.md)。此页记录的首版 BSP 仍以 TCM 镜像和仿真 `sim_console` 自检为准；`scripts/rt-thread/build_sim.sh` 现在会使用传入的 `MUL_IMPL`/`DIV_IMPL`，板级目标选择 `0/1`（DSP/SRT）。
+
+## DDR CoreMark 应用（开发分支）
+
+UART loader 与下载工具已作为独立软件加入，协议和测试见 [FPGA demo 报告](FPGA_DEMO_REPORT.md)。`RT_COREMARK_RESIDENT=1` 生成独立驻留应用，每轮输出 CRC、原始 cycles 和配置，收到 UART0 的 `r` 后重测；默认单次运行接口保留。完整 ELF 下载包已通过 RV32/RV64 × performance/validation 四组 SoC UART 数字仿真，各执行两轮并检查 RT-Thread 继续调度，0 SKIP。均为 1 次迭代的功能测试，实板和有效时长验收仍未完成。
+
+2026-10-13 起按新 demo 契约增加 `RT_COREMARK_LAYOUT=ddr` 独立布局：主代码、常量、普通数据/BSS、堆与线程栈进入 `0x80000000–0x8001ffff`；2000 B 工作集在 `0x80020000`；探测字在 `0x8003f000`。应用 ELF 入口在 DDR，热代码 LMA 仍在 D-TCM，IRQ/启动栈在 D-TCM。`rt-thread-coremark` 入口预装模型 bootstrap 与外存 HEX；`uart-rt-thread-test` 入口只预装 loader 的 TCM 初值，经 UART 下载 DDR 主体与 D-TCM 热镜像，不预装应用 HEX。上板时必须集成 loader BRAM 初值和匹配的 DDR IP。
+
+```bash
+RT_COREMARK_LAYOUT=ddr make rt-thread-coremark XLEN=32 MUL_IMPL=0 DIV_IMPL=1 CROSS_COMPILE=/usr/bin/riscv64-linux-gnu-
+RT_COREMARK_LAYOUT=ddr RT_COREMARK_MODE=validation make rt-thread-coremark XLEN=32 MUL_IMPL=0 DIV_IMPL=1 CROSS_COMPILE=/usr/bin/riscv64-linux-gnu-
+# RV64 使用 XLEN=64 独立复跑。
+```
+
+镜像目录为 `build/rt-thread/coremark-ddr-{performance,validation}-rv{32,64}`，驻留追加 `-resident`，非默认波特率再追加 `-baud<值>`。布局专用运行日志为 `logs/rt-coremark-ddr-*-rv*.log`，完整下载日志为 `logs/uart-rt-*-rv*.log`。TB 要求观察实际 DDR 指令请求；预装布局另检查 I$ 命中，完整 UART 入口检查两轮经 UART 解码的 PASS/READY 与 DMA/FENCE.I。单有 DDR 数据读写不能通过此布局验收。
+
+`codex/fpga-rtthread-coremark-ddr3` 另加独立应用入口，不替换原 `make rt-thread` 自检。构建使用未修改的 CoreMark vendor 源码、RT-Thread v5.2.2 和 DSP 乘法/SRT 除法；`.hot` 仍由 D-TCM 的镜像经硬件 DMA 装入 I-TCM，再执行 `FENCE.I`。专用链接脚本把 2 KiB `static_memblk` 放在 `0x80000000` 的 DDR 窗口，其他代码、数据和栈留在 TCM。应用先对 DDR 探测字做 D$ flush/invalidate 及读回；CoreMark 结束后再比较工作集在 D$ flush/invalidate 前后的哈希。镜像检查同时核对工作集地址与热代码 VMA/LMA。
+
+在仓库根目录运行功能仿真：
+
+```bash
+make rt-thread-coremark XLEN=32 MUL_IMPL=0 DIV_IMPL=1 CROSS_COMPILE=/usr/bin/riscv64-linux-gnu-
+make rt-thread-coremark XLEN=64 MUL_IMPL=0 DIV_IMPL=1 CROSS_COMPILE=/usr/bin/riscv64-linux-gnu-
+RT_COREMARK_MODE=validation make rt-thread-coremark XLEN=32 MUL_IMPL=0 DIV_IMPL=1 CROSS_COMPILE=/usr/bin/riscv64-linux-gnu-
+RT_COREMARK_MODE=validation make rt-thread-coremark XLEN=64 MUL_IMPL=0 DIV_IMPL=1 CROSS_COMPILE=/usr/bin/riscv64-linux-gnu-
+```
+
+默认每次只跑 1 次迭代。CoreMark 原输出会明确提示运行时间不到 10 秒，故 `PASS ... functional CRC (short run)` **只证明功能 CRC 正确，不是合格分数**。测试平台观察外存 AXI 模型的读写接受、UART0 TX 跳变、DMA 搬运顺序及执行热代码前的 `FENCE.I`；日志 `sim_console` 只是仿真观察口，固件同时逐字节经 SoC UART0 发送。外存模型不等于实际 Pango DDR3 芯片或板上串口采集。
+
+正式运行应以 `RT_COREMARK_ITERATIONS=0` 调用 `scripts/rt-thread/build.sh` 生成自动校准镜像，并在上板后核对 UART 输出中的 `Correct operation validated.`、三个分项 CRC、至少 10 秒实测时长、迭代数和时钟频率。若在仿真中尝试长时运行，可提高 `RT_COREMARK_MAX_CYCLES`，但当前 40,000,000 周期默认上限不足以模拟 10 秒。当前尚无 FPGA 上板成绩。应用输出和构建物分别位于 `logs/rt-coremark-*` 与 `build/rt-thread/coremark-*-rv*`。
+
 本适配基于 SoC 快照 `9c7cbb4`，仅在 `rt-thread-port` 开发；不修改或推送
 `main`。新增软件、构建入口和被动测试，不改 `vsrc/`、既有 benchmark、
 既有 SoC 测试或上游 RT-Thread 源码。

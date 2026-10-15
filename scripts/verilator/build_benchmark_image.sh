@@ -39,7 +39,7 @@ mkdir -p "${output_dir}"
     -fno-pie -fno-tree-loop-distribute-patterns -mstrict-align \
     -nostdlib -nostartfiles -static -no-pie \
     -I benchmark/bsp \
-    -Wl,--no-relax -Wl,-T,"${linker}" \
+    -Wl,--build-id=none,--no-relax -Wl,-T,"${linker}" \
     -Wl,-Map,"${output_dir}/program.map" \
     "$@" -o "${output_dir}/program.elf"
 

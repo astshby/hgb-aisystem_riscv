@@ -5,6 +5,12 @@ Nano 配置和 serial/pin 设备框架；RV32/RV64 完成抢占/上下文、tick
 DMA 装载 I-TCM 热代码的 SoC 仿真。默认是自检应用，未含 FinSH/POSIX/文件系统，
 也未上板。具体边界、地址和命令见 [RT-Thread BSP](RT_THREAD_PORT.md)。下文保留长期参考目标。
 
+2026-10-12 开发分支另完成 RT-Thread CoreMark 的 DDR 窗口工作集与双位宽短时仿真，保留 TCM 热代码 DMA。尚缺真实 DDR3、板级 UART 日志与满足至少 10 秒的有效 CoreMark 结果。
+
+2026-10-13 按 [demo 契约](FPGA_DEMO_REPORT.md) 增加普通代码/常量/数据/BSS/堆/线程栈全部位于 DDR 的独立布局与取指验证入口。保留外存模型预装入口，并完成整镜像 UART 下载、运行后驻留及 `r` 重测的 SoC 仿真；板级实现仍待后续，不能视为 D3–D6 实板验收完成。
+
+同日新增 [UART loader 与下载包工具](FPGA_DEMO_REPORT.md)，通过协议错误/发布读回主机测试及双位宽小型程序 UART 数字下载仿真；完整 RT-Thread/CoreMark 镜像的 RV32/RV64 × performance/validation 各两轮 CRC、DMA 热装载和持续调度亦已通过。正式自动校准驻留镜像已独立构建，尚无有效时长运行或板级成绩。
+
 > 面向 2026 紫光同创赛题一。  
 > 当前比赛硬件目标：盘古 676 200K 级 FPGA 平台 + 自研 RV64 RISC-V CPU；Zynq-7020/Vivado 可继续作为熟悉的早期验证平台，但不作为最终比赛平台。  
 > 当前定位：先建立可运行、可调试、可测试的软件栈，再逐步加入 AI Runtime 与 Agent Runtime。  

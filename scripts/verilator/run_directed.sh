@@ -5,12 +5,15 @@ xlen="${1:-32}"
 export CCACHE_TEMPDIR="${PWD}/build/ccache-tmp"
 export CCACHE_DIR="${PWD}/build/ccache"
 mkdir -p "${CCACHE_TEMPDIR}" "${CCACHE_DIR}" "build/verilator/directed-rv${xlen}" "logs"
+host_cflags=()
+if [[ "${DIV_IMPL:-0}" == 1 ]]; then host_cflags=(-CFLAGS -O0); fi
 
 shopt -s nullglob
 for tb_path in tb/core/tb_*.sv; do
     test_name="$(basename "${tb_path}" .sv)"
     out_dir="build/verilator/directed-rv${xlen}/${test_name}"
     verilator -Wall -Wno-fatal --assert --timing --binary \
+        "${host_cflags[@]}" \
         -DCORE_XLEN="${xlen}" \
         -DCORE_MUL_IMPL="${MUL_IMPL:-0}" -DCORE_DIV_IMPL="${DIV_IMPL:-0}" \
         -Mdir "${out_dir}" \

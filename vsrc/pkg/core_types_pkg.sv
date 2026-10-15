@@ -9,9 +9,9 @@ package core_types_pkg;
     // 以下为类型的定义与重命名，用于简化变量，logic：普通线路，enum：类似枚举，本质多选器，struct：结构体，用于组合操作
 
     // 数据宽度，grp，csr命名
-    typedef logic [XLEN-1:0] xlen_t;
-    typedef logic [GPR_ADDR_W-1:0] gpr_addr_t;
-    typedef logic [CSR_ADDR_W-1:0] csr_addr_t;
+    typedef logic [core_config_pkg::XLEN-1:0] xlen_t;
+    typedef logic [core_config_pkg::GPR_ADDR_W-1:0] gpr_addr_t;
+    typedef logic [core_config_pkg::CSR_ADDR_W-1:0] csr_addr_t;
 
     //类型选择与执行命名（id）
     typedef enum logic [2:0] {

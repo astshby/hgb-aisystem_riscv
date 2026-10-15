@@ -1,9 +1,8 @@
 # 文档入口与源码范围
 
-`rt-thread-port` 在 SoC 快照 `9c7cbb4` 上新增软件适配，不修改 main 或既有 RTL。
-RT-Thread 的构建、DMA/TCM 地址规划、测试和未实现边界见 [首版 BSP](RT_THREAD_PORT.md)。
+`main` 已通过 PR #5 合入 `rt-thread-port` 的首版软件适配。RT-Thread 的构建、DMA/TCM 地址规划、测试和未实现边界见 [首版 BSP](RT_THREAD_PORT.md)。MES2L676-200HP 的目标、实现、改动文件、时序和 Windows/WSL2 综合复现统一见 [FPGA demo 报告](FPGA_DEMO_REPORT.md)；此报告取代两份重复的板级进度文档，原架构文档和阶段历史保留。
 
-`SOC/all` 是 hgb 的协作开发分支，源码包含 S5 写回/写分配 Cache、DMA、TCM 和 MMIO。本目录保留完整的接口、阶段解读和软件路线文档；`main` 仍是 Core/M 基线，阅读 SoC 章节时须切回 `SOC/all` 或查看对应历史提交。rhbyv 保留阶段分支供逐步学习，hgb 的旧阶段分支已并入 `SOC/all` 的提交历史。
+`SOC/all` 是 hgb 的历史协作开发分支，源码包含 S5 写回/写分配 Cache、DMA、TCM 和 MMIO。本目录保留完整的接口、阶段解读和软件路线文档；当前 `main` 已包含这些 SoC 内容及首版 BSP。rhbyv 保留阶段分支供逐步学习，hgb 的旧阶段分支已并入 `SOC/all` 的提交历史。
 
 | 阶段 | hgb 历史提交 | rhbyv 学习分支 | 当时实现的边界 |
 |---|---|---|---|

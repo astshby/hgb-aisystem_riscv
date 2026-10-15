@@ -63,18 +63,18 @@ rhbyv-cpu-forlinux/
 `bus/` 负责地址、仲裁、错误响应及本地到 AXI4 单拍桥；`memory/` 提供同步 TCM 与启动 ROM；
 `dma/` 包含引擎、MMIO 寄存器和控制封装；`common/` 提供 MMIO 端点与输入同步器；
 `peripheral/` 实现 UART、Timer、GPIO，`interrupt/` 汇聚外部中断。
-外存经可综合本地端口暴露，仿真桥接 AXI RAM；真实 DDR3 IP 尚未接入。
+外存经可综合本地端口暴露，仿真桥接 AXI RAM。Pango wrapper 已连接 DDR3 IP 用户接口，物理 IP 仍待按板载颗粒重新生成并验证。
 协议见 [SoC 访存契约](SOC_BUS_CONTRACT.md)，寄存器见 [外设接口](SOC_PERIPHERALS.md)。
 
 ### 仿真和 FPGA Wrapper
 
 - `vsrc/sim_cpu/` 不可综合，包含一周期 IMem/DMem 和不解释测试协议的仿真顶层。
-- `vsrc/cpu/` 可综合，当前只有复位同步和未连接 BRAM 的 `cpu_top` 框架。
+- `vsrc/cpu/` 可综合，含原 `cpu_top` 框架、MES2L676-200HP 顶层和 256-bit DDR 用户接口桥；板级状态见 [Pango 进度](FPGA_DEMO_REPORT.md)。
 - Core 只认指令/数据 ready-valid 协议；存储器实现差异留在 wrapper。
 
 ## `tb/`
 
-- `unit/`：当前 42 项，包含 MEM 结果拼包、六种 MDU 配置、8 位算法穷举与 SRT 组件验证。
+- `unit/`：当前 43 项，包含 MEM 结果拼包、六种 MDU 配置、8 位算法穷举、SRT 组件及 Pango DDR 用户接口验证。
 - `core/`：18 项短程序流程，每种 XLEN 为 17 PASS、1 非适用位宽 SKIP；覆盖基础/M 指令、访存等待、MDU 前递与寄存边界、预测、CSR、Trap 和序列化取消。
 - `soc/`：互连、ROM/TCM、外设、DMA、AXI4 单拍桥与外存模型 TB；SoC 镜像 harness、C 中断/DMA 程序及启动汇编。
 - `cache/`：I$/旧 WT D$/WB D$ 各四配置单测、维护控制器两配置，以及 DDR 改码、DMA 交接与写回失败测试。
@@ -92,7 +92,9 @@ rhbyv-cpu-forlinux/
 
 - `rtl_files.f`：可综合 Core 的有序源码清单。
 - `soc_files.f`：Core 清单加可移植 SoC、Cache、DMA、存储器及外设；`make soc-test XLEN=32/64` 验证基础设施。
+- `pango_files.f`：在 SoC 清单上加入 200HP 平台顶层及 256-bit DDR 适配器，厂商 IP 由 PDS 工程另加。
 - `verilator/run_cache.sh`：`make cache-test XLEN=32/64` 的 I$/D$ 专项入口。
+- `pango/test_bridge.sh` 与 `pango/mes2l676_200hp.fdc`：双位宽 DDR 接口测试及 200HP 引脚/参考时钟约束草案。
 - `sim_files.f`：在 Core 上加入 `sim_cpu`。
 - `cpu_files.f`：在 Core 上加入 FPGA wrapper。
 - `verilator/run_unit.sh`：遍历 `tb/unit/tb_*.sv`。

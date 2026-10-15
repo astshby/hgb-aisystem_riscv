@@ -67,9 +67,22 @@ vivado-project:
 clean:
 	rm -rf build logs vivado-workspace
 
-.PHONY: rt-thread-fetch rt-thread
+.PHONY: rt-thread-fetch rt-thread rt-thread-coremark
 rt-thread-fetch:
 	bash scripts/rt-thread/fetch.sh
 
 rt-thread:
 	bash scripts/rt-thread/run.sh $(XLEN)
+
+rt-thread-coremark:
+	bash scripts/rt-thread/run_coremark.sh $(XLEN)
+
+.PHONY: loader loader-host-test loader-soc-test uart-rt-thread-test
+loader:
+	bash scripts/loader/build.sh $(XLEN)
+loader-host-test:
+	bash scripts/loader/test_host.sh
+loader-soc-test:
+	bash scripts/loader/test_soc.sh $(XLEN)
+uart-rt-thread-test:
+	bash scripts/loader/test_rt_thread.sh $(XLEN)

@@ -3,7 +3,7 @@
 module tcm_controller #(
     parameter logic [31:0] BASE = soc_addr_pkg::ITCM_BASE,
     parameter int unsigned BYTES = soc_config_pkg::ITCM_BYTES,
-    parameter string INIT_FILE = ""
+    parameter INIT_FILE = ""
 ) (
     input logic clk, rst,
     input logic req_valid,
