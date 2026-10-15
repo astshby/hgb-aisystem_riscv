@@ -25,7 +25,7 @@ Core 使用独立的指令和数据 ready/valid 接口，不直接实例化 FPGA
 - SoC：启动 ROM、I/D-TCM、2 路 UART、机器/通用 Timer、3 组 GPIO、外部中断汇聚与 DMA。
 - `mie/mip` 接入真实设备电平；中断排空流水，保存实际后继 PC 后进入 Direct `mtvec`。
 - Verilator 纯 SystemVerilog 测试，不使用 Cocotb。
-- RV32/RV64 各 42 项单元测试；18 项整核定向流程中各 17 PASS、1 非适用位宽 SKIP。
+- RV32/RV64 各 43 项单元测试，包含 Pango DDR 用户接口定向测试；18 项整核定向流程中各 17 PASS、1 非适用位宽 SKIP。
 - 适用的 riscv-tests：RV32 `58/58`，RV64 `78/78`，包括全部 8/13 项 UM；
   旧分离存储器路径跳过 fence_i/ma_data；SoC 路径含 fence_i，为 `59/59`、`79/79`，仅跳过 ma_data。
 - CoreMark 1.0 performance/validation CRC 均通过；默认 MDU 配置的固定迭代数结果：
@@ -33,7 +33,7 @@ Core 使用独立的指令和数据 ready/valid 接口，不直接实例化 FPGA
 
 S3 DMA/外存与 S4 WT/NWA Cache 的验收提交保留在 Git 历史；`SOC/all` 使用 S5 的 WB/WA 与维护协议，
 Cache 专项 RV32/RV64 各 18 PASS，设计见 [写回与数据交接](docs/understand/S5_CACHE_WRITEBACK.md)。
-独立 DDR CoreMark 和三主端口 Cache 压力测试仍待后续。盘古 676-200K Pro、Zynq-7020 的 DDR3 IP 和上板时序验证继续后推。
+RT-Thread/CoreMark 的 DDR 主布局、UART loader/CRC/驻留重测和真实 TCM DMA 已通过 SoC 模型验证。MES2L676-200HP 的 RV32 综合基线使用 DSP/SRT，双 TCM 初值全量校验通过；Windows/WSL2 的直接重建入口为 `scripts/pango/build.ps1`，所需板级配置已入库。目标 SoC 100 MHz；当前提交采用可综合的 125 MHz 单时钟基线，旧 P&R setup WNS −17.625 ns，100 MHz 实验 WNS −11.147 ns、未保留。目标、文件改动、时序实验、复现命令和实板验收差距统一见 [FPGA demo 报告](docs/FPGA_DEMO_REPORT.md)。尚无板上 DDR/UART/正式成绩或 ILA 证据；三主端口 Cache 压力测试与 Zynq-7020 DDR3 验证后推。
 `rt-thread-port` 已新增 RT-Thread v5.2.2 首版 BSP：RV32/RV64 的调度、机器 tick、
 UART0/1、三组 GPIO，以及 DMA 装载 I-TCM 中断/切换热代码均完成 SoC 仿真。
 详见 [移植、TCM 布局与复现命令](docs/RT_THREAD_PORT.md)。尚未上板，AI 功能仍是后续目标；以上成绩不代表 FPGA Fmax。
@@ -59,6 +59,10 @@ make soc-dma-software XLEN=32
 make soc-riscv-tests XLEN=32
 make soc-coremark XLEN=32
 make cache-test XLEN=32
+bash scripts/pango/test_bridge.sh
+make rt-thread-coremark XLEN=64 MUL_IMPL=0 DIV_IMPL=1
+make uart-rt-thread-test XLEN=32
+make uart-rt-thread-test XLEN=64
 # SoC 命令同样须以 XLEN=64 运行。
 ```
 
@@ -71,9 +75,9 @@ RISC-V 工具链默认位于 `/opt/riscv/bin`。`make test` 包含 lint、单元
 - `vsrc/core/`：与平台无关的可综合 Core。
 - `vsrc/soc/`：可移植 I$/D$、互连、ROM/TCM、DMA、MMIO 外设与中断。
 - `vsrc/sim_cpu/`：不可综合的仿真存储器和通用仿真顶层。
-- `vsrc/cpu/`：规划中的双平台 FPGA wrapper，优先盘古 676-200K Pro。
+- `vsrc/cpu/`：MES2L676-200HP SoC/DDR3 wrapper 与原有 `cpu_top` 框架；[板级进度和限制](docs/FPGA_DEMO_REPORT.md)。
 - `tb/`：单元、整核和上游 riscv-tests 适配测试。
-- `scripts/`：Verilator、工具链和 Vivado Tcl 工作流。
+- `scripts/`：Verilator、工具链、Pango 接口测试和 Vivado Tcl 工作流。
 - `benchmark/`：裸机 BSP、C 冒烟程序、固定 CoreMark 源码和本地 port。
 - `software/rt-thread/`：独立 RT-Thread BSP、DMA 启动与自检；依赖固定在忽略的 `build/` 中。
 
@@ -86,4 +90,5 @@ RISC-V 工具链默认位于 `/opt/riscv/bin`。`make test` 包含 lint、单元
 - [文档入口与分支范围](docs/README.md)、[理解文档导读](docs/understand/README.md)
 - [SoC 访存契约](docs/SOC_BUS_CONTRACT.md)、[外设连接图与寄存器](docs/SOC_PERIPHERALS.md)、[AXI/DDR 边界](docs/SOC_EXTERNAL_MEMORY.md)
 - [项目目录说明](docs/PROJECT_STRUCTURE.md)、[硬件目标](docs/HARDWARE_ROADMAP.md)、[软件开发目标](docs/SOFTWARE_ROADMAP.md)、[仿真与 FPGA 工作流](docs/SIMULATION_AND_FPGA.md)
+- [FPGA demo：目标、实现、时序与综合报告](docs/FPGA_DEMO_REPORT.md)
 - [历史修改记录](docs/COMMIT.md)、[贡献与 Agent 规则](AGENTS.md)

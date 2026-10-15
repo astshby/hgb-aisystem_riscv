@@ -1,8 +1,8 @@
 // Module: soc_top
 // Description: Portable core, DDR instruction/data caches, ROM, TCM, MMIO, DMA and external-memory port.
 module soc_top #(
-    parameter string ITCM_INIT_FILE = "",
-    parameter string DTCM_INIT_FILE = "",
+    parameter ITCM_INIT_FILE = "",
+    parameter DTCM_INIT_FILE = "",
     parameter int unsigned DDR_BYTES = 0,
     parameter bit ICACHE_ENABLE = 1'b1,
     parameter int unsigned ICACHE_BYTES = 4096,

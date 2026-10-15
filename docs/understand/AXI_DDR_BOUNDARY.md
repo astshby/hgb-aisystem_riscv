@@ -11,7 +11,7 @@ PHY、训练逻辑或厂商 Memory Controller。
 
 ```
 CPU I/D 或 DMA → 本地互连 → 外存端口 → local_to_axi → AXI RAM 模型
-                                                └→ 未来平台 DDR3 控制器
+                                                └→ Pango 平台另用 256-bit 用户接口桥与 DDR3 IP
 ```
 
 桥在本地接受请求时锁存地址、尺寸、数据与掩码。写通道 AW/W 独立握手，不假设同拍
@@ -30,9 +30,10 @@ READY 到来前保持。桥只容许一笔在途，`AWLEN/ARLEN=0`，不做 burs
 
 ## 上板需要补哪一层
 
-盘古 676-200K Pro 的平台 wrapper 必须连接厂商 DDR3 控制器/PHY 的真实用户接口，
-核实该接口是否为 AXI4、数据宽度、ID、时钟域、复位和校准完成信号；必要时再加
-宽度/时钟转换，不能把 AXI RAM 直接综合成“DDR3”。`DDR_BYTES` 必须与可访问容量
-一致，并在控制器 ready 前阻止合法请求悬挂。Zynq-7020 的 PL/PS DDR 路径则是
-另一个平台选择，不能直接沿用盘古 IP/约束。实际板级集成与时序检查在 S4 Cache
-之后继续推进，不在当前 S3 PASS 范围。
+MES2L676-200HP 的平台 wrapper 已连接参考 DDR3 IP 的 256-bit 用户接口。
+它并非完整 AXI4：无标准 B/RREADY 通道，因此由独立桥完成宽度与响应适配，
+不能直接使用 `local_to_axi`。SoC 与 IP 使用同一 `core_clk`，在校准完成前保持
+SoC 复位。`DDR_BYTES` 当前只开放 512 MiB。参考 IP 的颗粒配置与板载型号
+不一致，仍须在 PDS 2025.2 重新生成、验证时序与上板读写，不能把 AXI RAM
+或桥的单元测试当作物理 DDR3 成绩。详见 [Pango 进度](../FPGA_DEMO_REPORT.md)。
+Zynq-7020 的 PL/PS DDR 路径需另行适配。

@@ -59,8 +59,11 @@ if [[ "${SOC:-0}" == "1" ]]; then
 fi
 
 mkdir -p "${CCACHE_TEMPDIR}" "${CCACHE_DIR}" "${build_root}" "${sim_dir}" logs
+host_cflags=()
+if [[ "${DIV_IMPL:-0}" == 1 ]]; then host_cflags=(-CFLAGS -O0); fi
 
 verilator -Wall -Wno-fatal --assert --timing --binary \
+    "${host_cflags[@]}" \
     -DCORE_XLEN="${xlen}" \
     -DCORE_MUL_IMPL="${MUL_IMPL:-0}" -DCORE_DIV_IMPL="${DIV_IMPL:-0}" \
     -Mdir "${sim_dir}" \
@@ -89,12 +92,12 @@ run_test() {
     mkdir -p "${test_dir}"
 
     if ! "${tool_prefix}gcc" \
-        -march="${march}" -mabi="${mabi}" -mcmodel=medany \
+        -march="${march}" -mabi="${mabi}" -mcmodel=medany -fno-pie -fno-pic \
         -nostdlib -nostartfiles -static -no-pie \
         -I tb/riscv_tests/env \
         -I "${tests_root}/env" \
         -I "${tests_root}/isa/macros/scalar" \
-        -Wl,--no-relax -Wl,-T,"${linker}" \
+        -Wl,--build-id=none,--no-relax -Wl,-T,"${linker}" \
         -Wl,-Map,"${test_dir}/${test_name}.map" \
         "${source_file}" -o "${test_dir}/${test_name}.elf" \
         >"logs/riscv-${suite}-${test_name}-rv${xlen}${platform_suffix}-compile.log" 2>&1; then

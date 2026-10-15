@@ -7,6 +7,9 @@
 对应的 `XLEN=64`。这是独立 BSP 自检，不改变下面的原有回归入口。
 它检查 DMA 真实装载、TCM bank 一周期响应和内核/外设；详细依赖及未上板限制见
 [RT-Thread 适配](RT_THREAD_PORT.md)。
+板级目标后端为 `MUL_IMPL=0 DIV_IMPL=1`，例如
+`make rt-thread XLEN=64 MUL_IMPL=0 DIV_IMPL=1 CROSS_COMPILE=/usr/bin/riscv64-linux-gnu- OPT_FAST=-O0`；
+`scripts/rt-thread/build_sim.sh` 会把两项选择传给 Verilator。Pango wrapper、引脚和未完成的 DDR IP/固件装载事项见 [200HP 进度](FPGA_DEMO_REPORT.md)。
 
 ## 环境与入口
 
@@ -27,6 +30,7 @@ DIV_IMPL=0
 移位除法、Radix-4 SRT。Make 将选择导出给全部 Verilator runner，lint 也使用同一
 选择。例如 `make test XLEN=64 MUL_IMPL=1 DIV_IMPL=1`。普通 runner 会覆盖相同
 位宽的旧日志，不要并发运行同一位宽的不同配置；六组合矩阵使用独立目录。
+SRT 配置的单元、整核、ISA 与 benchmark runner 使用宿主 C++ `-O0` 以缩短 Verilator 生成程序的编译时间，不改变 RTL 参数或目标机编译优化。若系统只有 `riscv64-linux-gnu-*` 工具链，可在忽略的 `build/` 下建立相应 `riscv64-unknown-elf-*` 映射并设置 `RISCV_TOOL_ROOT`；裸机 runner 已禁止默认 PIC/GOT 与 build-id。
 
 ## 源码清单
 

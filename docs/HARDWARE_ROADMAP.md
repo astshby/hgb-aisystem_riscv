@@ -181,7 +181,7 @@ RV32 58/58、RV64 78/78，各明确跳过 `fence_i` 与 `ma_data`。六种 MDU �
 - S5：`s5/cache-up` 升级 WB/WA D$，添加脏逐出、clean/flush/invalidate、DMA 交接与 FENCE.I 发布屏障；入口 `make cache-test`。
   维护协议增加完成状态与错误报告，拒绝直接丢弃脏行；DMA 交接前后都需维护。
   独立 DDR CoreMark、I/D/DMA 压力测试及性能优化仍待后续。
-  盘古与 Zynq 的 DDR3 IP、引脚、时钟及上板验证继续后推。
+  MES2L676-200HP 的 256-bit DDR 用户接口桥、SoC 顶层和引脚草案已在独立分支启动，见 [板级进度](FPGA_DEMO_REPORT.md)；厂商 IP 重生、PDS 时序和上板仍待完成。Zynq 适配继续后推。
 
 ## 阶段 C：C 扩展
 
