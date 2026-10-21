@@ -38,6 +38,19 @@ package scoreboard_pkg;
         logic error;
     } memory_response_t;
 
+    // LQ/SQ 只共享存活项和寄存描述符视图；状态、结果与写使能由各队列独立持有。
+    typedef struct packed {
+        logic valid;
+        logic killed;
+        lsu_descriptor_t descriptor;
+    } lsu_entry_view_t;
+
+    // 仅无副作用的物理内存允许提前读，MMIO 和高位地址须取得 ROB 队头授权。
+    function automatic logic speculative_ram(input xlen_t address);
+        return address < xlen_t'(soc_addr_pkg::MTIME_BASE) ||
+               ((address >> 31) == xlen_t'(1));
+    endfunction
+
     typedef enum logic [2:0] {
         SCHED_ALU, SCHED_BRANCH, SCHED_MDU, SCHED_MEMORY, SCHED_SERIAL
     } schedule_class_e;

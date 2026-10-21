@@ -1,6 +1,17 @@
 # 双发射学习
 
-> 写作约束：[skills/regulation.md](../../../skills/regulation.md)。本文描述当前 scoreboard 后端及旧控制组边界。
+> 写作约束：[regulation.md](../../../regulation.md)。本文描述当前 scoreboard 后端及旧控制组边界。
+
+当前 P1.1a 候选从 `main@094443e` 建立 `core/p1-1a-split-lq-sq`。
+LQ/SQ 的控制和数据已拆入两个模块：LQ 持有 Load 描述符、逐字节 Store 转发、
+读返回格式化及完成；SQ 持有 Store 描述符、队头写授权、写返回及完成。
+两者通过 `lsu_entry_view_t` 共享存活描述符，分别拥有分配容量和状态写使能。
+包装层只保留双端口请求仲裁、反压 owner、重复响应路由和两项完成选择。
+ROB16/IQ8、按序发射、完整标签、取消排空与 ALU/Load/DSP 的 8/10/10 级边界保持。
+`run_lsq_equivalence.sh` 从 P0 提交提取参考 LSU，逐沿检查有效请求、完成、转发、
+Store owner、拒绝响应与容量；现有 LSU 测试另覆盖单类队列满时另一类可分配。
+双宽定向已通过，完整回归和同镜像比较仍在运行，PDS 尚缺 HMIC_S 1.10 IP 包。
+后续 ROB32/IQ 分离、局部乱序和路径候选未应用。以下 r15 数据保持其历史归属。
 
 新 P0 按工作区 [Codex B11](../../../OPTIMIZATION_PLAN.md#b11-core-完善后建立新-p0scoreboard-双发射)
 实施。r15 已通过 RV32 完整 SoC 的 85 MHz 内部 STA，用户已决定冻结为新 P0，
@@ -67,7 +78,9 @@ Cache miss 或外部 DDR 访问都在十拍内完成。MDU 适配器只保存标
 | 已就绪待执行指令 | `issue_queue.sv`，两项完整寄存包与分支结果，双出双入、部分消费、取消压紧 |
 | 推测结果、异常、退休顺序 | `retire_queue.sv`，16 项 ROB，标签包含槽号与代次 |
 | 待中央接纳的完成结果 | `completion_queue.sv`，五源各两项，寄存结果、完整 ID 和异常 |
-| 外部访存事务 | `load_store_queue.sv`，LQ4/SQ4、请求 owner、返回与取消排空 |
+| Load 事务 | `load_queue.sv`，LQ4、逐字节转发、读返回与取消排空 |
+| Store 事务 | `store_queue.sv`，SQ4、队头授权、写返回与取消排空 |
+| 访存端口仲裁 | `load_store_queue.sv`，两个请求 owner、响应路由、两项完成选择 |
 | 分支恢复 | 四份 RAT checkpoint、ROB 年龄边界和执行/LSQ 取消接口 |
 
 采用 data-in-ROB 重命名，没有额外 PRF/free-list。多个同名写者可以同时在途，

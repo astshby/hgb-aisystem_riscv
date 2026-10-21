@@ -13,6 +13,7 @@ ras="${RAS_ENABLE:-0}"
 [[ "$predictor" =~ ^[01]$ && "$ras" =~ ^[01]$ ]] || exit 2
 suffix=""
 if [[ "$predictor$ras" != 00 ]]; then suffix="-p${predictor}r${ras}"; fi
+if [[ "${LSQ_EQUIVALENCE:-0}" == 1 ]]; then suffix="${suffix}-lsq-equivalence"; fi
 for test in "${tests[@]}"; do
     [[ "$test" =~ ^[a-z_]+$ ]] || exit 2
     top="tb_scoreboard_$test"
@@ -33,6 +34,9 @@ for test in "${tests[@]}"; do
     log="logs/p0/$test-rv$width$suffix"
     extra_sources=()
     if [[ "$test" == metrics ]]; then extra_sources+=(tb/common/scoreboard_metrics.sv); fi
+    if [[ "${LSQ_EQUIVALENCE:-0}" == 1 ]]; then
+        extra_sources+=(build/p1-reference/load_store_queue_reference.sv tb/unit/scoreboard/lsq_equivalence_checker.sv)
+    fi
     mkdir -p "$out"
     verilator -Wall -Wno-fatal --assert --timing --binary -j 2 -CFLAGS -O1 \
         -DCORE_XLEN="$width" -DCORE_ISSUE_WIDTH=2 -DCORE_RETIRE_ENTRIES=16 \

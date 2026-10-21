@@ -22,6 +22,14 @@ RAT 绑定 ROB 标签、IQ8 顺序双发射、两个完整 ALU、共享分支/MD
 
 ## 当前状态
 
+P1.1a 候选位于 `core/p1-1a-split-lq-sq`，起点为已合入的 `main@094443e`。
+`load_queue.sv` 和 `store_queue.sv` 分别持有描述符、状态和完成数据，
+`load_store_queue.sv` 负责外部双端口仲裁与锁定。保持 ROB16/IQ8、按序发射、
+Store/MMIO 队头许可和 8/10/10 级边界；新增与 P0 LSU 原实现的逐周期比较入口
+`bash scripts/verilator/run_lsq_equivalence.sh 32`，RV64 同入口替换位宽。
+完整回归和新镜像对照进行中，完整 SoC PDS 缺 HMIC_S 1.10 IP 包，尚未验收 P1.1a。
+以下 r15 数值为历史 P0 记录。
+
 新 P0 发布基线为 `publish/p0-r15`，实测 RTL 为 `dffb8a2`；原开发分支
 `core/pipe-lsu-forward-format@5fa11fb` 和本地发布准备分支 `baseline/p0-r15@6d92659`
 保留。冻结依据与后续计划见工作区三个交接文档。
