@@ -10,7 +10,12 @@ LQ/SQ 的控制和数据已拆入两个模块：LQ 持有 Load 描述符、逐�
 ROB16/IQ8、按序发射、完整标签、取消排空与 ALU/Load/DSP 的 8/10/10 级边界保持。
 `run_lsq_equivalence.sh` 从 P0 提交提取参考 LSU，逐沿检查有效请求、完成、转发、
 Store owner、拒绝响应与容量；现有 LSU 测试另覆盖单类队列满时另一类可分配。
-双宽定向已通过，完整回归和同镜像比较仍在运行，PDS 尚缺 HMIC_S 1.10 IP 包。
+完整仿真已通过：RV32 231 PASS/5 SKIP，RV64 267 PASS/5 SKIP，包含各五项
+LSU 差分检查。四次 RV32 M0/M1 同镜像比较的 CRC、ROI/TB 周期和全部统计相同。
+新镜像由 GCC 11.4 编译，M0/M1 performance 为 2.633659/2.317931 CoreMark/MHz。
+DDR IP 已用厂商 HMIC_S 1.10 包自行生成，32/32 DQ 元数据匹配；新完整 SoC 工程
+的 228 项输入已校验。Windows 物理可用/提交余量复查为 14.59/12.69 GiB，
+标准 PDS 综合已启动，尚无物理结果。
 后续 ROB32/IQ 分离、局部乱序和路径候选未应用。以下 r15 数据保持其历史归属。
 
 新 P0 按工作区 [Codex B11](../../../OPTIMIZATION_PLAN.md#b11-core-完善后建立新-p0scoreboard-双发射)

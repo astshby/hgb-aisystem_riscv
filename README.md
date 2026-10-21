@@ -27,7 +27,13 @@ P1.1a 候选位于 `core/p1-1a-split-lq-sq`，起点为已合入的 `main@094443
 `load_store_queue.sv` 负责外部双端口仲裁与锁定。保持 ROB16/IQ8、按序发射、
 Store/MMIO 队头许可和 8/10/10 级边界；新增与 P0 LSU 原实现的逐周期比较入口
 `bash scripts/verilator/run_lsq_equivalence.sh 32`，RV64 同入口替换位宽。
-完整回归和新镜像对照进行中，完整 SoC PDS 缺 HMIC_S 1.10 IP 包，尚未验收 P1.1a。
+完整仿真已完成：RV32 231 PASS/5 SKIP，RV64 267 PASS/5 SKIP，包含双宽各五项
+P0 LSU 差分；RV32 四次 M0/M1 同镜像比较的周期、CRC 和全部统计保持。
+同镜像入口为 `scripts/verilator/compare_coremark.py`，新镜像使用 GCC 11.4，
+M0/M1 为 2.633659/2.317931 CoreMark/MHz，不能与下文 GCC 16.1 历史镜像混算。
+DDR IP 已生成，32/32 DQ 元数据匹配；完整 SoC 的 228 项暂存输入已校验。
+Windows 物理可用/提交余量复查为 14.59/12.69 GiB，标准 PDS 综合已启动，
+P1.1a 仍待物理验证。
 以下 r15 数值为历史 P0 记录。
 
 新 P0 发布基线为 `publish/p0-r15`，实测 RTL 为 `dffb8a2`；原开发分支
