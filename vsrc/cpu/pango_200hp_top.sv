@@ -2,7 +2,12 @@
 // Description: PG2L200H board wrapper for the portable SoC and Pango DDR3 controller.
 module pango_200hp_top #(
     parameter ITCM_INIT_FILE = "",
-    parameter DTCM_INIT_FILE = ""
+    parameter DTCM_INIT_FILE = "",
+    parameter int unsigned SOC_PROFILE = soc_config_pkg::SOC_PROFILE_FULL,
+    parameter bit LOCAL_TCM_ENABLE = 1'b0,
+    parameter bit DMA_WIDE_ENABLE = 1'b1,
+    parameter bit DMA_BLOCK_ENABLE = 1'b1,
+    parameter bit CACHE_BLOCK_ENABLE = 1'b1
 ) (
     input logic ref_clk_p, ref_clk_n,
     input logic board_reset_n,
@@ -27,6 +32,29 @@ module pango_200hp_top #(
     logic ddr_req_valid, ddr_req_ready, ddr_rsp_valid, ddr_rsp_ready;
     bus_req_t ddr_request;
     bus_rsp_t ddr_response;
+    logic dma_wide_req_valid, dma_wide_req_ready, dma_wide_rsp_valid, dma_wide_rsp_ready;
+    ddr_req_t dma_wide_request;
+    ddr_rsp_t dma_wide_response;
+    logic [1:0] cache_rd_cmd_valid, cache_rd_cmd_ready, cache_rd_valid, cache_rd_ready;
+    logic [1:0] cache_wr_cmd_valid, cache_wr_cmd_ready, cache_wr_valid, cache_wr_ready;
+    logic [1:0] cache_wr_rsp_valid, cache_wr_rsp_ready;
+    block_types_pkg::block_cmd_t cache_rd_cmd [2], cache_wr_cmd [2];
+    block_types_pkg::block_r_t cache_rd_data [2];
+    block_types_pkg::block_w_t cache_wr_data [2];
+    block_types_pkg::block_b_t cache_wr_rsp [2];
+    logic dma_block_rd_cmd_valid, dma_block_rd_cmd_ready, dma_block_rd_valid, dma_block_rd_ready;
+    logic dma_block_wr_cmd_valid, dma_block_wr_cmd_ready, dma_block_wr_valid, dma_block_wr_ready;
+    logic dma_block_wr_rsp_valid, dma_block_wr_rsp_ready;
+    block_types_pkg::block_cmd_t dma_block_rd_cmd, dma_block_wr_cmd;
+    block_types_pkg::block_r_t dma_block_rd_data;
+    block_types_pkg::block_w_t dma_block_wr_data;
+    block_types_pkg::block_b_t dma_block_wr_rsp;
+    logic rd_cmd_valid, rd_cmd_ready, rd_valid, rd_ready;
+    logic wr_cmd_valid, wr_cmd_ready, wr_valid, wr_ready, wr_rsp_valid, wr_rsp_ready;
+    block_types_pkg::block_cmd_t rd_cmd, wr_cmd;
+    block_types_pkg::block_r_t rd_data;
+    block_types_pkg::block_w_t wr_data;
+    block_types_pkg::block_b_t wr_rsp;
     logic [27:0] axi_awaddr, axi_araddr;
     logic axi_awuser_ap, axi_aruser_ap, axi_awvalid, axi_awready;
     logic axi_wready, axi_arvalid, axi_arready, axi_rlast, axi_rvalid;
@@ -50,21 +78,53 @@ module pango_200hp_top #(
     assign gpio_in[2] = '0;
 
     soc_top #(.ITCM_INIT_FILE(ITCM_INIT_FILE), .DTCM_INIT_FILE(DTCM_INIT_FILE),
-              .DDR_BYTES(512 * 1024 * 1024), .CLOCK_HZ(125000000),
+              .SOC_PROFILE(SOC_PROFILE), .LOCAL_TCM_ENABLE(LOCAL_TCM_ENABLE),
+              .DDR_BYTES(512 * 1024 * 1024), .DMA_WIDE_ENABLE(DMA_WIDE_ENABLE), .DMA_BLOCK_ENABLE(DMA_BLOCK_ENABLE),
+              .CACHE_BLOCK_ENABLE(CACHE_BLOCK_ENABLE), .CLOCK_HZ(125000000),
               .UART_DIVISOR(1085)) u_soc (
         .clk(core_clk), .rst(soc_rst), .uart_rx, .uart_tx,
         .gpio_in, .gpio_out, .gpio_oe,
         .ddr_req_valid, .ddr_req_ready, .ddr_request,
         .ddr_rsp_valid, .ddr_rsp_ready, .ddr_response,
+        .dma_wide_req_valid, .dma_wide_req_ready, .dma_wide_request,
+        .dma_wide_rsp_valid, .dma_wide_rsp_ready, .dma_wide_response,
+        .cache_rd_cmd_valid, .cache_rd_cmd_ready, .cache_rd_cmd, .cache_rd_valid, .cache_rd_ready, .cache_rd_data,
+        .cache_wr_cmd_valid, .cache_wr_cmd_ready, .cache_wr_cmd, .cache_wr_valid, .cache_wr_ready, .cache_wr_data,
+        .cache_wr_rsp_valid, .cache_wr_rsp_ready, .cache_wr_rsp,
+        .dma_block_rd_cmd_valid, .dma_block_rd_cmd_ready, .dma_block_rd_cmd,
+        .dma_block_rd_valid, .dma_block_rd_ready, .dma_block_rd_data,
+        .dma_block_wr_cmd_valid, .dma_block_wr_cmd_ready, .dma_block_wr_cmd,
+        .dma_block_wr_valid, .dma_block_wr_ready, .dma_block_wr_data,
+        .dma_block_wr_rsp_valid, .dma_block_wr_rsp_ready, .dma_block_wr_rsp,
         .commit_valid(), .commit_pc(), .commit_inst(), .commit_rd(),
-        .commit_rd_we(), .commit_rd_data(), .commit_exception(),
+        .commit_rd_we(), .commit_rd_data(), .commit_exception(), .commit_trace(),
         .dmem_store_fire(), .dmem_store_addr(), .dmem_store_data(), .dmem_store_strb()
     );
 
-    pango_ddr3_bridge #(.DDR_BYTES(512 * 1024 * 1024)) u_ddr_bridge (
+    // 窄访问、I/D行及DMA共用真实DDR；每方向独立owner，Cache自身仍等脏写回完成后才读。
+    ddr_block_fabric #(.DDR_BYTES(512 * 1024 * 1024)) u_ddr_port (
         .clk(core_clk), .rst(soc_rst),
-        .req_valid(ddr_req_valid), .req_ready(ddr_req_ready), .request(ddr_request),
-        .rsp_valid(ddr_rsp_valid), .rsp_ready(ddr_rsp_ready), .response(ddr_response),
+        .cpu_req_valid(ddr_req_valid), .cpu_req_ready(ddr_req_ready), .cpu_request(ddr_request),
+        .cpu_rsp_valid(ddr_rsp_valid), .cpu_rsp_ready(ddr_rsp_ready), .cpu_response(ddr_response),
+        .dma_req_valid(dma_wide_req_valid), .dma_req_ready(dma_wide_req_ready), .dma_request(dma_wide_request),
+        .dma_rsp_valid(dma_wide_rsp_valid), .dma_rsp_ready(dma_wide_rsp_ready), .dma_response(dma_wide_response),
+        .cache_rd_cmd_valid, .cache_rd_cmd_ready, .cache_rd_cmd, .cache_rd_valid, .cache_rd_ready, .cache_rd_data,
+        .cache_wr_cmd_valid, .cache_wr_cmd_ready, .cache_wr_cmd, .cache_wr_valid, .cache_wr_ready, .cache_wr_data,
+        .cache_wr_rsp_valid, .cache_wr_rsp_ready, .cache_wr_rsp,
+        .dma_block_rd_cmd_valid, .dma_block_rd_cmd_ready, .dma_block_rd_cmd,
+        .dma_block_rd_valid, .dma_block_rd_ready, .dma_block_rd_data,
+        .dma_block_wr_cmd_valid, .dma_block_wr_cmd_ready, .dma_block_wr_cmd,
+        .dma_block_wr_valid, .dma_block_wr_ready, .dma_block_wr_data,
+        .dma_block_wr_rsp_valid, .dma_block_wr_rsp_ready, .dma_block_wr_rsp,
+        .rd_cmd_valid, .rd_cmd_ready, .rd_cmd, .rd_valid, .rd_ready, .rd_data,
+        .wr_cmd_valid, .wr_cmd_ready, .wr_cmd, .wr_valid, .wr_ready, .wr_data,
+        .wr_rsp_valid, .wr_rsp_ready, .wr_rsp
+    );
+    pango_block_bridge #(.DDR_BYTES(512 * 1024 * 1024)) u_ddr_bridge (
+        .clk(core_clk), .rst(soc_rst),
+        .rd_cmd_valid, .rd_cmd_ready, .rd_cmd, .rd_valid, .rd_ready, .rd_data,
+        .wr_cmd_valid, .wr_cmd_ready, .wr_cmd, .wr_valid, .wr_ready, .wr_data,
+        .wr_rsp_valid, .wr_rsp_ready, .wr_rsp,
         .axi_awaddr, .axi_awuser_ap, .axi_awuser_id, .axi_awlen, .axi_awvalid, .axi_awready,
         .axi_wdata, .axi_wstrb, .axi_wready,
         .axi_araddr, .axi_aruser_ap, .axi_aruser_id, .axi_arlen, .axi_arvalid, .axi_arready,

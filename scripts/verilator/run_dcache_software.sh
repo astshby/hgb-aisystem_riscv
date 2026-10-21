@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 xlen="${1:-32}"
-tool_prefix="${RISCV_TOOL_ROOT:-/opt/riscv/bin}/riscv64-unknown-elf-"
+tool_prefix="${RISCV_TOOL_ROOT:?set RISCV_TOOL_ROOT to the toolchain bin directory}/riscv64-unknown-elf-"
 export SOC=1 SOC_DDR_BYTES=65536
 printf -v fault_addr '%x' "$((0x80000100 + xlen/8))"
 mkdir -p logs

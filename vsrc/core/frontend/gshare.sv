@@ -1,6 +1,6 @@
 // Module: gshare
 // Description: Non-speculative global-history predictor trained by saved PHT index.
-// 查询使用 PC 异或已提交历史；更新使用取指时保存的 PHT 索引。
+// 查询使用 PC 异或已寄存的正常退休历史；更新使用取指时保存的 PHT 索引。
 module gshare (
     input  logic                              clk,
     input  logic                              rst,
@@ -9,7 +9,10 @@ module gshare (
     output logic [core_config_pkg::PHT_IDX_W-1:0] lookup_idx,
     input  logic                              update_valid,
     input  logic [core_config_pkg::PHT_IDX_W-1:0] update_idx,
-    input  logic                              update_taken
+    input  logic                              update_taken,
+    input core_types_pkg::xlen_t lookup_pc_1,
+    output logic lookup_taken_1,
+    output logic [core_config_pkg::PHT_IDX_W-1:0] lookup_idx_1
 );
     import core_config_pkg::*;
 
@@ -40,15 +43,13 @@ module gshare (
         );
     end
 
-    // taken查询：同步更新保证看到最新计数器。
+    // 查询只读已寄存 PHT/GHR；同索引训练在沿后生效，不旁路当拍退休结果。
     always_comb begin
         lookup_idx = lookup_pc[2 +: PHT_IDX_W] ^ ghr_q; //gshare核心:^  (不是直接映射，而是^)
         lookup_counter = pht_valid_q[lookup_idx] ? pht_q[lookup_idx] : 2'b01;
-
-        // 同步更新
-        if (update_valid && (update_idx == lookup_idx))
-            lookup_counter = update_counter;
         lookup_taken = lookup_counter[1];
+        lookup_idx_1 = lookup_pc_1[2 +: PHT_IDX_W] ^ ghr_q;
+        lookup_taken_1 = pht_valid_q[lookup_idx_1] ? pht_q[lookup_idx_1][1] : 1'b0;
     end
 
     // 只有条件分支到达此更新端口，JAL/JALR 不写 PHT，也不进入 GHR。

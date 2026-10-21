@@ -4,7 +4,8 @@ module dcache #(
     parameter bit ENABLE = 1'b1,
     parameter int unsigned DDR_BYTES = 0,
     parameter int unsigned CACHE_BYTES = 4096,
-    parameter int unsigned LINE_BYTES = 32
+    parameter int unsigned LINE_BYTES = 32,
+    parameter bit BLOCK_ENABLE = 1'b0
 ) (
     input logic clk, rst,
     input logic req_valid,
@@ -28,7 +29,22 @@ module dcache #(
     output core_types_pkg::xlen_t maint_fault_addr,
     output logic fault_valid,
     output cache_pkg::cache_maint_error_e fault_code,
-    output core_types_pkg::xlen_t fault_addr
+    output core_types_pkg::xlen_t fault_addr,
+    output logic rd_cmd_valid,
+    input logic rd_cmd_ready,
+    output block_types_pkg::block_cmd_t rd_cmd,
+    input logic rd_valid,
+    output logic rd_ready,
+    input block_types_pkg::block_r_t rd_data,
+    output logic wr_cmd_valid,
+    input logic wr_cmd_ready,
+    output block_types_pkg::block_cmd_t wr_cmd,
+    output logic wr_valid,
+    input logic wr_ready,
+    output block_types_pkg::block_w_t wr_data,
+    input logic wr_rsp_valid,
+    output logic wr_rsp_ready,
+    input block_types_pkg::block_b_t wr_rsp
 );
     import core_config_pkg::*;
     import core_types_pkg::*;
@@ -54,7 +70,7 @@ module dcache #(
     logic [SET_W-1:0] meta_set, scan_set_q;
     logic maintenance_q, fill_started_q, wb_started_q;
     cache_maint_op_e operation_q;
-    logic install, touch, invalidate_entry, mark_clean, mark_dirty, update_way;
+    logic install, touch, invalidate_entry, mark_clean, mark_dirty, update_way, touch_way;
     xlen_t ram_data [2], probe_base;
     logic fill_ready, fill_done, fill_installable, fill_write, fill_req_valid, fill_req_ready;
     logic [WORD_W-1:0] fill_word;
@@ -83,7 +99,9 @@ module dcache #(
     assign request_fire = cache_req_valid && cache_req_ready;
     assign maint_rsp_valid = state_q == MAINT_DONE;
     assign meta_set = maintenance_q ? scan_set_q : request_q.addr[OFFSET_W +: SET_W];
-    assign probe_way = state_q == LOOKUP ? victim_way : way_q;
+    // LOOKUP 只选择下一拍的 way；MISS_CHECK/SCAN/WRITEBACK 才消费 probe。
+    // probe 固定读取已保存的 way，避免 valid→victim→probe→元数据写端同拍串接。
+    assign probe_way = way_q;
     assign probe_base = xlen_t'({probe_tag, meta_set, {OFFSET_W{1'b0}}});
 
     // 写命中及写分配完成后按原 strobe 合并，退休承诺的是本 Cache 持有的脏数据。
@@ -91,7 +109,9 @@ module dcache #(
     assign mark_dirty = state_q == STORE_APPLY && |request_q.wstrb;
     assign mark_clean = state_q == WRITEBACK && wb_done && wb_error == BUS_OK;
     assign touch = (state_q == LOOKUP && hit && !request_q.write) || install || mark_dirty;
-    assign update_way = state_q == LOOKUP ? hit_way : way_q;
+    // 命中拍只更新 LRU；有效位、脏位和 tag 的修改都使用事务已保存的 way。
+    assign update_way = way_q;
+    assign touch_way = state_q == LOOKUP ? hit_way : way_q;
     assign invalidate_entry =
         (state_q == MISS_CHECK && !probe_dirty) ||
         (mark_clean && (!maintenance_q || operation_q == CACHE_FLUSH)) ||
@@ -100,7 +120,7 @@ module dcache #(
     dcache_meta_array #(.SETS(SETS), .TAG_W(TAG_W)) u_meta (
         .clk, .rst, .lookup_set(meta_set), .lookup_tag(request_q.addr[OFFSET_W+SET_W +: TAG_W]),
         .hit, .hit_way, .victim_way, .probe_way, .probe_valid, .probe_dirty, .probe_tag,
-        .invalidate_entry, .install, .touch, .mark_dirty, .mark_clean, .update_way,
+        .invalidate_entry, .install, .touch, .mark_dirty, .mark_clean, .update_way, .touch_way,
         .install_tag(request_q.addr[OFFSET_W+SET_W +: TAG_W])
     );
     cache_data_array #(.CACHE_BYTES(CACHE_BYTES), .WORD_BYTES(DBUS_BYTES)) u_data (
@@ -123,20 +143,24 @@ module dcache #(
             fill_original.wstrb = '0;
         end
     end
-    cache_refill #(.LINE_BYTES(LINE_BYTES), .WORD_BYTES(DBUS_BYTES)) u_refill (
+    // 行填充与写回可走独立块口；不改变CPU命中、维护和原请求fallback的所有权。
+    cache_refill #(.LINE_BYTES(LINE_BYTES), .WORD_BYTES(DBUS_BYTES), .BLOCK_ENABLE(BLOCK_ENABLE)) u_refill (
         .clk, .rst, .start_valid(state_q == FILL && !fill_started_q),
         .fallback_enable(!request_q.write), .start_ready(fill_ready), .request(fill_original),
         .done_valid(fill_done), .done_ready(state_q == FILL), .installable(fill_installable),
         .response(fill_response), .write_valid(fill_write), .write_word(fill_word), .write_data(fill_data),
         .mem_req_valid(fill_req_valid), .mem_req_ready(fill_req_ready), .mem_request(fill_request),
-        .mem_rsp_valid(lower_rsp_valid && state_q == FILL), .mem_response(lower_response)
+        .mem_rsp_valid(lower_rsp_valid && state_q == FILL), .mem_response(lower_response),
+        .rd_cmd_valid, .rd_cmd_ready, .rd_cmd, .rd_valid, .rd_ready, .rd_data
     );
-    cache_writeback #(.LINE_BYTES(LINE_BYTES)) u_writeback (
+    cache_writeback #(.LINE_BYTES(LINE_BYTES), .BLOCK_ENABLE(BLOCK_ENABLE)) u_writeback (
         .clk, .rst, .start_valid(state_q == WRITEBACK && !wb_started_q), .start_ready(wb_ready),
         .line_addr(probe_base), .read_enable(wb_read), .read_word(wb_word), .read_data(ram_data[way_q]),
         .done_valid(wb_done), .done_ready(state_q == WRITEBACK), .error(wb_error), .fault_addr(wb_fault_addr),
         .req_valid(wb_req_valid), .req_ready(wb_req_ready), .request(wb_request),
-        .rsp_valid(lower_rsp_valid && state_q == WRITEBACK), .response(lower_response)
+        .rsp_valid(lower_rsp_valid && state_q == WRITEBACK), .response(lower_response),
+        .wr_cmd_valid, .wr_cmd_ready, .wr_cmd, .wr_valid, .wr_ready, .wr_data,
+        .wr_rsp_valid, .wr_rsp_ready, .wr_rsp
     );
     assign lower_valid = !rst && (state_q == WRITEBACK ? wb_req_valid :
                                  state_q == STORE_SEND ? 1'b1 : fill_req_valid);

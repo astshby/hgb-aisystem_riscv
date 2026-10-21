@@ -28,12 +28,23 @@ module tb_core_m;
     int retired = 0;
     int stores = 0;
     int m_waits = 0;
-    int load_bubbles = 0;
+    logic load_operand_seen = 1'b0;
     xlen_t minimum;
     xlen_t misa;
 
     always #5 clk = ~clk;
-    sim_cpu_top dut (.*);
+    sim_cpu_top dut (.commit_trace(), .*);
+
+    // Load→M 的正确性取决于实际发射操作数，不再绑定旧 load-use 气泡信号。
+    always @(posedge clk) begin
+        if (!rst && dut.u_core.mdu_req_valid && dut.u_core.mdu_req_ready &&
+            dut.u_core.d2_ex_q.pc == xlen_t'(112)) begin
+            assert (dut.u_core.mdu_request.operand_a == xlen_t'(-6) &&
+                    dut.u_core.mdu_request.operand_b == xlen_t'(3))
+                else $fatal(1, "Load producer was not captured by dependent MDU");
+            load_operand_seen = 1'b1;
+        end
+    end
 
     task automatic append(input logic [31:0] inst, input xlen_t expected, input logic writes = 1'b1);
         program_inst[program_size] = inst;
@@ -111,7 +122,6 @@ module tb_core_m;
         for (int cycles = 0; cycles < 5000; cycles++) begin
             @(negedge clk);
             if (dut.u_core.execution_stall) m_waits++;
-            if (dut.u_core.load_use_stall) load_bubbles++;
             if (dmem_store_fire) begin
                 stores++;
                 assert (dmem_store_addr == '0 && dmem_store_data[31:0] == 32'hffff_fffa &&
@@ -130,7 +140,7 @@ module tb_core_m;
                         else $fatal(1, "M pc=%h got=%h expected=%h", commit_pc, commit_rd_data, expected_data[retired]);
                 retired++;
                 if (retired == program_size) begin
-                    assert (stores == 1 && m_waits > 0 && load_bubbles > 0)
+                    assert (stores == 1 && m_waits > 0 && load_operand_seen)
                         else $fatal(1, "M pipeline coverage incomplete");
                     $display("PASS tb_core_m RV%0d retired=%0d cycles=%0d", XLEN, retired, cycles);
                     break;

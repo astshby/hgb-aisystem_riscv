@@ -11,6 +11,128 @@ import re
 import xml.etree.ElementTree as ET
 
 
+GENERATED_SCRIPTS = ("compile.tcl", "synthesize.tcl", "implement.tcl")
+MEMORY_SCRIPTS = ("memory_guard.ps1", "memory_gate.ps1")
+SYNTHESIZE_COMMANDS = "source compile.tcl\nsynthesize -ads -selected_syn_tool_opt 2\n"
+SCOREBOARD_CONFIGURATION = {
+    "core_backend": "scoreboard", "core_issue_width": 2, "core_retire_entries": 16,
+    "core_issue_queue_entries": 8, "core_load_queue_entries": 4,
+    "core_store_queue_entries": 4, "core_branch_checkpoints": 4,
+    "core_predictor_mode": 0, "core_ras_enable": 0,
+    "fetch_data_bits": 64, "data_ports": 2, "tcm_banks_per_region": 2,
+    "dcache_banks": 2, "dcache_bytes": 4096, "icache_bytes": 4096,
+}
+
+
+def compile_command(xlen, profile_id, local_tcm, dma_wide=1,
+                    cache_block=None, dma_block=None, core_issue_width=None, scoreboard=False):
+    dma_parameter = "" if dma_wide is None else f" DMA_WIDE_ENABLE {dma_wide}"
+    block_parameters = ""
+    if cache_block is not None:
+        block_parameters += f" CACHE_BLOCK_ENABLE {cache_block}"
+    if dma_block is not None:
+        block_parameters += f" DMA_BLOCK_ENABLE {dma_block}"
+    issue_directive = "" if core_issue_width is None else f" CORE_ISSUE_WIDTH={core_issue_width}"
+    if scoreboard:
+        if core_issue_width != 2:
+            raise ValueError("scoreboard P0 requires issue width 2")
+        issue_directive += (" CORE_SCOREBOARD=1 CORE_RETIRE_ENTRIES=16 CORE_ISSUE_QUEUE_ENTRIES=8"
+                            " CORE_LOAD_QUEUE_ENTRIES=4 CORE_STORE_QUEUE_ENTRIES=4 CORE_BRANCH_CHECKPOINTS=4"
+                            " CORE_PREDICTOR_MODE=0 CORE_RAS_ENABLE=0")
+    return ("compile -top_module pango_200hp_top -verilog_standard SystemVerilog "
+            f"-compiler_directives {{CORE_XLEN={xlen} CORE_MUL_IMPL=0 CORE_DIV_IMPL=1{issue_directive}}} "
+            '-defined_parameters {ITCM_INIT_FILE "firmware/imem.hex" '
+            'DTCM_INIT_FILE "firmware/dmem.hex" '
+            f'SOC_PROFILE {profile_id} LOCAL_TCM_ENABLE {local_tcm}{dma_parameter}{block_parameters}}} -loop_limit 65536')
+
+
+def verify_staged_manifest(root, manifest):
+    """Verify staged inputs; this function does not read or certify PDS results."""
+    root = root.resolve()
+    for name, expected in manifest["files"].items():
+        path = (root / name).resolve()
+        path.relative_to(root)
+        if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            raise ValueError(f"staged byte hash mismatch: {name}")
+    configuration = {key: manifest[key] for key in ("xlen", "mul", "div", "soc_clock_hz")}
+    if "schema_version" not in manifest:
+        # 旧清单没有覆盖生成 Tcl，不能由历史默认值推断已证实的外设或 TCM 配置。
+        return dict(configuration, soc_profile="unknown", soc_profile_id="unknown",
+                    local_tcm_enable="unknown", soc_presence="unknown",
+                    slow_presence="unknown", dma_wide_enable="unknown", ddr_data_bits="unknown",
+                    cache_block_enable="unknown", dma_block_enable="unknown", core_issue_width="unknown",
+                    evidence="legacy: generated Tcl/configuration unverified")
+    if type(manifest["schema_version"]) is not int or manifest["schema_version"] not in (1, 2, 3, 4):
+        raise ValueError("unsupported staging manifest schema")
+    schema = manifest["schema_version"]
+    if schema >= 2 and (type(manifest.get("dma_wide_enable")) is not int or
+                        manifest.get("dma_wide_enable") != 1 or manifest.get("ddr_data_bits") != 256):
+        raise ValueError("invalid staged native DMA configuration")
+    # 新候选固定采用当前板级入口；旧清单只读兼容，不能追认后来新增的默认功能。
+    if schema == 3:
+        for key in ("cache_block_enable", "dma_block_enable", "core_issue_width"):
+            if type(manifest.get(key)) is not int or manifest.get(key) != 1:
+                raise ValueError(f"invalid staged block/issue configuration: {key}")
+    if schema == 4:
+        for key, expected in dict(SCOREBOARD_CONFIGURATION, cache_block_enable=1, dma_block_enable=1).items():
+            if type(manifest.get(key)) is not type(expected) or manifest[key] != expected:
+                raise ValueError(f"invalid staged scoreboard configuration: {key}")
+        for name in ("imem.hex", "dmem.hex"):
+            original = (root / "firmware" / name).read_text().split()
+            for bank in range(2):
+                bank_name = f"firmware/{name}.bank{bank}"
+                if bank_name not in manifest["files"]:
+                    raise ValueError(f"TCM bank image not covered by manifest: {bank_name}")
+                if (root / bank_name).read_text().split() != original[bank::2]:
+                    raise ValueError(f"incorrect TCM interleaving: {bank_name}")
+    profile = manifest.get("soc_profile")
+    local_tcm = manifest.get("local_tcm_enable")
+    if profile not in ("full", "lite") or type(local_tcm) is not int or local_tcm not in (0, 1):
+        raise ValueError("invalid staged SoC profile/local-TCM configuration")
+    profile_id = int(profile == "lite")
+    present = 0x727f if profile_id else 0x7fff
+    slow_present = present & (0x7ff3 if local_tcm or schema == 4 else 0x7fff)
+    if (manifest.get("soc_profile_id") != profile_id or
+            manifest.get("soc_presence") != f"0x{present:04x}" or
+            manifest.get("slow_presence") != f"0x{slow_present:04x}"):
+        raise ValueError("inconsistent staged SoC presence/profile configuration")
+    if (type(manifest["xlen"]) is not int or manifest["xlen"] not in (32, 64) or
+            (manifest["mul"], manifest["div"], manifest["soc_clock_hz"]) != (0, 1, 125000000) or
+            manifest.get("top") != "pango_200hp_top"):
+        raise ValueError("unexpected board wrapper configuration")
+    for name in GENERATED_SCRIPTS:
+        if name not in manifest["files"]:
+            raise ValueError(f"generated script not covered by manifest: {name}")
+    if manifest.get("memory_guard_version") == 1:
+        for name in MEMORY_SCRIPTS:
+            if name not in manifest["files"]:
+                raise ValueError(f"memory guard not covered by manifest: {name}")
+    commands = [line.strip() for line in (root / "compile.tcl").read_text(encoding="utf-8").splitlines()
+                if line.strip().startswith("compile")]
+    if commands != [compile_command(manifest["xlen"], profile_id, local_tcm,
+                                    1 if schema >= 2 else None,
+                                    1 if schema >= 3 else None, 1 if schema >= 3 else None,
+                                    2 if schema == 4 else (1 if schema == 3 else None),
+                                    scoreboard=schema == 4)]:
+        raise ValueError("compile Tcl parameters differ from staging manifest")
+    if (root / "synthesize.tcl").read_text(encoding="utf-8") != SYNTHESIZE_COMMANDS:
+        raise ValueError("unexpected generated synthesis commands")
+    configuration.update({key: manifest[key] for key in
+                          ("soc_profile", "soc_profile_id", "local_tcm_enable",
+                           "soc_presence", "slow_presence")})
+    configuration["dma_wide_enable"] = 1 if schema >= 2 else "unknown"
+    configuration["ddr_data_bits"] = 256 if schema >= 2 else "unknown"
+    for key in ("cache_block_enable", "dma_block_enable", "core_issue_width"):
+        configuration[key] = manifest[key] if schema >= 3 else "unknown"
+    if schema == 4:
+        configuration.update({key: manifest[key] for key in SCOREBOARD_CONFIGURATION})
+    configuration["evidence"] = (f"schema {schema}: staged hashes and compile parameters verified "
+                                 "(input evidence only)" +
+                                 ("; legacy DMA configuration unknown" if schema == 1 else "") +
+                                 ("; legacy block/issue configuration unknown" if schema < 3 else ""))
+    return configuration
+
+
 def sources(repo, file_list):
     for line in (repo / file_list).read_text(encoding="utf-8").splitlines():
         line = line.split("#", 1)[0].strip()
@@ -33,6 +155,10 @@ def main():
     parser.add_argument("--output", type=Path, required=True, help="empty local ASCII Windows directory")
     parser.add_argument("--ip-dir", type=Path, required=True, help="generated ddr3_test candidate directory")
     parser.add_argument("--xlen", type=int, choices=(32, 64), default=32)
+    parser.add_argument("--soc-profile", choices=("full", "lite"), default="full")
+    parser.add_argument("--local-tcm", type=int, choices=(0, 1), default=0)
+    parser.add_argument("--core-backend", choices=("legacy", "scoreboard"), default="legacy",
+                        help="scoreboard selects the explicit P0 i2/ROB16/IQ8/LQ4/SQ4 configuration")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[2]
     root = args.output.resolve()
@@ -74,7 +200,8 @@ def main():
     if any(not source.is_file() for source, _ in staged):
         parser.error("missing generated IP or production loader; generate IP and make loader first")
     elf = (firmware / "loader.elf").read_bytes()
-    if elf[:4] != b"\x7fELF" or elf[4] != (1 if args.xlen == 32 else 2) or elf[18:20] != b"\xf3\x00":
+    if (len(elf) < (52 if args.xlen == 32 else 64) or elf[:4] != b"\x7fELF" or
+            elf[4] != (1 if args.xlen == 32 else 2) or elf[18:20] != b"\xf3\x00"):
         parser.error("loader ELF width mismatch")
     for name in ("imem.hex", "dmem.hex"):
         words = (firmware / name).read_text().split()
@@ -98,16 +225,42 @@ def main():
     if len(free_lines) != 2 or not free_lines[0].startswith("create_clock ") or not free_lines[1].startswith("set_clock_groups "):
         parser.error("unexpected reference free_clk constraints; review candidate manually")
     root.mkdir(parents=True, exist_ok=True)
-    manifest = {"xlen": args.xlen, "mul": 0, "div": 1,
+    profile_id = 0 if args.soc_profile == "full" else 1
+    present = 0x7fff if profile_id == 0 else 0x727f
+    scoreboard = args.core_backend == "scoreboard"
+    manifest = {"schema_version": 4 if scoreboard else 3, "xlen": args.xlen, "mul": 0, "div": 1,
+                "dma_wide_enable": 1, "ddr_data_bits": 256,
+                "cache_block_enable": 1, "dma_block_enable": 1, "core_issue_width": 1,
+                "soc_profile": args.soc_profile, "soc_profile_id": profile_id,
+                "local_tcm_enable": args.local_tcm, "soc_presence": f"0x{present:04x}",
+                "slow_presence": f"0x{present & (0x7ff3 if args.local_tcm or scoreboard else 0x7fff):04x}",
                 "soc_clock_hz": int(user_mhz * 1000000),
                 "ddr_actual_rate_mbps": float(params["ACTUAL_RATE"]),
                 "device": "PG2L200H-6IFBB676", "top": "pango_200hp_top",
                 "status": "candidate; no timing closure or board compatibility claim", "files": {}}
+    if scoreboard:
+        manifest.update(SCOREBOARD_CONFIGURATION)
+    try:
+        manifest["source_commit"] = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True,
+                                                            stderr=subprocess.DEVNULL).strip()
+        manifest["source_branch"] = subprocess.check_output(["git", "branch", "--show-current"], cwd=repo,
+                                                            text=True, stderr=subprocess.DEVNULL).strip()
+        manifest["source_status"] = subprocess.check_output(["git", "status", "--porcelain"], cwd=repo,
+                                                            text=True, stderr=subprocess.DEVNULL).splitlines()
+    except subprocess.CalledProcessError:
+        manifest["source_commit"] = "unavailable"
     for source, relative in staged:
         dest = root / relative
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, dest)
         manifest["files"][relative.as_posix()] = hashlib.sha256(dest.read_bytes()).hexdigest()
+    if scoreboard:
+        for name in ("imem.hex", "dmem.hex"):
+            words = (root / "firmware" / name).read_text().split()
+            for bank in range(2):
+                relative = f"firmware/{name}.bank{bank}"
+                (root / relative).write_text("\n".join(words[bank::2]) + "\n", encoding="ascii")
+                manifest["files"][relative] = hashlib.sha256((root / relative).read_bytes()).hexdigest()
     # 保持同一顶层层次，只移除例程专属且当前不存在的 free_clk 两行。
     constraints = "\n".join(line for line in fdc.splitlines() if "free_clk" not in line) + "\n"
     (root / "board_ddr.fdc").write_bytes(constraints.encode("utf-8"))
@@ -118,15 +271,23 @@ def main():
                 "set_arch -family Logos2 -device PG2L200H -package FBB676 -speedgrade -6"]
     commands += [f"add_design {{{path.as_posix()}}}" for path in rtl]
     commands += ["add_constraint {board_ddr.fdc}",
-                 "compile -top_module pango_200hp_top -verilog_standard SystemVerilog "
-                 f"-compiler_directives {{CORE_XLEN={args.xlen} CORE_MUL_IMPL=0 CORE_DIV_IMPL=1}} "
-                 '-defined_parameters {ITCM_INIT_FILE "firmware/imem.hex" DTCM_INIT_FILE "firmware/dmem.hex"} '
-                 "-loop_limit 65536"]
+                 compile_command(args.xlen, profile_id, args.local_tcm,
+                                 dma_wide=1, cache_block=1, dma_block=1,
+                                 core_issue_width=2 if scoreboard else 1, scoreboard=scoreboard)]
     (root / "compile.tcl").write_text("\n".join(commands) + "\n", encoding="utf-8")
-    (root / "synthesize.tcl").write_text("source compile.tcl\nsynthesize -ads -selected_syn_tool_opt 2\n", encoding="utf-8")
+    (root / "synthesize.tcl").write_text(SYNTHESIZE_COMMANDS, encoding="utf-8")
     shutil.copyfile(repo / "scripts/pango/implement.tcl", root / "implement.tcl")
+    for name in MEMORY_SCRIPTS:
+        shutil.copyfile(repo / "scripts/pango" / name, root / name)
+    manifest["memory_guard_version"] = 1
+    for name in GENERATED_SCRIPTS + MEMORY_SCRIPTS:
+        manifest["files"][name] = hashlib.sha256((root / name).read_bytes()).hexdigest()
+    verify_staged_manifest(root, manifest)
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    print(f"PASS staged RV{args.xlen} m0d1 candidate: {len(rtl)} HDL files, {root}")
+    print(f"PASS staged RV{args.xlen} m0d1 profile={args.soc_profile} "
+          f"local_tcm={args.local_tcm} dma_wide=1 ddr_data=256 cache_block=1 dma_block=1 "
+          f"core_backend={args.core_backend} core_issue_width={2 if scoreboard else 1} "
+          f"candidate: {len(rtl)} HDL files, {root}")
     print("Run pds_shell -work_dir <output> -project_name soc_rvN -file <output>/compile.tcl first.")
 
 

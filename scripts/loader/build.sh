@@ -3,7 +3,12 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 xlen="${1:-32}"
 case "$xlen" in 32) abi=ilp32;; 64) abi=lp64;; *) exit 2;; esac
-prefix="${CROSS_COMPILE:-/usr/bin/riscv64-linux-gnu-}"
+if [[ -n "${CROSS_COMPILE:-}" ]]; then
+    prefix="$CROSS_COMPILE"
+else
+    : "${RISCV_TOOL_ROOT:?set RISCV_TOOL_ROOT or CROSS_COMPILE}"
+    prefix="${RISCV_TOOL_ROOT}/riscv64-unknown-elf-"
+fi
 out="build/loader/rv$xlen"
 if [[ "${LOADER_BAUD:-115200}" != 115200 || "${LOADER_QUIET_MS:-100}" != 100 ]]; then
     out="build/loader/sim-rv$xlen"

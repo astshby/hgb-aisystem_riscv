@@ -1,5 +1,7 @@
 # A4 + B riscv-tests Validation
 
+> 写作约束：见工作区根目录的 `skills/regulation.md`。
+
 This flow compiles the fixed upstream snapshot under
 `tb/riscv_tests/vendor/riscv-tests/`. A local M-mode environment supplies reset,
 linking, memory-image generation, trap entry, and tohost PASS/FAIL reporting so

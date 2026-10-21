@@ -16,3 +16,7 @@
 !/scripts/
 !/tb/
 !/vsrc/
+
+# Python bytecode
+__pycache__/
+*.pyc

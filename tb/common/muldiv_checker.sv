@@ -21,6 +21,7 @@ module muldiv_checker #(
     logic req_ready;
     muldiv_req_t request;
     logic rsp_valid;
+    logic result_available;
     logic rsp_ready = 1'b0;
     xlen_t rsp_data;
     int checks = 0;
@@ -31,7 +32,7 @@ module muldiv_checker #(
     // 语义单元共用 MDU 的唯一握手壳；MODE 只筛选指令，不复制协议状态机。
     muldiv_unit #(.MUL_IMPL(MUL_IMPL), .DIV_IMPL(DIV_IMPL)) dut (
         .clk, .rst, .cancel, .req_valid, .req_ready, .request,
-        .rsp_valid, .rsp_ready, .rsp_data
+        .result_available, .rsp_valid, .rsp_ready, .rsp_data
     );
 
     // TB 使用宽有符号乘法和原生除法作独立参考，不复用被测部分积或迭代算法。
@@ -110,7 +111,7 @@ module muldiv_checker #(
 
     task automatic launch(input muldiv_req_t req);
         @(negedge clk);
-        assert (req_ready && !rsp_valid) else $fatal(1, "MDU not idle before request");
+        assert (req_ready && !rsp_valid && !result_available) else $fatal(1, "MDU not idle before request");
         request = req;
         req_valid = 1'b1;
         @(posedge clk);
@@ -154,6 +155,15 @@ module muldiv_checker #(
             expected_wait = ((req.op_width == OP_WIDTH_WORD) ? 32 : XLEN) / 2 + 1;
         else
             expected_wait = (req.op_width == OP_WIDTH_WORD) ? 32 : XLEN;
+        // 普通后端的 done 只授权锁存，下一拍才响应；特殊除法已在请求沿写入结果槽。
+        if (int'(req.operation) < 4 || !special)
+            expected_wait++;
+        // 普通除法先保存幅值；SRT 再独立预计算 -D。特殊值仍直接写结果槽。
+        if (int'(req.operation) >= 4 && !special) begin
+            expected_wait++;
+            if (DIV_IMPL == DIV_SRT4)
+                expected_wait++;
+        end
         launch(req);
         wait_cycles = 0;
         while (!rsp_valid) begin
@@ -165,25 +175,110 @@ module muldiv_checker #(
         end
         assert (wait_cycles == expected_wait)
             else $fatal(1, "MDU latency got=%0d expected=%0d", wait_cycles, expected_wait);
-        assert (rsp_data == expected)
+        assert (result_available && rsp_data == expected)
             else $fatal(1, "MDU op=%0d width=%0d a=%h b=%h got=%h expected=%h",
                         req.operation, req.op_width, req.operand_a, req.operand_b, rsp_data, expected);
         repeat (3) begin
             @(negedge clk);
-            assert (rsp_valid && !req_ready && rsp_data == expected)
+            assert (rsp_valid && result_available && !req_ready && rsp_data == expected)
                 else $fatal(1, "MDU response changed under backpressure");
         end
         rsp_ready = 1'b1;
         @(posedge clk);
         @(negedge clk);
         rsp_ready = 1'b0;
-        assert (req_ready && !rsp_valid) else $fatal(1, "MDU response not consumed exactly once");
+        assert (req_ready && !rsp_valid && !result_available)
+            else $fatal(1, "MDU response not consumed exactly once");
         checks++;
+    endtask
+
+    // 幅值已保存但后端尚未启动时取消，启动脉冲不能在取消后复活。
+    task automatic cancel_prepared_division;
+        muldiv_req_t req;
+        req = '0;
+        req.operation = MD_DIV;
+        req.operand_a = xlen_t'(-121);
+        req.operand_b = xlen_t'(11);
+        launch(req);
+        assert (dut.u_div_unit.backend_start_q && !rsp_valid)
+            else $fatal(1, "division magnitude preparation missing");
+        cancel = 1'b1;
+        @(posedge clk);
+        @(negedge clk);
+        cancel = 1'b0;
+        repeat (XLEN + 4) begin
+            #1;
+            assert (!dut.u_div_unit.backend_start_q && !rsp_valid && req_ready)
+                else $fatal(1, "cancelled prepared division restarted");
+            @(negedge clk);
+        end
+        checks++;
+        check_operation(req);
+    endtask
+
+    // ready 始终为 1 时仍不能穿透完成寄存，且只允许一次响应握手。
+    task automatic check_always_ready(input muldiv_op_e operation);
+        muldiv_req_t req;
+        int wait_cycles;
+        req = '0;
+        req.operation = operation;
+        req.operand_a = xlen_t'(-97);
+        req.operand_b = xlen_t'(7);
+        rsp_ready = 1'b1;
+        launch(req);
+        wait_cycles = 0;
+        while (!rsp_valid) begin
+            if (dut.backend_done)
+                assert (!req_ready && !rsp_valid)
+                    else $fatal(1, "backend completion bypassed result register");
+            @(negedge clk);
+            wait_cycles++;
+            assert (wait_cycles <= XLEN + 4) else $fatal(1, "ready response timeout");
+        end
+        assert (rsp_data == reference_result(req)) else $fatal(1, "ready response data");
+        @(posedge clk);
+        @(negedge clk);
+        rsp_ready = 1'b0;
+        repeat (2) begin
+            assert (!rsp_valid && req_ready) else $fatal(1, "ready response duplicated");
+            @(negedge clk);
+        end
+        checks++;
+    endtask
+
+    // 正好在后端 done 到来、结果尚未锁存时取消；不能把完成值带入下一次请求。
+    task automatic cancel_at_completion(input muldiv_op_e operation);
+        muldiv_req_t req;
+        int wait_cycles;
+        req = '0;
+        req.operation = operation;
+        req.operand_a = xlen_t'(-101);
+        req.operand_b = xlen_t'(11);
+        launch(req);
+        wait_cycles = 0;
+        while (!dut.backend_done) begin
+            @(negedge clk);
+            wait_cycles++;
+            assert (wait_cycles <= XLEN + 4) else $fatal(1, "completion cancel timeout");
+        end
+        assert (!rsp_valid) else $fatal(1, "result visible before capture edge");
+        cancel = 1'b1;
+        @(posedge clk);
+        @(negedge clk);
+        cancel = 1'b0;
+        repeat (XLEN + 4) begin
+            #1;
+            assert (!rsp_valid && req_ready) else $fatal(1, "cancelled completion revived");
+            @(negedge clk);
+        end
+        checks++;
+        check_operation(req);
     endtask
 
     task automatic interrupt_operation(input logic reset_it, input logic wait_result,
                                        input muldiv_op_e operation);
         muldiv_req_t req;
+        logic available_before_cancel;
         req = '0;
         req.operation = operation;
         req.operand_a = xlen_t'(32'hf123_4567);
@@ -193,11 +288,16 @@ module muldiv_checker #(
             while (!rsp_valid) @(negedge clk);
         end else
             @(negedge clk);
+        available_before_cancel = result_available;
         if (reset_it) rst = 1'b1;
         else cancel = 1'b1;
+        #1;
+        assert (!rsp_valid && !req_ready && result_available == available_before_cancel)
+            else $fatal(1, "cancel/reset changed saved availability before clock edge");
         @(posedge clk);
         @(negedge clk);
-        assert (!rsp_valid && !req_ready) else $fatal(1, "cancel/reset handshake was not masked");
+        assert (!rsp_valid && !req_ready && !result_available)
+            else $fatal(1, "cancel/reset failed to clear registered result state");
         rst = 1'b0;
         cancel = 1'b0;
         repeat (XLEN + 4) begin
@@ -255,11 +355,15 @@ module muldiv_checker #(
             end
         for (int backend = 0; backend < 2; backend++)
             if (supported(backend == 0 ? 1 : 4, OP_WIDTH_XLEN)) begin
+                check_always_ready(backend == 0 ? MD_MULH : MD_DIV);
+                cancel_at_completion(backend == 0 ? MD_MULH : MD_DIV);
                 interrupt_operation(1'b0, 1'b0, backend == 0 ? MD_MULH : MD_DIV);
                 interrupt_operation(1'b0, 1'b1, backend == 0 ? MD_MULH : MD_DIV);
                 interrupt_operation(1'b1, 1'b0, backend == 0 ? MD_MULH : MD_DIV);
                 interrupt_operation(1'b1, 1'b1, backend == 0 ? MD_MULH : MD_DIV);
             end
+        if (MODE != 1)
+            cancel_prepared_division();
         $display("PASS %s RV%0d checks=%0d", TEST_NAME, XLEN, checks);
         finished = 1'b1;
         if (FINISH_ON_DONE) $finish;

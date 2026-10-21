@@ -1,11 +1,15 @@
 // Module: tb_uart_loader
 // Description: Downloads a DDR executable through actual SoC UART pins, including rejected header/retry.
-module tb_uart_loader;
+module tb_uart_loader #(
+    parameter bit LOCAL_TCM_ENABLE = 1'b0,
+    parameter int unsigned SOC_PROFILE = soc_config_pkg::SOC_PROFILE_FULL
+);
     timeunit 1ns;
     timeprecision 1ps;
     import core_config_pkg::*;
     localparam int DIVISOR = 100; // 50 MHz / 500 kbaud, simulation firmware only.
-    tb_soc_benchmark #(.DDR_BYTES(256 * 1024)) test();
+    tb_soc_benchmark #(.DDR_BYTES(256 * 1024), .LOCAL_TCM_ENABLE(LOCAL_TCM_ENABLE),
+                       .SOC_PROFILE(SOC_PROFILE)) test();
     logic host_rx = 1'b1;
     byte unsigned received[$];
     byte unsigned wire_bytes[262144];

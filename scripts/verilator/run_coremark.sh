@@ -2,11 +2,16 @@
 set -euo pipefail
 
 xlen="${1:-32}"
+# 固定镜像重放必须在任何软件构建/校准之前分流；常规入口继续保留原流程。
+if [[ -n "${COREMARK_REPLAY_DIR:-}" ]]; then
+    exec python3 scripts/verilator/coremark_snapshot.py replay \
+        "${COREMARK_REPLAY_DIR}" --xlen "${xlen}"
+fi
 mul_impl="${MUL_IMPL:-0}"
 div_impl="${DIV_IMPL:-0}"
 config="m${mul_impl}d${div_impl}"
 source scripts/verilator/benchmark_platform.sh
-tool_root="${RISCV_TOOL_ROOT:-/opt/riscv/bin}"
+tool_root="${RISCV_TOOL_ROOT:?set RISCV_TOOL_ROOT to the toolchain bin directory}"
 tool_prefix="${tool_root}/riscv64-unknown-elf-"
 sim_dir="build/verilator/benchmark-rv${xlen}-${config}"
 coremark_root="benchmark/coremark/vendor/coremark"

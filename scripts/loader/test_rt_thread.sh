@@ -2,14 +2,18 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 xlen="${1:-32}"
+source scripts/soc_profile.sh
 [[ "${RT_COREMARK_ITERATIONS:-1}" == 1 ]] || { echo 'UART integration TB requires RT_COREMARK_ITERATIONS=1'; exit 2; }
 export RT_APP=coremark RT_COREMARK_LAYOUT=ddr RT_COREMARK_RESIDENT=1
 export RT_COREMARK_BAUD=500000 RT_COREMARK_ITERATIONS=1 MUL_IMPL=0 DIV_IMPL=1
-export CROSS_COMPILE="${CROSS_COMPILE:-/usr/bin/riscv64-linux-gnu-}"
+if [[ -z "${CROSS_COMPILE:-}" ]]; then
+    : "${RISCV_TOOL_ROOT:?set RISCV_TOOL_ROOT or CROSS_COMPILE}"
+    export CROSS_COMPILE="${RISCV_TOOL_ROOT}/riscv64-unknown-elf-"
+fi
 mode="${RT_COREMARK_MODE:-performance}"
 mkdir -p logs
-bash scripts/rt-thread/build.sh "$xlen" > "logs/uart-rt-$mode-build-rv$xlen.log" 2>&1 || {
-    tail -n 40 "logs/uart-rt-$mode-build-rv$xlen.log"; exit 1;
+bash scripts/rt-thread/build.sh "$xlen" > "logs/uart-rt-$mode-build-rv$xlen-p$soc_profile.log" 2>&1 || {
+    tail -n 40 "logs/uart-rt-$mode-build-rv$xlen-p$soc_profile.log"; exit 1;
 }
 app="build/rt-thread/coremark-ddr-$mode-rv$xlen-resident-baud500000"
 export LOADER_PACKET="$app/program.hgb"

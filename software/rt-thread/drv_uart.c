@@ -81,6 +81,8 @@ static const struct rt_uart_ops ops = {
 
 void hgb_uart_irq(unsigned n)
 {
+    if (n >= 2 || !hgb_soc_has(hgb_soc_presence, HGB_TARGET_UART0 + n))
+        hgb_finish(151);
     rt_uint32_t status = REG32(UART_BASE(n) + 8);
     if (status & 12) {
         hgb_uart_errors[n]++;
@@ -93,6 +95,7 @@ void hgb_uart_init(void)
 {
     struct serial_configure cfg = RT_SERIAL_CONFIG_DEFAULT;
     for (unsigned n = 0; n < 2; n++) {
+        if (!hgb_soc_has(hgb_soc_presence, HGB_TARGET_UART0 + n)) continue;
         REG32(UART_BASE(n) + 16) = 0;
         REG32(UART_BASE(n) + 8) = 12;
         serial[n].ops = &ops;
@@ -102,6 +105,6 @@ void hgb_uart_init(void)
                 (void *)(rt_ubase_t)UART_BASE(n)) != RT_EOK) hgb_finish(147);
         framework_control = serial[n].parent.control;
         serial[n].parent.control = checked_control;
-        hgb_irq_enable(n + 1);
+        if (hgb_irq_enable(n + 1) != RT_EOK) hgb_finish(152);
     }
 }

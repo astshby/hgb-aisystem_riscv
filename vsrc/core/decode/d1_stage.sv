@@ -5,7 +5,6 @@ module d1_stage (
     input  pipeline_pkg::if_d1_t     in_packet,
     output pipeline_pkg::d1_d2_t     out_packet,
     output pipeline_pkg::redirect_t  redirect,
-    output pipeline_pkg::pred_update_t pred_update,
     output logic                       serialize_req
 );
     import core_types_pkg::*;
@@ -39,7 +38,7 @@ module d1_stage (
         jal_target = in_packet.pc + imm;
     end
 
-    // D1 异常在控制流处理之前完成，异常指令不会产生预测更新或提前重定向。
+    // D1 异常在控制流处理之前完成，异常指令不会产生提前重定向。
     d1_exception_check u_d1_exception_check (
         .in_packet,
         .uop,
@@ -54,18 +53,10 @@ module d1_stage (
                          (uop.sys_op == SYS_FENCE) || (uop.sys_op == SYS_FENCE_I));
     end
 
-    // JAL 控制：JAL 不进入 GHR，但需要写入 BTB；真正推进时由 core 放行更新。
+    // JAL 控制仍在 D1 提前解析；BTB 等该指令正常退休才训练，JAL 不进入 GHR。
     always_comb begin
-        pred_update = '0;
         redirect = '0;
         if (in_packet.valid && !decoded_exc.valid && (uop.branch_op == BR_JAL)) begin
-            pred_update.valid = 1'b1;
-            pred_update.kind = BR_JAL;
-            pred_update.pc = in_packet.pc;
-            pred_update.taken = 1'b1;
-            pred_update.target = jal_target;
-            pred_update.pred = in_packet.pred;
-
             // 指令有效、未命中预测或目标错误时，重定向到实际 JAL 目标。
             if (!in_packet.pred.taken || (in_packet.pred.target != jal_target)) begin
                 redirect.valid = 1'b1;

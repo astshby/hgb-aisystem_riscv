@@ -13,13 +13,24 @@ export CCACHE_DIR="${PWD}/build/ccache"
 mkdir -p "${CCACHE_TEMPDIR}" "${CCACHE_DIR}" "${sim_dir}" logs
 host_cflags=()
 if [[ "${div_impl}" == 1 ]]; then host_cflags=(-CFLAGS -O0); fi
+if [[ "$core_backend" == scoreboard ]]; then host_cflags=(-CFLAGS -O1); fi
 extra_sources=()
 extra_options=()
-if [[ "${SOC:-0}" == "1" ]]; then
-    extra_sources+=(tb/soc/axi_memory_model.sv)
-    extra_options+=("-GDDR_BYTES=${SOC_DDR_BYTES:-0}" "-GDCACHE_ENABLE=${SOC_DCACHE_ENABLE:-1}")
+if [[ "$core_backend" == scoreboard ]]; then
+    extra_sources+=(tb/common/scoreboard_metrics.sv tb/benchmark/bind_scoreboard_metrics.sv)
 fi
-verilator -Wall -Wno-fatal --assert --timing --binary \
+if [[ "${SOC:-0}" == "1" ]]; then
+    extra_sources+=(tb/soc/axi_memory_model.sv tb/soc/axi_block_memory_model.sv)
+    extra_options+=("-GDDR_BYTES=${SOC_DDR_BYTES:-0}" "-GDDR_MODEL_BYTES=${bench_ddr_model_bytes}" "-GDCACHE_ENABLE=${SOC_DCACHE_ENABLE:-1}"
+                    "-GCLOCK_HZ=${bench_clock_hz}" "-GUART_DIVISOR=${bench_uart_divisor}"
+                    "-GLOCAL_TCM_ENABLE=${bench_local_tcm_enable}"
+                    "-GDMA_WIDE_ENABLE=${bench_dma_wide_enable}"
+                    "-GDMA_BLOCK_ENABLE=${bench_dma_block_enable}"
+                    "-GCACHE_BLOCK_ENABLE=${bench_cache_block_enable}"
+                    "-GSOC_PROFILE=${bench_soc_profile_id}")
+fi
+verilator -Wall -Wno-fatal --assert --timing --binary -j 2 \
+    "${core_microarch_flags[@]}" \
     "${host_cflags[@]}" \
     -DCORE_XLEN="${xlen}" \
     -DCORE_MUL_IMPL="${mul_impl}" -DCORE_DIV_IMPL="${div_impl}" \

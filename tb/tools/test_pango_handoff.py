@@ -1,0 +1,444 @@
+#!/usr/bin/env python3
+"""Exercise Pango staging with temporary fake inputs; never invoke PDS or Windows."""
+import copy
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+import unittest
+import xml.etree.ElementTree as ET
+
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO))
+from scripts.pango.prepare_project import GENERATED_SCRIPTS, MEMORY_SCRIPTS, compile_command, verify_staged_manifest
+from scripts.pango.summarize_timing import summarize
+
+
+class HandoffTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="pango-handoff-", dir="/tmp")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.repo = self.root / "fake-repo"
+        self.ip = self.root / "fake-ip"
+        scripts = self.repo / "scripts/pango"
+        scripts.mkdir(parents=True)
+        for name in ("prepare_project.py", "check_ip_dq.py", "implement.tcl", "mes2l676_200hp.fdc") + MEMORY_SCRIPTS:
+            shutil.copyfile(REPO / "scripts/pango" / name, scripts / name)
+        (self.repo / "vsrc").mkdir()
+        (self.repo / "vsrc/fixture.sv").write_text("module fixture; endmodule\n")
+        (self.repo / "scripts/pango_files.f").write_text("vsrc/fixture.sv\n")
+        (self.ip / "rtl").mkdir(parents=True)
+        (self.ip / "pnr").mkdir()
+        for name in ("ddr3_test.v", "ddr3_test_ddrphy_top.v", "rtl/fixture.v"):
+            (self.ip / name).write_text("// Offline staging fixture, not a DDR controller.\n")
+        tree = ET.Element("ip")
+        ET.SubElement(ET.SubElement(tree, "header"), "version").text = "1.10"
+        params = {"ACTUAL_RATE": "1000", "DFI_CLK_PERIOD": "8000"}
+        fdc = (scripts / "mes2l676_200hp.fdc").read_text()
+        params.update({f"PAD_DQ{index}": pin for index, pin in re.findall(
+            r"\{p:mem_dq\[(\d+)\]\} \{PAP_IO_LOC\} \{(\w+)\}", fdc)})
+        for name, value in params.items():
+            node = ET.SubElement(tree, "param")
+            ET.SubElement(node, "name").text = name
+            ET.SubElement(node, "value").text = value
+        ET.ElementTree(tree).write(self.ip / "ddr3_test.idf")
+        (self.ip / "pnr/ddr_test.fdc").write_text(
+            "create_clock -name {ref_clk} -period {20.0}\n"
+            "create_generated_clock -name {ddrphy_sysclk} -multiply_by {5} -divide_by {2}\n"
+            "create_clock -name {free_clk} -period {10.0}\n"
+            "set_clock_groups -asynchronous -group {free_clk}\n")
+        for width in (32, 64):
+            firmware = self.repo / f"build/loader/rv{width}"
+            firmware.mkdir(parents=True)
+            # ELF 头和镜像形状合法，但不含可执行程序；只验证交接输入，不冒充固件执行。
+            ident = b"\x7fELF" + bytes((1 if width == 32 else 2, 1, 1)) + bytes(9)
+            if width == 32:
+                header = struct.pack("<HHIIIIIHHHHHH", 2, 243, 1, 0, 0, 0, 0, 52, 0, 0, 0, 0, 0)
+            else:
+                header = struct.pack("<HHIQQQIHHHHHH", 2, 243, 1, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0)
+            (firmware / "loader.elf").write_bytes(ident + header)
+            for name in ("imem.hex", "dmem.hex"):
+                (firmware / name).write_text(("0" * (width // 4) + "\n") * (65536 // (width // 8)))
+        bin_dir = self.root / "bin"
+        bin_dir.mkdir()
+        mock = bin_dir / "wslpath"
+        mock.write_text("#!/bin/sh\nprintf '%s\\n' 'X:\\offline-fixture'\n")
+        mock.chmod(0o755)
+        self.env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ["PATH"],
+                        PYTHONDONTWRITEBYTECODE="1")
+
+    def stage(self, width=32, profile="full", local=0, output=None, success=True, backend="legacy"):
+        output = output or self.root / f"rv{width}-{profile}-ltcm{local}"
+        result = subprocess.run([sys.executable, "-B", str(self.repo / "scripts/pango/prepare_project.py"),
+                                 "--xlen", str(width), "--soc-profile", profile, "--local-tcm", str(local),
+                                 "--core-backend", backend,
+                                 "--output", str(output), "--ip-dir", str(self.ip)],
+                                text=True, capture_output=True, env=self.env)
+        self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
+        return output, result
+
+    def test_scoreboard_native_configuration_and_bank_images(self):
+        for width in (32, 64):
+            for local in (0, 1):
+                with self.subTest(width=width, local=local):
+                    firmware = self.repo / f"build/loader/rv{width}"
+                    for name in ("imem.hex", "dmem.hex"):
+                        (firmware / name).write_text("".join(f"{index:0{width//4}x}\n"
+                            for index in range(65536//(width//8))))
+                    output, _ = self.stage(width=width, local=local, backend="scoreboard")
+                    manifest = json.loads((output / "manifest.json").read_text())
+                    configuration = verify_staged_manifest(output, manifest)
+                    self.assertEqual(manifest["schema_version"], 4)
+                    self.assertEqual(manifest["memory_guard_version"], 1)
+                    for name in MEMORY_SCRIPTS:
+                        self.assertIn(name, manifest["files"])
+                    self.assertEqual(configuration["core_backend"], "scoreboard")
+                    self.assertEqual(configuration["core_retire_entries"], 16)
+                    self.assertEqual(configuration["data_ports"], 2)
+                    self.assertEqual(configuration["slow_presence"], "0x7ff3")
+                    self.assertIn("CORE_SCOREBOARD=1", (output / "compile.tcl").read_text())
+                    for name in ("imem.hex", "dmem.hex"):
+                        words = (output / "firmware" / name).read_text().split()
+                        for bank in range(2):
+                            self.assertEqual((output / f"firmware/{name}.bank{bank}").read_text().split(),
+                                             words[bank::2])
+                    self.verify_cli(output)
+                    print(f"PASS offline scoreboard staging RV{width} local={local} native_banks=2")
+
+    def test_memory_guard_is_bound_to_staged_inputs(self):
+        output, _ = self.stage()
+        manifest = json.loads((output / "manifest.json").read_text())
+        for name in MEMORY_SCRIPTS:
+            changed = copy.deepcopy(manifest)
+            del changed["files"][name]
+            with self.assertRaisesRegex(ValueError, "memory guard not covered"):
+                verify_staged_manifest(output, changed)
+        (output / "memory_guard.ps1").write_text("throw 'modified guard'\n")
+        with self.assertRaises(ValueError):
+            verify_staged_manifest(output, manifest)
+
+    def test_scoreboard_rehashed_mismatches_rejected(self):
+        output, _ = self.stage(backend="scoreboard")
+        manifest = json.loads((output / "manifest.json").read_text())
+        path = output / "compile.tcl"
+        original = path.read_text()
+        for before, after in (("CORE_SCOREBOARD=1", ""), ("CORE_RETIRE_ENTRIES=16", "CORE_RETIRE_ENTRIES=4"),
+                              ("CORE_LOAD_QUEUE_ENTRIES=4", "CORE_LOAD_QUEUE_ENTRIES=1")):
+            altered = copy.deepcopy(manifest)
+            path.write_text(original.replace(before, after))
+            altered["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
+            with self.assertRaisesRegex(ValueError, "compile Tcl parameters"):
+                verify_staged_manifest(output, altered)
+        path.write_text(original)
+        bank_name = "firmware/imem.hex.bank0"
+        bank = output / bank_name
+        bank.write_text("00000001\n" + bank.read_text().split("\n", 1)[1])
+        manifest["files"][bank_name] = hashlib.sha256(bank.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(ValueError, "incorrect TCM interleaving"):
+            verify_staged_manifest(output, manifest)
+
+    def verify_cli(self, output, staging=True, success=True):
+        command = [sys.executable, "-B", str(REPO / "scripts/pango/verify_synthesis.py"), str(output)]
+        if staging:
+            command.append("--staging-only")
+        result = subprocess.run(command, text=True, capture_output=True, env=self.env)
+        self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
+        return result
+
+    def test_eight_staged_configurations(self):
+        for width in (32, 64):
+            for profile in ("full", "lite"):
+                for local in (0, 1):
+                    with self.subTest(width=width, profile=profile, local=local):
+                        output, _ = self.stage(width, profile, local)
+                        manifest = json.loads((output / "manifest.json").read_text())
+                        config = verify_staged_manifest(output, manifest)
+                        self.assertEqual(manifest["schema_version"], 3)
+                        for key in ("cache_block_enable", "dma_block_enable", "core_issue_width"):
+                            self.assertEqual(config[key], 1)
+                        self.assertEqual(config["soc_profile"], profile)
+                        self.assertEqual(config["local_tcm_enable"], local)
+                        present = 0x7fff if profile == "full" else 0x727f
+                        self.assertEqual(config["soc_presence"], f"0x{present:04x}")
+                        self.assertEqual(config["slow_presence"], f"0x{present & (0x7ff3 if local else 0x7fff):04x}")
+                        self.assertTrue(set(GENERATED_SCRIPTS) <= manifest["files"].keys())
+                        result = self.verify_cli(output)
+                        self.assertIn("no synthesis evidence", result.stdout)
+                        self.assertFalse((output / "synthesis-summary.json").exists())
+                        self.verify_cli(output, staging=False, success=False)
+                        print(f"PASS offline staging RV{width} profile={profile} local_tcm={local}")
+
+    def test_invalid_cli_values(self):
+        for width, profile, local in ((32, "full", 2), (32, "minimal", 0), (16, "full", 0)):
+            with self.subTest(width=width, profile=profile, local=local):
+                output, result = self.stage(width, profile, local, success=False)
+                self.assertIn("invalid choice", result.stderr)
+                self.assertFalse(output.exists())
+
+    def test_existing_output_is_preserved(self):
+        output = self.root / "existing"
+        output.mkdir()
+        marker = output / "user-evidence"
+        marker.write_text("keep me")
+        _, result = self.stage(output=output, success=False)
+        self.assertIn("output must be empty", result.stderr)
+        self.assertEqual(marker.read_text(), "keep me")
+
+    def test_wrong_and_truncated_elf_rejected(self):
+        firmware = self.repo / "build/loader/rv32/loader.elf"
+        firmware.write_bytes((self.repo / "build/loader/rv64/loader.elf").read_bytes())
+        for content in (firmware.read_bytes(), b"\x7fELF"):
+            with self.subTest(size=len(content)):
+                firmware.write_bytes(content)
+                output, result = self.stage(success=False)
+                self.assertIn("loader ELF width mismatch", result.stderr)
+                self.assertFalse(output.exists())
+
+    def test_missing_staged_file_rejected(self):
+        (self.repo / "build/loader/rv32/imem.hex").unlink()
+        output, result = self.stage(success=False)
+        self.assertIn("missing generated IP or production loader", result.stderr)
+        self.assertFalse(output.exists())
+
+    def test_invalid_hex_shape_rejected(self):
+        (self.repo / "build/loader/rv32/dmem.hex").write_text("00000000\n")
+        output, result = self.stage(success=False)
+        self.assertIn("invalid production TCM HEX: dmem.hex", result.stderr)
+        self.assertFalse(output.exists())
+
+    def test_all_generated_tcl_tampering_rejected(self):
+        output, _ = self.stage()
+        for name in GENERATED_SCRIPTS:
+            with self.subTest(name=name):
+                path = output / name
+                original = path.read_bytes()
+                path.write_bytes(original + b"# changed\n")
+                result = self.verify_cli(output, success=False)
+                self.assertIn(f"staged byte hash mismatch: {name}", result.stderr)
+                path.write_bytes(original)
+
+    def test_rehashed_parameter_change_still_rejected(self):
+        output, _ = self.stage()
+        path = output / "compile.tcl"
+        manifest = json.loads((output / "manifest.json").read_text())
+        original = path.read_text()
+        for old, new in (("LOCAL_TCM_ENABLE 0", "LOCAL_TCM_ENABLE 1"),
+                         ("SOC_PROFILE 0", "SOC_PROFILE 1"), ("CORE_XLEN=32", "CORE_XLEN=64"),
+                         ("DMA_WIDE_ENABLE 1", "DMA_WIDE_ENABLE 0"),
+                         ("CACHE_BLOCK_ENABLE 1", "CACHE_BLOCK_ENABLE 0"),
+                         ("DMA_BLOCK_ENABLE 1", "DMA_BLOCK_ENABLE 0"),
+                         ("CORE_ISSUE_WIDTH=1", "CORE_ISSUE_WIDTH=2"),
+                         (" CACHE_BLOCK_ENABLE 1", ""), (" DMA_BLOCK_ENABLE 1", ""),
+                         (" CORE_ISSUE_WIDTH=1", "")):
+            with self.subTest(parameter=old):
+                path.write_text(original.replace(old, new))
+                manifest["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
+                with self.assertRaisesRegex(ValueError, "compile Tcl parameters differ"):
+                    verify_staged_manifest(output, manifest)
+
+    def test_manifest_script_coverage_and_schema_rejected(self):
+        output, _ = self.stage()
+        manifest = json.loads((output / "manifest.json").read_text())
+        for name in GENERATED_SCRIPTS:
+            changed = copy.deepcopy(manifest)
+            del changed["files"][name]
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "not covered by manifest"):
+                verify_staged_manifest(output, changed)
+        for version in (True, 0, 5):
+            changed = dict(manifest, schema_version=version)
+            with self.subTest(version=version), self.assertRaisesRegex(ValueError, "unsupported staging"):
+                verify_staged_manifest(output, changed)
+
+    def legacy_manifest(self, schema):
+        """Build an exact historical command, not a new command with a relabelled version."""
+        output, _ = self.stage()
+        manifest = json.loads((output / "manifest.json").read_text())
+        manifest["schema_version"] = schema
+        if schema == 1:
+            del manifest["dma_wide_enable"]
+            del manifest["ddr_data_bits"]
+        for key in ("cache_block_enable", "dma_block_enable", "core_issue_width"):
+            del manifest[key]
+        path = output / "compile.tcl"
+        lines = path.read_text().splitlines()
+        lines = [compile_command(32, 0, 0, 1 if schema == 2 else None)
+                 if line.startswith("compile") else line for line in lines]
+        path.write_text("\n".join(lines) + "\n")
+        manifest["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        (output / "manifest.json").write_text(json.dumps(manifest))
+        return output, manifest
+
+    def test_schema_one_keeps_dma_configuration_unknown(self):
+        output, manifest = self.legacy_manifest(1)
+        config = verify_staged_manifest(output, manifest)
+        self.assertEqual(config["dma_wide_enable"], "unknown")
+        self.assertEqual(config["ddr_data_bits"], "unknown")
+        for key in ("cache_block_enable", "dma_block_enable", "core_issue_width"):
+            self.assertEqual(config[key], "unknown")
+        self.assertIn("legacy DMA", config["evidence"])
+        self.assertIn('"dma_block_enable": "unknown"', self.verify_cli(output).stdout)
+
+    def test_schema_two_keeps_block_and_issue_configuration_unknown(self):
+        output, manifest = self.legacy_manifest(2)
+        original = {name: (output / name).read_bytes() for name in GENERATED_SCRIPTS}
+        config = verify_staged_manifest(output, manifest)
+        self.assertEqual(config["dma_wide_enable"], 1)
+        self.assertEqual(config["ddr_data_bits"], 256)
+        for key in ("cache_block_enable", "dma_block_enable", "core_issue_width"):
+            self.assertEqual(config[key], "unknown")
+        self.assertIn("legacy block/issue", config["evidence"])
+        self.assertIn('"core_issue_width": "unknown"', self.verify_cli(output).stdout)
+        self.assertEqual(original, {name: (output / name).read_bytes() for name in GENERATED_SCRIPTS})
+
+    def test_legacy_rehashed_new_parameters_are_rejected(self):
+        for schema in (1, 2):
+            with self.subTest(schema=schema):
+                output, manifest = self.legacy_manifest(schema)
+                path = output / "compile.tcl"
+                original = path.read_text()
+                for added in ("CACHE_BLOCK_ENABLE 1", "DMA_BLOCK_ENABLE 1"):
+                    path.write_text(original.replace("LOCAL_TCM_ENABLE 0", f"LOCAL_TCM_ENABLE 0 {added}"))
+                    manifest["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
+                    with self.assertRaisesRegex(ValueError, "compile Tcl parameters differ"):
+                        verify_staged_manifest(output, manifest)
+                # 显式使用不同临时输出，避免第二个历史版本复用非空候选目录。
+                shutil.rmtree(output)
+
+    def test_schema_three_missing_or_invalid_block_issue_metadata_rejected(self):
+        output, _ = self.stage()
+        manifest = json.loads((output / "manifest.json").read_text())
+        for key in ("cache_block_enable", "dma_block_enable", "core_issue_width"):
+            for value in (None, 0, True, "1", 2):
+                with self.subTest(key=key, value=value):
+                    changed = copy.deepcopy(manifest)
+                    if value is None:
+                        del changed[key]
+                    else:
+                        changed[key] = value
+                    with self.assertRaisesRegex(ValueError, "block/issue configuration"):
+                        verify_staged_manifest(output, changed)
+
+    def test_native_dma_metadata_rejected_if_inconsistent(self):
+        output, _ = self.stage()
+        manifest = json.loads((output / "manifest.json").read_text())
+        for key, value in (("dma_wide_enable", 0), ("dma_wide_enable", True), ("ddr_data_bits", 64)):
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "native DMA"):
+                verify_staged_manifest(output, dict(manifest, **{key: value}))
+
+    def test_legacy_configuration_is_explicitly_unknown(self):
+        output, _ = self.stage()
+        manifest = json.loads((output / "manifest.json").read_text())
+        del manifest["schema_version"]
+        for name in GENERATED_SCRIPTS:
+            del manifest["files"][name]
+        for name in ("local_tcm_enable", "slow_presence"):
+            del manifest[name]
+        (output / "manifest.json").write_text(json.dumps(manifest))
+        config = verify_staged_manifest(output, manifest)
+        self.assertEqual(config["soc_profile"], "unknown")
+        self.assertEqual(config["local_tcm_enable"], "unknown")
+        for key in ("cache_block_enable", "dma_block_enable", "core_issue_width"):
+            self.assertEqual(config[key], "unknown")
+        self.assertIn("legacy", config["evidence"])
+        self.assertIn("legacy", self.verify_cli(output).stdout)
+        self.verify_cli(output, staging=False, success=False)
+
+    def test_staging_cannot_replace_timing_evidence(self):
+        output, _ = self.stage()
+        with self.assertRaises(FileNotFoundError):
+            summarize(output, output / "nonexistent-implementation.log")
+
+    def test_timing_summary_configuration_and_route_gate(self):
+        output, _ = self.stage(64, "lite", 1)
+        synthesis = output / "prj_tasks/syn_1/synthesize"
+        timing = output / "prj_tasks/pnr_1/report_timing"
+        db = timing / "report_db"
+        synthesis.mkdir(parents=True)
+        db.mkdir(parents=True)
+        (synthesis / "pango_200hp_top.snr").write_text(
+            "Total LUTs: 1\nTotal Registers: 1\nTotal Latches: 0\n"
+            "Total DRMs = 34\nTotal APMs = 4\nTotal I/O ports = 1\n")
+        (synthesis / "pango_200hp_top_syn.vm").write_text("// fixture, not synthesized HDL\n")
+        (timing / "pango_200hp_top.rtr").write_text("fixture, not a timing report\n")
+        (output / "init-both-summary.json").write_text("{}\n")
+        names = ["report_timing_fmax", "check_timing_summary"]
+        names += [f"report_timing_{corner}_{check}" for corner in ("slow", "fast")
+                  for check in ("setup", "hold", "recovery", "removal", "mpw", "skew")]
+        for name in names + ["report_timing_slow_path_setup"]:
+            (db / f"{name}.db").write_text(
+                "<tables><table><column_headers><data>Slack</data></column_headers>"
+                "<row><data>0.0</data></row></table></tables>")
+        log = output / "implementation.log"
+        actions = ("dev_map -force_to_run", "place", "route", "route_optimize", "report_timing")
+        completed = "\n".join(f"Executing : {action} successfully." for action in actions)
+        completed += ("\nTotal route nets size: 1\nUnrouted nets at iteration 1: 0\n"
+                      "Device Utilization Summary\n| + LUT | 1 |\n| + FF | 1 |\n"
+                      "| + DRM36K | 34 |\n| + APM | 4 |\n| IO | 1 |\n")
+        log.write_text(completed)
+        result = summarize(output, log)
+        self.assertEqual(result["configuration"]["soc_profile"], "lite")
+        self.assertEqual(result["configuration"]["local_tcm_enable"], 1)
+        self.assertEqual(result["configuration"]["slow_presence"], "0x7273")
+        for key in ("cache_block_enable", "dma_block_enable", "core_issue_width"):
+            self.assertEqual(result["configuration"][key], 1)
+        self.assertEqual(result["implementation_actions"][1], "place")
+        log.write_text(completed.replace("Unrouted nets at iteration 1: 0", "Unrouted nets at iteration 1: 1"))
+        with self.assertRaisesRegex(ValueError, "1 unrouted nets"):
+            summarize(output, log)
+        log.write_text(completed.replace("Executing : route successfully.", "Executing : route"))
+        with self.assertRaisesRegex(ValueError, "incomplete implementation action: route"):
+            summarize(output, log)
+
+    def test_original_resource_gate_kept(self):
+        output, _ = self.stage()
+        report = output / "prj_tasks/syn_1/synthesize/pango_200hp_top.snr"
+        report.parent.mkdir(parents=True)
+        for bram, dsp, latch, success in ((34, 4, 0, True), (33, 4, 0, False),
+                                          (34, 3, 0, False), (34, 4, 1, False)):
+            with self.subTest(bram=bram, dsp=dsp, latch=latch):
+                report.write_text(f"Total LUTs: 1\nTotal Registers: 1\nTotal Latches: {latch}\n"
+                                  f"Total DRMs = {bram}\nTotal APMs = {dsp}\nTotal I/O ports = 1\n")
+                self.verify_cli(output, staging=False, success=success)
+
+    def test_scoreboard_width_specific_resource_gate(self):
+        for width, drm, apm in ((32, 36, 4), (64, 38, 12)):
+            output, _ = self.stage(width=width, backend="scoreboard")
+            report = output / "prj_tasks/syn_1/synthesize/pango_200hp_top.snr"
+            report.parent.mkdir(parents=True)
+            for actual_drm, actual_apm, latch, success in (
+                    (drm, apm, 0, True), (drm-2, apm, 0, False),
+                    (drm, apm+1, 0, False), (drm, apm, 1, False)):
+                with self.subTest(width=width, drm=actual_drm, apm=actual_apm, latch=latch):
+                    report.write_text(f"Total LUTs: 1\nTotal Registers: 1\nTotal Latches: {latch}\n"
+                                      f"Total DRMs = {actual_drm}\nTotal APMs = {actual_apm}\n"
+                                      "Total I/O ports = 1\n")
+                    self.verify_cli(output, staging=False, success=success)
+
+    def test_powershell_configuration_contract_static_only(self):
+        script = (REPO / "scripts/pango/build.ps1").read_text()
+        for fragment in ("[ValidateSet('full','lite')][string]$SocProfile",
+                         "[ValidateSet(0,1)][int]$LocalTcmEnable",
+                         "'--soc-profile', $SocProfile", "'--local-tcm', \"$LocalTcmEnable\"",
+                         "'--staging-only'", "$manifest.soc_profile -cne $SocProfile",
+                         "$manifest.local_tcm_enable -ne $LocalTcmEnable",
+                         "$manifest.schema_version -ne 3",
+                         "$manifest.cache_block_enable -ne 1", "$manifest.dma_block_enable -ne 1",
+                         "$manifest.core_issue_width -ne 1",
+                         "soc_profile = $manifest.soc_profile",
+                         "local_tcm_enable = $manifest.local_tcm_enable",
+                         "cache_block_enable = $manifest.cache_block_enable",
+                         "dma_block_enable = $manifest.dma_block_enable",
+                         "core_issue_width = $manifest.core_issue_width"):
+            self.assertIn(fragment, script)
+        self.assertLess(script.index("'--staging-only'"), script.index("Write-Output 'RUN native PDS"))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

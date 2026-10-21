@@ -13,15 +13,26 @@ module dcache_meta_array #(
     output logic probe_valid, probe_dirty,
     output logic [TAG_W-1:0] probe_tag,
     input logic invalidate_entry, install, touch, mark_dirty, mark_clean,
-    input logic update_way,
+    input logic update_way, touch_way,
     input logic [TAG_W-1:0] install_tag
 );
+    // valid/dirty 属于每个缓存行；LRU 属于整组，touch 与行写入分别选择 way。
     logic valid_q [SETS][2], dirty_q [SETS][2], lru_q [SETS];
     logic [TAG_W-1:0] tag_q [SETS][2];
+
+    // 两路命中并行比较；同时命中时保留原有的 way 1 优先约定。
     always_comb begin
         hit_way = valid_q[lookup_set][1] && tag_q[lookup_set][1] == lookup_tag;
         hit = hit_way || (valid_q[lookup_set][0] && tag_q[lookup_set][0] == lookup_tag);
+    end
+
+    // 无效 way 优先，否则选择 LRU；输出只供控制器保存，不反馈到本拍 probe。
+    always_comb begin
         victim_way = !valid_q[lookup_set][0] ? 0 : !valid_q[lookup_set][1] ? 1 : lru_q[lookup_set];
+    end
+
+    // 探测由已保存的 way 驱动，供替换与维护判断；无效行不报告 dirty。
+    always_comb begin
         probe_valid = valid_q[lookup_set][probe_way];
         probe_dirty = probe_valid && dirty_q[lookup_set][probe_way];
         probe_tag = tag_q[lookup_set][probe_way];
@@ -43,7 +54,7 @@ module dcache_meta_array #(
             end
             if (mark_clean) dirty_q[lookup_set][update_way] <= 0;
             if (mark_dirty) dirty_q[lookup_set][update_way] <= 1;
-            if (touch) lru_q[lookup_set] <= !update_way;
+            if (touch) lru_q[lookup_set] <= !touch_way;
         end
     end
 endmodule

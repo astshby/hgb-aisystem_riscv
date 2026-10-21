@@ -66,9 +66,12 @@ module bus_interconnect #(
 
     for (genvar s = 0; s < 15; s++) begin : g_eligibility
         for (genvar m = 0; m < MASTERS; m++) begin : g_master
+            // D 与 DMA 在旧响应完成沿可交接，否则连续 D 请求会一直挡住 DMA。
+            // 仅涉及 I 的跨 owner 交接隔拍，保留 I-valid 与 D-ready 的组合隔离。
             assign eligible[s][m] = m_req_valid[m] && (int'(route[m]) == s) &&
                 (!pending_q[m] || master_done[m]) &&
-                (!DATA_PRIORITY || !busy_q[s] || owner_q[s] == OWNER_W'(m));
+                (!DATA_PRIORITY || !busy_q[s] || owner_q[s] == OWNER_W'(m) ||
+                 (m != 0 && owner_q[s] != '0 && response_done[s]));
         end
         // D-ready 独立于 I-valid，不能从同时包含两个候选的组合块回推。
         if (MASTERS > 2) begin : g_dma_turn
@@ -76,8 +79,10 @@ module bus_interconnect #(
         end else begin : g_two_masters
             assign dma_turn[s] = 1'b0;
         end
-        assign data_ready[s] = eligible[s][1] && !dma_turn[s] &&
-                               (!locked_q[s] || locked_owner_q[s] == OWNER_W'(1)) &&
+        // 已锁 D 的请求优先于后来到达的 DMA；未锁定时才按下一轮次选择。
+        // 与实际 grant 的锁定优先级一致，但不引入 I-valid 到 D-ready 的组合依赖。
+        assign data_ready[s] = eligible[s][1] &&
+                               (locked_q[s] ? locked_owner_q[s] == OWNER_W'(1) : !dma_turn[s]) &&
                                (!busy_q[s] || response_done[s]) && s_req_ready[s];
     end
 

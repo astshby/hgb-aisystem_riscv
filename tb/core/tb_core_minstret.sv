@@ -30,11 +30,12 @@ module tb_core_minstret;
     logic counter_access, counter_write, done;
     always #5 clk = ~clk;
 
-    core dut (.fence_i_commit(), .irq_software(1'b0), .irq_timer(1'b0), .irq_external(1'b0), .*);
+    core dut (.commit_trace(), .imem_rsp_error_1(1'b0), .fence_i_commit(), .irq_software(1'b0), .irq_timer(1'b0), .irq_external(1'b0), .*);
     sim_imem #(.DEPTH_WORDS(256)) u_imem (
         .clk, .rst, .req_valid(imem_req_valid), .req_addr(imem_req_addr),
         .req_ready(imem_req_ready), .rsp_valid(imem_rsp_valid),
-        .rsp_data(imem_rsp_data), .rsp_ready(imem_rsp_ready)
+        .rsp_data(imem_rsp_data), .rsp_ready(imem_rsp_ready),
+        .rsp_error(), .rsp_error_1()
     );
 
     // 真实请求握手后延迟完成，覆盖计数器前方 Load/Store 的长等待和发射去重。

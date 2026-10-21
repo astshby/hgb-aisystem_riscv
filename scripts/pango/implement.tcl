@@ -11,8 +11,20 @@ if {![string is integer -strict $hgb_threads] || $hgb_threads < 0} {
     error "HGB_PDS_THREADS must be a nonnegative integer (0 means automatic)"
 }
 set_option max_threads $hgb_threads
+set hgb_memory_gate [file join [file dirname [info script]] memory_gate.ps1]
+set hgb_memory_logs [file join [file dirname $::env(HGB_PDS_PROJECT)] memory]
+proc hgb_check_memory {phase} {
+    global hgb_memory_gate hgb_memory_logs
+    # 每个耗内存阶段前重新查询 Windows；查询失败或不足时 exec 抛错，停止该阶段。
+    puts [exec powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+        -File $hgb_memory_gate -LogDirectory $hgb_memory_logs -Phase $phase]
+}
+hgb_check_memory dev_map
 dev_map -force_to_run
+hgb_check_memory place
 place
+hgb_check_memory route
 route
+hgb_check_memory route_optimize
 route_optimize
 report_timing

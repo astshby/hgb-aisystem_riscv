@@ -1,9 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 xlen="${1:-32}"
+source scripts/verilator/core_build_config.sh
 export CCACHE_TEMPDIR="${PWD}/build/ccache-tmp"
 export CCACHE_DIR="${PWD}/build/ccache"
 mkdir -p "${CCACHE_TEMPDIR}" "${CCACHE_DIR}" logs
+for sets in 2 64 128; do
+    out_dir="build/verilator/cache-rv${xlen}-${core_build_tag}/metadata-${sets}"
+    log="logs/cache-rv${xlen}-${core_build_tag}-metadata-${sets}.log"
+    mkdir -p "$out_dir"
+    verilator "${core_microarch_flags[@]}" -Wall -Wno-fatal --assert --timing --binary \
+        -DCORE_XLEN="$xlen" -Mdir "$out_dir" -f scripts/soc_files.f \
+        tb/cache/tb_dcache_meta_array.sv -GSETS="$sets" \
+        --top-module tb_dcache_meta_array >"$log" 2>&1
+    "$out_dir/Vtb_dcache_meta_array" >>"$log" 2>&1 || { tail -n 20 "$log"; exit 1; }
+    if rg -q '(%Fatal|%Error|Assertion failed)' "$log"; then
+        tail -n 20 "$log"
+        exit 1
+    fi
+    rg 'PASS tb_dcache_meta_array' "$log"
+done
 for test_name in tb_icache tb_dcache tb_dcache_wb; do
     for config in small default disabled absent; do
         parameters=()
@@ -12,10 +28,10 @@ for test_name in tb_icache tb_dcache tb_dcache_wb; do
             disabled) parameters+=(-GENABLE=0) ;;
             absent) parameters+=(-GDDR_BYTES=0) ;;
         esac
-        out_dir="build/verilator/cache-rv${xlen}/${test_name}-${config}"
-        log="logs/cache-rv${xlen}-${test_name}-${config}.log"
+        out_dir="build/verilator/cache-rv${xlen}-${core_build_tag}/${test_name}-${config}"
+        log="logs/cache-rv${xlen}-${core_build_tag}-${test_name}-${config}.log"
         mkdir -p "${out_dir}"
-        verilator -Wall -Wno-fatal --assert --timing --binary \
+        verilator "${core_microarch_flags[@]}" -Wall -Wno-fatal --assert --timing --binary \
             -DCORE_XLEN="${xlen}" -Mdir "${out_dir}" -f scripts/soc_files.f \
             "tb/cache/${test_name}.sv" "${parameters[@]}" --top-module "${test_name}" >"${log}" 2>&1
         "${out_dir}/V${test_name}" >>"${log}" 2>&1 || { tail -n 20 "${log}"; exit 1; }
@@ -27,10 +43,10 @@ for test_name in tb_icache tb_dcache tb_dcache_wb; do
     done
 done
 for active in 1 0; do
-    out_dir="build/verilator/cache-rv${xlen}/maintenance-${active}"
-    log="logs/cache-rv${xlen}-maintenance-${active}.log"
+    out_dir="build/verilator/cache-rv${xlen}-${core_build_tag}/maintenance-${active}"
+    log="logs/cache-rv${xlen}-${core_build_tag}-maintenance-${active}.log"
     mkdir -p "${out_dir}"
-    verilator -Wall -Wno-fatal --assert --timing --binary \
+    verilator "${core_microarch_flags[@]}" -Wall -Wno-fatal --assert --timing --binary \
         -DCORE_XLEN="${xlen}" -Mdir "${out_dir}" -f scripts/soc_files.f \
         tb/cache/tb_cache_maintenance.sv -GACTIVE="${active}" \
         --top-module tb_cache_maintenance >"${log}" 2>&1

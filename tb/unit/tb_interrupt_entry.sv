@@ -8,9 +8,11 @@ module tb_interrupt_entry;
     import pipeline_pkg::*;
     logic clk = 0, rst = 1, irq_pending, pipeline_busy, retire_valid, interrupt_take;
     mem_wb_t commit_packet;
+    xlen_t commit_next_pc;
     redirect_t wb_redirect;
     xlen_t interrupt_pc;
     always #5 clk = ~clk;
+    assign commit_next_pc = commit_packet.next_pc;
     interrupt_entry dut (.*);
     initial begin
         irq_pending = 0;

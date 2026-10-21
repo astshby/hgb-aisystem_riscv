@@ -27,7 +27,9 @@ module tb_icache #(
     localparam xlen_t BASE = xlen_t'(DDR_BASE);
     localparam int STRIDE = CACHE_BYTES / 2;
 
-    icache #(.ENABLE(ENABLE), .CACHE_BYTES(CACHE_BYTES), .DDR_BYTES(DDR_BYTES)) dut (.*);
+    icache #(.ENABLE(ENABLE), .CACHE_BYTES(CACHE_BYTES), .DDR_BYTES(DDR_BYTES)) dut (
+        .rd_cmd_valid(), .rd_cmd_ready(1'b0), .rd_cmd(),
+        .rd_valid(1'b0), .rd_ready(), .rd_data('0), .*);
     address_decode #(.DDR_BYTES(DDR_BYTES)) decoder (
         .request(saved_request), .target(decoded_target), .error(decoded_error)
     );

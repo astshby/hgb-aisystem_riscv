@@ -34,9 +34,21 @@ module tb_core_load_pipeline;
     logic completed = 1'b0;
 
     always #5 clk = ~clk;
-    sim_cpu_top dut (.*);
+    sim_cpu_top dut (.commit_trace(), .*);
     assign result_addr = xlen_t'(TEST_RESULT_ADDR);
-    store_result_monitor u_result_monitor (.*);
+    // 结果 Store 的总线所有者与退休 ID 从 TB 层级读取，不扩展 FPGA 接口。
+    store_result_monitor u_result_monitor (
+        .store_request_id(dut.u_core.lsu_owner_id),
+        .store_response_fire(dut.u_core.dmem_rsp_valid && dut.u_core.dmem_rsp_ready &&
+                             dut.u_core.lsu_owner_valid && dut.u_core.dmem_req_write),
+        .store_response_error(dut.u_core.dmem_rsp_error),
+        .store_response_id(dut.u_core.lsu_owner_id),
+        .store_retire_fire(dut.u_core.queue_retire_fire &&
+                           dut.u_core.head_meta.kind == pipeline_pkg::RET_STORE),
+        .store_retire_error(dut.u_core.head_result.exc.valid),
+        .store_retire_id(dut.u_core.head_id),
+        .cancel(dut.u_core.wb_redirect.valid), .*
+    );
 
     initial begin
         for (idx = 0; idx < 64; idx = idx + 1)

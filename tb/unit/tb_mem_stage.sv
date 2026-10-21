@@ -1,159 +1,70 @@
 // Module: tb_mem_stage
-// Description: Checks cache request backpressure, metadata flow, and MEM forwarding.
+// Description: Checks ordinary metadata flow, MEM forwarding under stalls, and early LSU exceptions.
 module tb_mem_stage;
     timeunit 1ns;
     timeprecision 1ps;
-
     import core_config_pkg::*;
     import core_types_pkg::*;
     import pipeline_pkg::*;
     import riscv_priv_pkg::*;
-
     logic issue_enable;
-    logic mdu_rsp_valid, mdu_rsp_ready, result_stall;
-    xlen_t mdu_rsp_data;
     ex_mem_t in_packet;
-    logic dmem_req_valid;
-    logic dmem_req_write;
-    xlen_t dmem_req_addr;
-    xlen_t dmem_req_wdata;
-    logic [DBUS_BYTES-1:0] dmem_req_wstrb;
-    logic dmem_req_ready;
     mem_wb_t out_packet;
-    logic request_stall;
     gpr_forward_t gpr_forward;
     csr_forward_t csr_forward;
-
-    mem_size_e dmem_req_size;
-
+    int checks = 0;
     mem_stage dut (.*);
 
     initial begin
-        issue_enable = 1'b1;
-        mdu_rsp_valid = 1'b0;
-        mdu_rsp_data = '0;
-        dmem_req_ready = 1'b0;
-        in_packet = '0;
-
-        // 普通 ALU 指令不使用数据总线，并可直接从 MEM 前递。
-        in_packet.valid = 1'b1;
-        in_packet.rd = 5'd2;
-        in_packet.result = xlen_t'(42);
-        in_packet.uop.gpr_write = 1'b1;
-        in_packet.uop.wb_sel = WB_ALU;
-        #1;
-        assert (!dmem_req_valid && !request_stall && out_packet.valid)
-            else $fatal(1, "ALU packet must bypass memory request");
-        assert (gpr_forward.valid && gpr_forward.addr == 5'd2 &&
-                gpr_forward.data == xlen_t'(42))
-            else $fatal(1, "missing MEM ALU forwarding");
-
-        // WB 反压只禁止推进，不应隐藏 MEM 已经完成的 ALU 结果。
-        issue_enable = 1'b0;
-        #1;
-        assert (!out_packet.valid && gpr_forward.valid && gpr_forward.data == xlen_t'(42))
-            else $fatal(1, "MEM forwarding lost under WB backpressure");
-        issue_enable = 1'b1;
-
-        // CSR 新值在 MEM 透明传递，并作为后续 CSR 指令的旁路候选。
-        in_packet = '0;
-        in_packet.valid = 1'b1;
-        in_packet.csr_we = 1'b1;
-        in_packet.csr_addr = CSR_MSCRATCH;
-        in_packet.csr_new = xlen_t'(32'h1234);
-        #1;
-        assert (csr_forward.valid && csr_forward.addr == CSR_MSCRATCH &&
-                csr_forward.data == xlen_t'(32'h1234))
-            else $fatal(1, "missing MEM CSR forwarding");
-
-        issue_enable = 1'b0;
-        #1;
-        assert (!out_packet.valid && csr_forward.valid && csr_forward.data == xlen_t'(32'h1234))
-            else $fatal(1, "MEM CSR forwarding lost under WB backpressure");
-        issue_enable = 1'b1;
-
-        // load 命中 ready 时立即进入 MEM/WB，但数据要到 WB 才能前递。
-        in_packet = '0;
-        in_packet.valid = 1'b1;
-        in_packet.rd = 5'd2;
-        in_packet.uop.gpr_write = 1'b1;
-        in_packet.uop.mem_read = 1'b1;
-        in_packet.uop.wb_sel = WB_LOAD;
-        in_packet.result = xlen_t'(4);
-        dmem_req_ready = 1'b1;
-        #1;
-        assert (dmem_req_valid && !dmem_req_write && !request_stall && out_packet.valid)
-            else $fatal(1, "accepted load request");
-        assert (!gpr_forward.valid && out_packet.result == xlen_t'(4))
-            else $fatal(1, "load must wait for WB response");
-
-        // 请求未被 Cache 接收时，MEM 保持该指令并请求反压。
-        dmem_req_ready = 1'b0;
-        #1;
-        assert (dmem_req_valid && request_stall && !out_packet.valid)
-            else $fatal(1, "load request backpressure");
-
-        // 已带异常的访存不能产生存储器副作用。
-        in_packet.exc.valid = 1'b1;
-        #1;
-        assert (!dmem_req_valid && !request_stall && out_packet.valid)
-            else $fatal(1, "faulting load must not access memory");
-
-        // 更老的 WB 指令阻塞时，MEM 不得发出年轻请求。
-        in_packet.exc.valid = 1'b0;
-        issue_enable = 1'b0;
-        dmem_req_ready = 1'b1;
-        #1;
-        assert (!dmem_req_valid && !request_stall && !out_packet.valid)
-            else $fatal(1, "disabled MEM issue");
-
-        // M 包等待结果时不能前递占位值或发出访存请求。
-        in_packet = '0;
-        in_packet.valid = 1'b1;
-        in_packet.rd = gpr_addr_t'(7);
-        in_packet.uop.fu = FU_MULDIV;
-        in_packet.uop.gpr_write = 1'b1;
-        in_packet.uop.wb_sel = WB_ALU;
-        issue_enable = 1'b1;
-        #1;
-        assert (result_stall && !out_packet.valid && !gpr_forward.valid &&
-                !dmem_req_valid && mdu_rsp_ready)
-            else $fatal(1, "MEM forwarded unfinished M result");
-
-        // WB 反压不隐藏已完成 M 结果，只禁止推进与响应消费。
-        issue_enable = 1'b0;
-        mdu_rsp_valid = 1'b1;
-        mdu_rsp_data = xlen_t'(21);
-        #1;
-        assert (!result_stall && !out_packet.valid && !mdu_rsp_ready &&
-                gpr_forward.valid && gpr_forward.data == xlen_t'(21))
-            else $fatal(1, "MEM M forwarding lost under WB backpressure");
-        issue_enable = 1'b1;
-        #1;
-        assert (out_packet.valid && out_packet.result == xlen_t'(21) &&
-                out_packet.rd == gpr_addr_t'(7) && mdu_rsp_ready)
-            else $fatal(1, "MEM M result not joined with metadata");
-
-        // 异常包、空包与非 M 包不能消费跨级 MDU 的响应。
-        in_packet.exc.valid = 1'b1;
-        #1;
-        assert (out_packet.valid && out_packet.exc.valid && !mdu_rsp_ready &&
-                !result_stall && !gpr_forward.valid)
-            else $fatal(1, "exception MEM packet consumed M result");
-        in_packet.exc.valid = 1'b0;
-        in_packet.valid = 1'b0;
-        #1;
-        assert (!out_packet.valid && !mdu_rsp_ready && !result_stall)
-            else $fatal(1, "empty MEM packet consumed M result");
-        in_packet.valid = 1'b1;
-        in_packet.uop.fu = FU_ALU;
-        in_packet.result = xlen_t'(42);
-        #1;
-        assert (out_packet.valid && out_packet.result == xlen_t'(42) &&
-                !mdu_rsp_ready && !result_stall)
-            else $fatal(1, "non-M MEM packet reused another stage selection");
-
-        $display("PASS tb_mem_stage RV%0d", XLEN);
+        // 原请求反压/严格队头属性迁至 tb_lsu_transaction；MEM 不再拥有外部请求。
+        // 普通 ALU、链接地址及 CSR 旧值仍可直接从寄存 MEM 包前递。
+        for (int selection = 0; selection < 5; selection++) begin
+            xlen_t expected;
+            in_packet = '0;
+            in_packet.valid = 1;
+            in_packet.retire_id = retire_id_t'(selection + 1);
+            in_packet.rd = 2;
+            in_packet.result = xlen_t'(64'hfedc_ba98_1234_5678);
+            in_packet.seq_pc = xlen_t'(64'h8765_4321_0000_0014);
+            // 实际方向与全宽目标独立携带；未跳转时 next_pc 不能覆盖潜在目标。
+            in_packet.branch = '{taken:selection[0], target:xlen_t'(64'hdead_beef_8000_0020) + xlen_t'(selection * 4)};
+            in_packet.next_pc = selection[0] ? in_packet.branch.target : in_packet.seq_pc;
+            in_packet.csr_old = xlen_t'(42);
+            in_packet.uop.gpr_write = 1;
+            in_packet.uop.wb_sel = wb_sel_e'(selection);
+            in_packet.csr_we = 1;
+            in_packet.csr_addr = CSR_MSCRATCH;
+            in_packet.csr_new = xlen_t'(32'h1234);
+            case (wb_sel_e'(selection))
+                WB_SEQ_PC: expected = in_packet.seq_pc;
+                WB_CSR: expected = in_packet.csr_old;
+                default: expected = in_packet.result;
+            endcase
+            for (int enabled = 0; enabled < 2; enabled++) begin
+                issue_enable = 1'(enabled);
+                #1;
+                // WB/LSU 等待只禁止推进，不应隐藏 MEM 已经完成的普通结果。
+                assert (out_packet.valid == issue_enable && out_packet.retire_id == in_packet.retire_id &&
+                        out_packet.result == in_packet.result && out_packet.csr_new == in_packet.csr_new &&
+                        out_packet.branch == in_packet.branch && out_packet.next_pc == in_packet.next_pc &&
+                        gpr_forward.valid == (wb_sel_e'(selection) != WB_LOAD) &&
+                        gpr_forward.data == expected && csr_forward.valid &&
+                        csr_forward.addr == CSR_MSCRATCH && csr_forward.data == xlen_t'(32'h1234))
+                    else $fatal(1, "MEM packet/forward selection=%0d enabled=%0d", selection, enabled);
+                checks++;
+            end
+            // 已带异常的访存沿普通流水送异常；地址或 CSR 候选不能被前递使用。
+            in_packet.exc = '{valid:1'b1, cause:EXC_LOAD_ADDR_MISALIGNED, tval:xlen_t'(3)};
+            #1;
+            assert (out_packet.valid && out_packet.exc == in_packet.exc &&
+                    !gpr_forward.valid && !csr_forward.valid)
+                else $fatal(1, "early exception forwarded a value or lost metadata");
+            in_packet.valid = 0;
+            #1;
+            assert (!out_packet.valid && !gpr_forward.valid && !csr_forward.valid)
+                else $fatal(1, "empty MEM retains ownership");
+        end
+        $display("PASS tb_mem_stage RV%0d metadata_forward=%0d exceptions=5 empty=5", XLEN, checks);
         $finish;
     end
 endmodule

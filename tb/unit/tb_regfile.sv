@@ -16,7 +16,10 @@ module tb_regfile;
     xlen_t write_data;
 
     always #5 clk = ~clk;
-    regfile dut (.*);
+    regfile dut (
+        .rs1_addr_1('0), .rs2_addr_1('0), .rs1_data_1(), .rs2_data_1(),
+        .write_enable_1(1'b0), .write_addr_1('0), .write_data_1('0), .*
+    );
 
     initial begin
         rs1_addr = 5'd5;

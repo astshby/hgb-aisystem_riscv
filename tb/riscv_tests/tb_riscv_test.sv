@@ -15,6 +15,7 @@ module tb_riscv_test;
     logic commit_rd_we;
     logic [XLEN-1:0] commit_rd_data;
     logic commit_exception;
+    pipeline_pkg::retire_trace_t commit_trace [2];
     logic dmem_store_fire;
     logic [XLEN-1:0] dmem_store_addr;
     logic [XLEN-1:0] dmem_store_data;
@@ -35,7 +36,26 @@ module tb_riscv_test;
 
     always #5 clk = ~clk;
     sim_cpu_top dut (.*);
-    store_result_monitor u_result_monitor (.*);
+    // 结果 Store 的总线所有者与退休 ID 从 TB 层级读取，不扩展 FPGA 接口。
+    store_result_monitor #(.RESULT_BYTES(8)) u_result_monitor (
+`ifdef CORE_SCOREBOARD
+        .store_request_id(dut.u_core.store_request_id),
+        .store_response_fire(dut.u_core.store_response_fire),
+        .store_response_error(dut.u_core.store_response_error),
+        .store_response_id(dut.u_core.store_response_id),
+`else
+        .store_request_id(dut.u_core.lsu_owner_id),
+        .store_response_fire(dut.u_core.dmem_rsp_valid && dut.u_core.dmem_rsp_ready &&
+                             dut.u_core.lsu_owner_valid && dut.u_core.dmem_req_write),
+        .store_response_error(dut.u_core.dmem_rsp_error),
+        .store_response_id(dut.u_core.lsu_owner_id),
+`endif
+        .store_retire_fire(dut.u_core.queue_retire_fire &&
+                           dut.u_core.head_meta.kind == pipeline_pkg::RET_STORE),
+        .store_retire_error(dut.u_core.head_result.exc.valid),
+        .store_retire_id(dut.u_core.head_id),
+        .cancel(dut.u_core.wb_redirect.valid), .*
+    );
 
     initial begin
         if (!$value$plusargs("IMEM=%s", imem_path))
@@ -58,10 +78,13 @@ module tb_riscv_test;
         for (cycles = 0; cycles < max_cycles; cycles = cycles + 1) begin
             // 下降沿观察上升沿已经完成的提交与 tohost 状态，避免 NBA 调度竞争。
             @(negedge clk);
-            if (trace_enable && commit_valid)
-                $display("COMMIT pc=%h inst=%h rd=%0d we=%0b data=%h exc=%0b",
-                         commit_pc, commit_inst, commit_rd, commit_rd_we,
-                         commit_rd_data, commit_exception);
+            if (trace_enable)
+                for (int lane = 0; lane < 2; lane++)
+                    if (commit_trace[lane].valid)
+                        $display("COMMIT pc=%h inst=%h rd=%0d we=%0b data=%h exc=%0b lane=%0d",
+                                 commit_trace[lane].pc, commit_trace[lane].inst, commit_trace[lane].rd,
+                                 commit_trace[lane].rd_we, commit_trace[lane].rd_data,
+                                 commit_trace[lane].exception, lane);
             if (test_done) begin
                 assert (test_pass)
                     else $fatal(1, "FAIL %s code=%0d pc=%h inst=%h",

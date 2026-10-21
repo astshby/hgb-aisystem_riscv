@@ -11,6 +11,7 @@ module tb_ex_exception_check;
     d2_ex_t in_packet;
     xlen_t effective_address;
     logic branch_taken;
+    logic operands_ready = 1'b1, branch_ready = 1'b1;
     xlen_t branch_target;
     exception_t exception;
 
@@ -57,6 +58,10 @@ module tb_ex_exception_check;
         assert (exception.valid && exception.cause == EXC_LOAD_ADDR_MISALIGNED &&
                 exception.tval == effective_address)
             else $fatal(1, "misaligned load");
+        operands_ready = 1'b0;
+        #1;
+        assert (!exception.valid) else $fatal(1, "pending operand checked as real address");
+        operands_ready = 1'b1;
 
         in_packet.uop.mem_read = 1'b0;
         in_packet.uop.mem_write = 1'b1;
@@ -78,6 +83,10 @@ module tb_ex_exception_check;
         assert (exception.valid && exception.cause == EXC_INST_ADDR_MISALIGNED &&
                 exception.tval == branch_target)
             else $fatal(1, "misaligned control target");
+        branch_ready = 1'b0;
+        #1;
+        assert (!exception.valid) else $fatal(1, "unready branch snapshot raised exception");
+        branch_ready = 1'b1;
 
         branch_taken = 1'b0;
         #1;

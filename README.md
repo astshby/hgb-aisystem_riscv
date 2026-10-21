@@ -1,94 +1,119 @@
 # hgb-aisystem
 
-`hgb-aisystem_riscv` 是硬件协作发布、理解文档与未来软件栈的仓库；共享的
-SystemVerilog Core 是单发射、顺序执行的 RV32/RV64 六级流水线：
+RV32 优先的 RISC-V Core/SoC 协作仓库。目标是 RT-Thread 上的文本输入、板上模型
+推理、文本输出；RV64 跟随共享架构验证。近期不把 Linux、MMU、F/V、图像链路作为
+交付前提。
 
-```text
-IF → D1 → D2 → EX → MEM → WB
-```
+`CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16` 选择正在验收的新 P0：
+RAT 绑定 ROB 标签、IQ8 顺序双发射、两个完整 ALU、共享分支/MDU、LQ4/SQ4 双 AGU，
+两个完成口与按序双退休。原生 IF64 和双数据口已接入 SoC；MMIO/Store 受队头许可。
+默认 `CORE_BACKEND=legacy` 保留旧 IF→D1→D2→EX→MEM→WB 控制组。
 
-构建时可选择 RV32 或 RV64，已实现整数基础指令、M 乘除扩展、六种 Zicsr 指令、
-ECALL/EBREAK/MRET、机器模式精确同步异常/中断，以及 BTB + 非推测 GShare。
-Core 使用独立的指令和数据 ready/valid 接口，不直接实例化 FPGA BRAM。
+## 当前能力
+
+- RV32/RV64 I/M/Zicsr，精确同步异常、机器中断、CSR、MRET。
+- DSP/Booth-Wallace/移位乘法，SRT/移位除法。
+- BTB、GShare/Local/chooser、4 深 RAS，正常退休训练。
+- 唯一退休队列、tagged 完成、逐源捕获；新后端支持 ROB 标签重命名、双 LSU 与字节转发。
+- 64 KiB I/D-TCM、Boot ROM、MMIO、UART0/1、Timer0/1、GPIO0/1/2、IRQ。
+- 2 路 I$/D$，WB/WA D$，FENCE.I、维护命令、DMA 所有权交接。
+- DMA legacy 和两块 128B 双槽引擎，256 位 DDR 口，读写可重叠。
+- 标准 AXI 与 Pango 原生 DDR 桥；RT-Thread BSP、UART loader、CoreMark。
 
 ## 当前状态
 
-- RV32IM/RV64IM 六级流水、GPR/CSR 前递、load-use 检测和存储器反压。
-- 单条在途多周期 MDU：统一握手与取消；三种乘法、两种除法可选，默认 DSP 推断乘法 + 移位除法（most easy）。
-- JAL 在 D1 解析；条件分支与 JALR 在 EX 解析。
-- `muldiv_unit` 独立于流水级：EX 内的 `ex_mdu` 发射请求，MEM 内的 `mem_mdu` 接收并拼接结果；package 仅保留类型与常量。
-- 三主端口互连和单通道 DMA 已接入 SoC；AXI4 单拍桥与可变延迟 RAM 完成外存仿真闭环。
-- DDR 已接入两路阻塞式 I$/D$（各默认 4 KiB/32 B 行）；D$ 使用 WB/WA，FENCE.I 等待脏代码发布后恢复取指。
-- D$ 提供 MMIO clean/flush/invalidate 及状态，DMA 使用显式所有权交接；TCM/MMIO 旁路。
-- 脏逐出失败保留缓存数据；FENCE.I 自动写回失败停取指直到复位，不宣称具备机器检查恢复。
-- CSR 在 EX 完成读改写与 WARL，WB 执行架构提交。
-- SoC：启动 ROM、I/D-TCM、2 路 UART、机器/通用 Timer、3 组 GPIO、外部中断汇聚与 DMA。
-- `mie/mip` 接入真实设备电平；中断排空流水，保存实际后继 PC 后进入 Direct `mtvec`。
-- Verilator 纯 SystemVerilog 测试，不使用 Cocotb。
-- RV32/RV64 各 43 项单元测试，包含 Pango DDR 用户接口定向测试；18 项整核定向流程中各 17 PASS、1 非适用位宽 SKIP。
-- 适用的 riscv-tests：RV32 `58/58`，RV64 `78/78`，包括全部 8/13 项 UM；
-  旧分离存储器路径跳过 fence_i/ma_data；SoC 路径含 fence_i，为 `59/59`、`79/79`，仅跳过 ma_data。
-- CoreMark 1.0 performance/validation CRC 均通过；默认 MDU 配置的固定迭代数结果：
-  RV32 `2.897145`、RV64 `2.579496 CoreMark/MHz`（Verilator 周期成绩）。
+新 P0 发布基线为 `publish/p0-r15`，实测 RTL 为 `dffb8a2`；原开发分支
+`core/pipe-lsu-forward-format@5fa11fb` 和本地发布准备分支 `baseline/p0-r15@6d92659`
+保留。冻结依据与后续计划见工作区三个交接文档。
+四个 Load 槽先格式化转发值，再选择两个输出；提示有效位与载荷分离，原资格、
+取消、返回优先级和请求/完成时点保持。主流水 ALU 为 8 级，Load/DSP 乘法为 10 级。
+RV32 为 228 PASS/5 SKIP，M0/M1 为 **2.859463/2.494327 CoreMark/MHz**；四次
+固定重放的周期、CRC 和全部计数与 r13/r14b 一致。比 CMP 分别高 9.84%/8.61%，
+比拆分起点高 19.45%/16.70%。RV64 功能为 264 PASS/5 SKIP，跟随共享 RTL，
+不设置独立性能门槛、不做 P&R；取消前完成的 M0 两次重放只作附加记录，M1 已取消。
 
-S3 DMA/外存与 S4 WT/NWA Cache 的验收提交保留在 Git 历史；`SOC/all` 使用 S5 的 WB/WA 与维护协议，
-Cache 专项 RV32/RV64 各 18 PASS，设计见 [写回与数据交接](docs/understand/S5_CACHE_WRITEBACK.md)。
-RT-Thread/CoreMark 的 DDR 主布局、UART loader/CRC/驻留重测和真实 TCM DMA 已通过 SoC 模型验证。MES2L676-200HP 的 RV32 综合基线使用 DSP/SRT，双 TCM 初值全量校验通过；Windows/WSL2 的直接重建入口为 `scripts/pango/build.ps1`，所需板级配置已入库。目标 SoC 100 MHz；当前提交采用可综合的 125 MHz 单时钟基线，旧 P&R setup WNS −17.625 ns，100 MHz 实验 WNS −11.147 ns、未保留。目标、文件改动、时序实验、复现命令和实板验收差距统一见 [FPGA demo 报告](docs/FPGA_DEMO_REPORT.md)。尚无板上 DDR/UART/正式成绩或 ILA 证据；三主端口 Cache 压力测试与 Zynq-7020 DDR3 验证后推。
-`rt-thread-port` 已新增 RT-Thread v5.2.2 首版 BSP：RV32/RV64 的调度、机器 tick、
-UART0/1、三组 GPIO，以及 DMA 装载 I-TCM 中断/切换热代码均完成 SoC 仿真。
-详见 [移植、TCM 布局与复现命令](docs/RT_THREAD_PORT.md)。尚未上板，AI 功能仍是后续目标；以上成绩不代表 FPGA Fmax。
+本轮 `dffb8a2` 的 r15 标准 PDS 已完成：**85.2464 MHz、85 MHz WNS +0.034 ns、
+TNS 0、零未布通**，12 类 STA 均无失败，57,382 条网络全部布通。物理为
+40,154 LUT、32,318 FF、36 DRM、4 APM、77 IO；比 r14b 少 800 LUT，FF 不变。
+相对 r14b，Fmax 提高 3.03%；比 CMP 的 87.8837 MHz 低 3.00%。
+用户已确认按 8–10 级结构、CoreMark/MHz 不回退和标准 PDS ≥85 MHz 冻结 r15 为新 P0。
+CMP 是 7 级 ALU 诊断点，不作为本次冻结门槛。原 `p0-acceptance.json` 保留当时
+与 CMP 比频率的失败记录，原始数值和判据没有改写。发布基线为 `publish/p0-r15`，
+发布仅含当前 P0 文件的一次提交，不带开发历史；原开发和历史阶段分支全部在
+本地保留。后续 RTL 优化从独立分支开展。
+源码、固定镜像和同源结果索引为 `logs/pipeline/forward-format-dffb8a2-20261021/`；
+详细分类、周期、跳过项与物理证据见双发射和 FPGA 文档。Core/SoC 用户侧共用时钟，
+IP 仍为 125 MHz，本轮为 85 MHz 内部 STA 约束检查；35/73 项 I/O 延迟缺失，未上板。
+旧控制组为 `perf/coremark-baseline@53b7ee9`，端口默认值问题已在 `c04c588` 修复。
+
+历史 RV32 PDS（i1、full、local TCM 0、块口全开）：
+
+- 同域 Fmax 65.4279 MHz，125 MHz WNS −7.284 ns。
+- 物理 LUT/FF 24888/20140，DRM36K 34，APM 4，0 未布通。
+- 前 100 条 SoC setup 路径全部从 `reset_sync_q[1]` 出发，复位网是首要物理问题。
+
+后续同配置标准布局与复位树修正后，85 MHz 约束检查得到 Fmax 92.3306 MHz、
+WNS +0.934 ns、0 未布通。这个 i1 结果不能作为新 scoreboard 后端的频率。
+
+CoreMark：
+
+| 检查点 | RV32 | RV64 |
+|---|---:|---:|
+| `19562a9` Core-only | 2.118203 | 1.944208 |
+| I1 Core-only | 1.710011 | 1.549205 |
+| I2 i2/q8 Core-only | 1.811039 | 1.627599 |
+| C2 scoreboard i2/q16 单 LSU Core-only，64 次迭代 | 2.111139 | 1.892827 |
+| C6 `b98f714` 双 LSU，M0 Core-only，64 次迭代 | 2.387318 | 2.099647 |
+| C6 `b98f714`，M1 完整 SoC-TCM，64 次迭代 | 2.371599 | 2.087406 |
+| `555453f` 请求缓冲，M1，同一固定镜像 | 2.142396 | 1.911813 |
+| `fdb3ffb` 寄存退休，M0，同一固定镜像 | 2.393948 | 2.092062 |
+| `fdb3ffb`，M1，同一固定镜像 | 2.137354 | 1.896438 |
+
+新候选使用 p0/r0、DSP/SRT，固定镜像与原始日志见 `docs/understand/DUAL_ISSUE.md`
+和工作区 `ITERATIONS.md`。M1 保留 DDR3、MMIO、DMA 等完整硬件，程序和数据在
+TCM，DDR 空闲。DDR 执行和外设背景负载成绩尚未测量。Core-only、SoC-TCM、
+DDR/RT 分开记录；不同迭代数、预测参数或镜像的历史成绩不作严格同条件增幅比较。
+`fdb3ffb` 另将 ROB 完成到退休的路径分拍，双宽整核保持 129 拍连续双退休；
+RV32 综合最差路径从 29 级、19.389 ns 降至 19 级、13.177 ns；
+该历史检查点的标准 PDS 布线已中断，未冻结为 P0。
+
+## 文档
+
+- [项目介绍](docs/PROJECT_INTRO.md)：目录、参数、环境、仿真、FPGA、功能。
+- [学习文档](docs/understand/README.md)：SoC、双发射、DDR/AXI、FPGA、优化五块。
+- [FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)：PDS 流程、时序、资源、板级边界。
+- 工作区根目录：`ITERATIONS.md`、`OPTIMIZATION_PLAN.md`、`HANDOVER.md`。
+
+所有 Markdown 按 `../skills/regulation.md` 写。`docs/COMMIT.md` 不再存在。
 
 ## 快速验证
 
-从仓库根目录运行：
-
 ```bash
+export RISCV_TOOL_ROOT=<toolchain-bin>
+export MUL_IMPL=0 DIV_IMPL=1 PREDICTOR_MODE=1 RAS_ENABLE=1 RETIRE_ENTRIES=4
 make test XLEN=32
 make test XLEN=64
 make riscv-tests XLEN=32
 make riscv-tests XLEN=64
 make benchmark-smoke XLEN=32
-make benchmark-smoke XLEN=64
 make coremark XLEN=32
-make coremark XLEN=64
-make mdu-backends XLEN=32
-make mdu-backends XLEN=64
-make soc-test XLEN=32
-make soc-software XLEN=32
-make soc-dma-software XLEN=32
-make soc-riscv-tests XLEN=32
-make soc-coremark XLEN=32
-make cache-test XLEN=32
-bash scripts/pango/test_bridge.sh
-make rt-thread-coremark XLEN=64 MUL_IMPL=0 DIV_IMPL=1
-make uart-rt-thread-test XLEN=32
-make uart-rt-thread-test XLEN=64
-# SoC 命令同样须以 XLEN=64 运行。
+SOC_CACHE_BLOCK_ENABLE=1 SOC_DMA_WIDE_ENABLE=1 SOC_DMA_BLOCK_ENABLE=1 \
+  SOC_LOCAL_TCM_ENABLE=1 make soc-riscv-tests XLEN=32
+bash scripts/verilator/run_dma_block.sh 32
 ```
 
-RISC-V 工具链默认位于 `/opt/riscv/bin`。`make test` 包含 lint、单元测试和
-整核定向测试，但不自动包含 `make riscv-tests`。生成物写入 `build/`，日志
-写入 `logs/`，二者都不进入版本库。
+普通 `make` 的 DIV 默认 0、ISSUE 默认 1。正式对照使用 DSP/SRT、Tournament/RAS；
+双发射加 `ISSUE_WIDTH=2 RETIRE_ENTRIES=8`。RT-Thread 需要先恢复 v5.2.2 依赖或用
+`RTTHREAD_ROOT` 指向已核验副本。
 
-## 目录入口
+新后端验证使用 `CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16 DIV_IMPL=1`；
+`bash scripts/verilator/run_scoreboard.sh 64` 与 `run_scoreboard_soc.sh 64` 验证模块，
+换为 32 验证另一位宽。旧性能表的预测配置与新 P0 的 p0/r0 物理模板分别记录。
 
-- `vsrc/core/`：与平台无关的可综合 Core。
-- `vsrc/soc/`：可移植 I$/D$、互连、ROM/TCM、DMA、MMIO 外设与中断。
-- `vsrc/sim_cpu/`：不可综合的仿真存储器和通用仿真顶层。
-- `vsrc/cpu/`：MES2L676-200HP SoC/DDR3 wrapper 与原有 `cpu_top` 框架；[板级进度和限制](docs/FPGA_DEMO_REPORT.md)。
-- `tb/`：单元、整核和上游 riscv-tests 适配测试。
-- `scripts/`：Verilator、工具链、Pango 接口测试和 Vivado Tcl 工作流。
-- `benchmark/`：裸机 BSP、C 冒烟程序、固定 CoreMark 源码和本地 port。
-- `software/rt-thread/`：独立 RT-Thread BSP、DMA 启动与自检；依赖固定在忽略的 `build/` 中。
+## 边界
 
-## 阅读 SoC 前
-
-先从 [理解文档导读](docs/understand/README.md) 依次读 [M 扩展](docs/understand/M_EXTENSION.md)、[CSR、异常和中断](docs/understand/CSR_TRAPS_AND_INTERRUPTS.md)、[I/D 访存握手](docs/understand/MEMORY_HANDSHAKE.md)。它们解释 EX/MEM 的 M 结果汇合、WB 精确提交，以及请求接受沿与响应返回沿的区别。再沿 [SoC 源码导读](docs/understand/SOC_SOURCE_WALKTHROUGH.md) 查历史阶段的模块和测试。hgb 的 `main` 仍是 Core/M 基线；`SOC/all` 的源码与阶段提交对应关系见 [文档入口](docs/README.md)。
-
-## 文档
-
-- [文档入口与分支范围](docs/README.md)、[理解文档导读](docs/understand/README.md)
-- [SoC 访存契约](docs/SOC_BUS_CONTRACT.md)、[外设连接图与寄存器](docs/SOC_PERIPHERALS.md)、[AXI/DDR 边界](docs/SOC_EXTERNAL_MEMORY.md)
-- [项目目录说明](docs/PROJECT_STRUCTURE.md)、[硬件目标](docs/HARDWARE_ROADMAP.md)、[软件开发目标](docs/SOFTWARE_ROADMAP.md)、[仿真与 FPGA 工作流](docs/SIMULATION_AND_FPGA.md)
-- [FPGA demo：目标、实现、时序与综合报告](docs/FPGA_DEMO_REPORT.md)
-- [历史修改记录](docs/COMMIT.md)、[贡献与 Agent 规则](AGENTS.md)
+- 没有真实 DDR/UART/ILA、bitstream、烧板、十秒 CoreMark 或功耗。
+- 125 MHz setup 未收敛，工具 Fmax 不是板上频率。
+- 没有硬件 Cache 一致性；DMA 需要软件 clean/flush/invalidate。
+- 每个 D$ bank 的 miss 阻塞；跨 bank 可独立排队，共享外部填充/写回带宽。
+- AI 加速器尚未接入。

@@ -7,6 +7,7 @@ volatile unsigned int tohost __attribute__((section(".tohost"), aligned(8)));
 volatile unsigned char sim_console __attribute__((section(".sim_console")));
 volatile rt_uint32_t hgb_irq_count[8], hgb_tick_irqs, hgb_dma_bytes;
 volatile rt_ubase_t hgb_fault_cause, hgb_fault_pc, hgb_fault_value;
+rt_uint32_t hgb_soc_presence, hgb_soc_profile;
 static rt_uint64_t next_tick;
 static rt_uint32_t tick_cycles;
 
@@ -45,12 +46,15 @@ static void set_compare(rt_uint64_t value)
     REG32(0x02004004) = (rt_uint32_t)(value >> 32);
 }
 
-void hgb_irq_enable(unsigned id)
+rt_err_t hgb_irq_enable(unsigned id)
 {
+    /* 拒绝不存在的源，不能先写 priority/enable 再报告错误。 */
+    if (!hgb_soc_irq_present(hgb_soc_presence, id)) return -RT_EINVAL;
     rt_base_t level = rt_hw_interrupt_disable();
     REG32(IRQ_BASE + 4 * id) = 1;
     REG32(IRQ_BASE + 0x2000) |= 1u << id;
     rt_hw_interrupt_enable(level);
+    return RT_EOK;
 }
 
 HOT_CODE void hgb_dispatch(rt_ubase_t cause, rt_ubase_t *frame)
@@ -75,7 +79,7 @@ HOT_CODE void hgb_dispatch(rt_ubase_t cause, rt_ubase_t *frame)
     case 11: {
         unsigned id = REG32(IRQ_BASE + 0x200004);
         if (id == 0) break;
-        if (id > 7) hgb_finish(140);
+        if (!hgb_soc_irq_present(hgb_soc_presence, id)) hgb_finish(140);
         hgb_irq_count[id]++;
         if (id <= 2) hgb_uart_irq(id - 1);
         else if (id >= 4 && id <= 6) hgb_gpio_irq(id - 4);
@@ -133,6 +137,16 @@ static void assert_failed(const char *ex, const char *func, rt_size_t line)
 
 void hgb_boot(void)
 {
+    /* 新 BSP 要求发现 ABI；不探测缺失窗口，也不假设旧硬件等同 full。 */
+    hgb_soc_presence = REG32(INFO_BASE + HGB_SOC_PRESENCE_OFFSET);
+    rt_uint32_t discovery = REG32(INFO_BASE + HGB_SOC_DISCOVERY_OFFSET);
+    if (!hgb_soc_discovery_valid(hgb_soc_presence, discovery)) hgb_finish(149);
+    hgb_soc_profile = discovery & 0xffu;
+    const unsigned required[] = {HGB_TARGET_ITCM, HGB_TARGET_DTCM, HGB_TARGET_MTIME,
+                                HGB_TARGET_IRQ, HGB_TARGET_UART0, HGB_TARGET_GPIO0, HGB_TARGET_DMA,
+                                HGB_TARGET_SOC};
+    for (unsigned n = 0; n < sizeof(required) / sizeof(required[0]); n++)
+        if (!hgb_soc_has(hgb_soc_presence, required[n])) hgb_finish(150);
     load_hot_code();
     rt_assert_set_hook(assert_failed);
     rt_system_timer_init();

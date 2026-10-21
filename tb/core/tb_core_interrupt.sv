@@ -29,8 +29,10 @@ module tb_core_interrupt;
     xlen_t pending_data_q, expected_pc, saved_pc;
     int delay_q, scenario, cycles, interrupts, traps, stores, irq_started_cycle;
     logic requested, mret_seen, done;
+    logic m_issued, m_completed, m_retired, m_run_seen, m_result_seen;
+    retire_id_t m_id;
     always #5 clk = ~clk;
-    core dut (.fence_i_commit(), .*);
+    core dut (.commit_trace(), .imem_rsp_error_1(1'b0), .fence_i_commit(), .*);
     assign imem_req_ready = !imem_rsp_valid || imem_rsp_ready;
     assign dmem_req_ready = !pending_q && (!dmem_rsp_valid || dmem_rsp_ready);
 
@@ -89,7 +91,35 @@ module tb_core_interrupt;
             traps = 0;
             stores = 0;
             mret_seen = 0;
+            m_issued = 0;
+            m_completed = 0;
+            m_retired = 0;
+            m_run_seen = 0;
+            m_result_seen = 0;
+            m_id = '0;
         end else begin
+            // M 的执行寿命和架构寿命分别由 request/completion 与退休 ID 描述。
+            // IRQ 必须等二者都排空，不能只看旧 MEM 中是否还有一条 M 指令。
+            if (dut.mdu_req_valid && dut.mdu_req_ready) begin
+                assert (!m_issued && dut.d2_ex_q.pc == xlen_t'(32))
+                    else $fatal(1, "IRQ test repeated/unexpected MDU request");
+                m_issued = 1;
+                m_id = dut.d2_ex_q.retire_id;
+            end
+            if (m_issued && !m_completed && !dut.mdu_req_ready && !dut.mdu_complete_valid)
+                m_run_seen = 1;
+            if (dut.mdu_complete_valid) m_result_seen = 1;
+            if (dut.mdu_complete_valid && dut.mdu_complete_ready) begin
+                assert (m_issued && !m_completed && dut.mdu_completion.id == m_id &&
+                        dut.mdu_completion.result.gpr_data == xlen_t'(9))
+                    else $fatal(1, "IRQ test stale/repeated/corrupt MDU completion");
+                m_completed = 1;
+            end
+            if (commit_valid && commit_pc == xlen_t'(32)) begin
+                assert (m_completed && !m_retired && dut.head_id == m_id)
+                    else $fatal(1, "IRQ test retired wrong MDU ID");
+                m_retired = 1;
+            end
             if (dmem_req_valid && dmem_req_ready && dmem_req_write) begin
                 assert (dmem_req_addr == 516 || dmem_req_addr == 524)
                     else $fatal(1, "wrong-path store escaped");
@@ -99,6 +129,12 @@ module tb_core_interrupt;
                 if (dut.trap_cause[XLEN-1]) begin
                     assert (!pending_q && !dmem_rsp_valid && !commit_valid)
                         else $fatal(1, "interrupt crossed in-flight work");
+                    // 排空后的 IRQ 不经过执行取消链；必须确实没有未收请求或未交付结果。
+                    assert (!dut.execution_cancel && dut.mdu_req_ready &&
+                            !dut.mdu_req_valid && !dut.mdu_complete_valid &&
+                            !dut.u_ex_stage.u_ex_mdu.issued_q && dut.retire_occupancy == '0 &&
+                            !dut.retire_query_result.any_unretired_mdu && (!m_issued || m_retired))
+                        else $fatal(1, "drained interrupt left live MDU work");
                     assert (dut.trap_pc == expected_pc && dut.trap_tval == 0 &&
                             dut.trap_cause == ((xlen_t'(1) << (XLEN-1)) | xlen_t'(7)))
                         else $fatal(1, "interrupt resume mismatch scenario=%0d pc=%h want=%h",
@@ -132,7 +168,7 @@ module tb_core_interrupt;
     endtask
 
     initial begin
-        for (scenario = 0; scenario < 11; scenario++) begin
+        for (scenario = 0; scenario < 12; scenario++) begin
             @(negedge clk);
             rst = 1;
             irq_timer = 0;
@@ -175,16 +211,19 @@ module tb_core_interrupt;
             for (cycles = 0; cycles < 700; cycles++) begin
                 @(negedge clk);
                 if (!requested) begin
-                    if (((scenario == 0 || scenario == 6) && dut.wb_wait && dut.mem_wb_q.pc == 24) ||
-                        (scenario == 1 && dut.mem_result_stall) ||
+                    if (((scenario == 0 || scenario == 6) && dut.lsu_wait && dut.head_meta.pc == 24) ||
+                        (scenario == 1 && m_issued && !m_completed &&
+                         !dut.mdu_req_ready && !dut.mdu_complete_valid) ||
                         (scenario == 2 && dut.if_d1_q.valid && dut.if_d1_q.pc == 40) ||
                         (scenario == 3 && dut.if_d1_q.valid && dut.if_d1_q.pc == 60) ||
                         (scenario == 4 && dut.if_d1_q.valid && dut.if_d1_q.pc == 104) ||
-                        (scenario == 5 && dut.wb_wait && dut.mem_wb_q.pc == 36) ||
-                        (scenario == 7 && dut.wb_wait && dut.mem_wb_q.pc == 24) ||
-                        (scenario == 8 && dut.wb_wait && dut.mem_wb_q.pc == 36) ||
-                        (scenario == 9 && dut.mem_result_stall) ||
-                        (scenario == 10 && dut.d2_ex_q.valid && dut.d2_ex_q.pc == 40)) begin
+                        (scenario == 5 && dut.lsu_wait && dut.head_meta.pc == 36) ||
+                        (scenario == 7 && dut.lsu_wait && dut.head_meta.pc == 24) ||
+                        (scenario == 8 && dut.lsu_wait && dut.head_meta.pc == 36) ||
+                        (scenario == 9 && m_issued && !m_completed &&
+                         !dut.mdu_req_ready && !dut.mdu_complete_valid) ||
+                        (scenario == 10 && dut.d2_ex_q.valid && dut.d2_ex_q.pc == 40) ||
+                        (scenario == 11 && dut.mdu_complete_valid && dut.mdu_completion.id == m_id)) begin
                         irq_timer = 1;
                         requested = 1;
                         irq_started_cycle = cycles;
@@ -194,7 +233,8 @@ module tb_core_interrupt;
                 // IRQ 脉冲在 Load/Store/MDU 排空前撤销；场景 10 保持电平，由 CSR 关闭 MIE。
                 if (scenario >= 7 && scenario <= 9 && requested && cycles > irq_started_cycle)
                     irq_timer = 0;
-                if (scenario >= 7 && commit_valid && commit_pc == 104) begin
+                // 场景 11 在 RESULT 已有效时请求 IRQ，仍须先按 ID 退休，再进入中断。
+                if (scenario >= 7 && scenario <= 10 && commit_valid && commit_pc == 104) begin
                     assert (requested && interrupts == 0 && traps == 0 && stores == 2)
                         else $fatal(1, "withdrawn/masked IRQ lost work scenario=%0d", scenario);
                     done = 1;
@@ -212,8 +252,11 @@ module tb_core_interrupt;
                 end
             end
             assert (done) else $fatal(1, "IRQ scenario timeout %0d", scenario);
+            if (scenario != 6)
+                assert (m_issued && m_completed && m_retired && m_run_seen && m_result_seen)
+                    else $fatal(1, "IRQ MDU lifecycle coverage incomplete scenario=%0d", scenario);
         end
-        $display("PASS tb_core_interrupt RV%0d scenarios=11", XLEN);
+        $display("PASS tb_core_interrupt RV%0d scenarios=12", XLEN);
         $finish;
     end
 endmodule
