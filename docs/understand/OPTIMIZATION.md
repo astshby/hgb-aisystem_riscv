@@ -1,0 +1,120 @@
+# 优化学习
+
+> 写作约束：[skills/regulation.md](../../../skills/regulation.md)。本文记录哪些改动真正改变了周期或频率，哪些只是结构变化。
+
+## 1. CoreMark/MHz 怎么算
+
+设迭代数为 K、CPU 周期为 C：
+
+```text
+CoreMark/MHz = K × 10^6 / C
+```
+
+板上总分还要乘实际 MHz。IPC、CoreMark/MHz、Fmax、实际时钟和资源效率分开记录。
+时钟约束写 125 MHz 不代表电路能在 125 MHz 工作。
+
+本项目至少四条路径：Core-only 一周期存储、SoC TCM、裸机 DDR/Cache、RT-Thread
+DDR。迭代数、链接布局、软件指令数、Cache 状态和总线等待不同。只在同路径、同
+ELF/HEX、同参数下比较纯 RTL 改动。
+
+## 2. 逐轮数据
+
+下面是 RV32 历史测量，镜像和配置存在差异；跨行不直接计算纯 RTL 增幅。
+
+| 阶段 | 路径 | 周期/迭代 | CoreMark/MHz | 说明 |
+|---|---|---:|---:|---|
+| 第三轮 | SoC TCM | 345,167 | 2.897145 | 接近一周期存储 |
+| 第四轮 | SoC TCM | 1,183,872 | 0.844686 | 主端事务寄存器 |
+| 第六轮 | Core-only | 约 413,700 | 2.417461 | WB 响应寄存 |
+| 第十轮 | Core-only | 472,098 | 2.118203 | 分支结果寄存 |
+| I1 C2c | Core-only | 578,891 | 1.727441 | 严格 WAW、LSU/CSR 队头 |
+| I1 C3c | Core-only | 603,568 | 1.6568 | 解除全局阻塞，反而退步 |
+| I1 最终 | Core-only | 584,792 | 1.710011 | Tournament/RAS |
+| I2 i2/q8 | Core-only | 552,169 | 1.811039 | 有限双发射 |
+
+当前 `fdb3ffb` 使用固定 64 次迭代，双宽、M0/M1 的八次重放通过：
+
+| 分类 | RV32 CoreMark/MHz | RV64 CoreMark/MHz |
+|---|---:|---:|
+| M0 Core + 仿真双口存储 | 2.393948 | 2.092062 |
+| M1 完整 SoC-TCM，DDR 空闲 | 2.137354 | 1.896438 |
+
+无额外请求拍的同镜像对照 `b98f714` 的 M1 为 2.371599/2.087406。
+两项时序改动分别是 SoC 请求缓冲和 ROB 寄存退休；前者增加一次访存请求等待，
+后者增加一次退休等待。两者都保持每拍双路吞吐，仍会降低部分程序的周期效率。
+最终取舍须和标准布线 Fmax 一同验收，P0 的 RV32 门槛为 85 MHz。
+
+## 3. 三个负优化
+
+### 3.1 第四轮：主端事务寄存器
+
+`bus_transaction_register` 是单槽状态机，一笔完成后下一拍才能接下一笔。TCM
+本来可以接近 1 拍，现在要经过请求寄存、fabric、TCM、响应寄存。SoC TCM 分数
+下降约 70.8%。
+
+收回思路：热 TCM 给专用 1 拍口；慢路径保留寄存但允许请求 FIFO 和 2–4 笔
+outstanding；Cache miss 用 critical-word-first。
+
+### 3.2 第六轮：WB 响应寄存
+
+`wb_response_register` 先把响应寄存，下一拍才让 LSU 完成。所有 Load 多一拍，
+Core-only 下降 16.6%。
+
+收回思路：保留寄存边界，同沿把格式化数据旁路给 EX 带 ID 前递；或用 2 项响应
+队列，第一次消费从队头旁路。
+
+### 3.3 第十轮：分支结果寄存
+
+`branch_result_register` 让所有条件分支/JALR 停 EX 一拍，Core-only 下降 10.4%。
+
+收回思路：乐观推进。EX 用组合结果先推进本包，下一拍用寄存快照检查误预测。
+预测正确零代价，误预测仍是一拍后重定向。异常、目标不对齐、训练和中断边界单独测。
+
+## 4. I1 的主要成本
+
+1. 全部 Load/Store 等退休队头。普通 RAM Load 不需要这个许可，只有 MMIO、
+   Store 副作用和 CSR 需要。
+2. 严格 WAW。查询最多返回一个生产者，所以同名写者要等；按年龄选最年轻的更老
+   写者可以去掉这个停顿。
+3. 单完成口固定 WB 优先。队头 Load 等完成时，年轻 WB 抢走完成口；C3c 的退步
+   是这个机制的直接证据。
+4. CSR 队头、单 LSU、4 槽 ROB。容量和顺序策略要分别测量。
+
+## 5. 旧 SoC 成本与当前边界
+
+下面列出 I1/I2 旧后端的主要成本。新 scoreboard 后端已经提供原生 IF64、
+I$ 命中 II=1、TCM 双 bank 与两个 D$ bank，详细契约见 [SoC 系统](SOC_SYSTEM.md)。
+每个 D$ bank 仍为阻塞式 miss，共享 DDR 填充/写回带宽；MMIO 的周期另测。
+
+1. 取指逐 word 串行拼 64 位；I$ 命中 II=3。
+2. 整行安装逐 word；D$ miss 全阻塞。
+3. 每个主端单笔在途；TCM 仍经过 router/fabric。
+4. MMIO 端点约 3 拍接受间隔；UART 只有一字节 RX。
+
+## 6. 怎么测
+
+1. 先加事件计数：取指饥饿、发射 0/1/2、退休 0/1/2、RAW/WAW、队列满、
+   LSU/MDU、Cache 命中/缺失、仲裁等待。
+2. 包含式计数可以重叠；互斥归因要先声明优先级，不能把重叠原因相加。
+3. 每条指令用完整 ID 跟踪 alloc、request、response、valid、complete、retire。
+4. 区分延迟和吞吐停顿；空级没有工作不算停顿。
+5. 每次 RTL 改动跑同一 ELF，先 Core-only，再 SoC TCM，再 DDR/RT。
+
+## 7. 优化顺序
+
+先完成 scoreboard 双发射 Core 与实际端口供给，并以完整 RV32 SoC 标准 PDS
+≥85 MHz 建立 P0；RV64 先行开发，共享 RTL 验证双宽。当前功能与固定镜像已通过，
+物理验收仍在进行。
+
+随后按 P1 TCM、P2 完成/唤醒、P3 分支、P4 访存与 Load-use、P5 前端/Cache、
+P6 整体主频推进。每轮先测同镜像 CoreMark/MHz，再测标准频率，保持 85 MHz
+下限。M2 不单列，DDR 执行及外设背景负载独立记录。具体分支与验收见工作区
+`OPTIMIZATION_PLAN.md` 的 Codex B10/B11。
+
+## 8. 不要做的事
+
+- 不用增加表容量代替实际测量。
+- 不用 false path 掩盖真实同步路径。
+- 不把不同 ELF、频率或 RTL 的优点拼成一个成绩。
+- 不把功能 PASS 写成性能提升。
+- 不把 Core-only、SoC TCM、DDR 的分数混用。

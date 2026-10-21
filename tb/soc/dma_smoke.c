@@ -2,6 +2,7 @@
  * Description: Bare-metal DMA, interrupt and optional external-memory integration test.
  */
 #include <stdint.h>
+#include "../cache/cache_maintenance.h"
 
 #define REG32(a) (*(volatile uint32_t *)(uintptr_t)(a))
 #define DMA 0x10030000u
@@ -88,6 +89,21 @@ int main(void)
     if (result) return 60 + result;
     __asm__ volatile("fence.i" ::: "memory");
     if (((int (*)(void))(uintptr_t)(DDR + 0x200))() != 37) return 70;
+
+    /* CPU 写入可能只在脏 D-cache 中；先 flush 转移所有权，DMA 期间不访问目标。 */
+    volatile uint8_t *wide_src = (volatile uint8_t *)(uintptr_t)(DDR + 0x1000);
+    volatile uint8_t *wide_dst = (volatile uint8_t *)(uintptr_t)(DDR + 0x2000);
+    for (unsigned int i = 0; i < 160; i++) {
+        wide_src[i] = (uint8_t)(i * 7 + 5);
+        wide_dst[i] = 0xa5;
+    }
+    if (cache_maintain(CACHE_FLUSH)) return 90;
+    result = transfer(DDR + 0x1000, DDR + 0x2000, 153, 153, 0);
+    if (result) return 91 + result;
+    /* 完成 IRQ 只保证 DMA 写结束，不代表 CPU 缓存已经一致。 */
+    if (cache_maintain(CACHE_INVALIDATE)) return 96;
+    for (unsigned int i = 0; i < 160; i++)
+        if (wide_dst[i] != (i < 153 ? (uint8_t)(i * 7 + 5) : 0xa5)) return 97;
 #endif
 
     result = transfer(0x10000000u, (uint32_t)(uintptr_t)&target[0], 8, 0, 1);

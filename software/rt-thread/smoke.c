@@ -36,6 +36,11 @@ static void worker(void *arg)
 static void test_entry(void *arg)
 {
     (void)arg;
+    unsigned uart_count = 0, gpio_count = 0, missing_count = 0;
+    char summary[128];
+    rt_snprintf(summary, sizeof(summary), "rt discovery ABI=%u profile=%u presence=0x%08x\n",
+                HGB_SOC_DISCOVERY_ABI, (unsigned)hgb_soc_profile, (unsigned)hgb_soc_presence);
+    report(summary);
     rt_ubase_t mtvec;
     __asm__ volatile("csrr %0, mtvec" : "=r"(mtvec));
     CHECK(mtvec == 0x0100e000u && hgb_dma_bytes > 0, 1);
@@ -50,6 +55,12 @@ static void test_entry(void *arg)
 
     for (unsigned n = 0; n < 2; n++) {
         rt_device_t dev = rt_device_find(n ? "uart1" : "uart0");
+        if (!hgb_soc_has(hgb_soc_presence, HGB_TARGET_UART0 + n)) {
+            CHECK(dev == RT_NULL && hgb_irq_enable(n + 1) == -RT_EINVAL, 21);
+            missing_count++;
+            continue;
+        }
+        uart_count++;
         CHECK(dev != RT_NULL, 10);
         CHECK(rt_device_init(dev) == RT_EOK, 11);
         struct serial_configure cfg = RT_SERIAL_CONFIG_DEFAULT;
@@ -69,12 +80,28 @@ static void test_entry(void *arg)
         CHECK(rt_device_close(dev) == RT_EOK, 19);
         CHECK(REG32(UART_BASE(n) + 16) == 0, 20);
     }
-    report("PASS rt UART0/1 device API + RX IRQ semaphore wakeup + close\n");
+    if (uart_count == 2)
+        report("PASS rt UART0/1 device API + RX IRQ semaphore wakeup + close\n");
+    else
+        report("PASS rt present UART device API + RX IRQ semaphore wakeup + close; absent UART unregistered\n");
 
     CHECK(hgb_pin_mode_checked(0, PIN_MODE_INPUT_PULLUP) == -RT_EINVAL, 30);
     CHECK(rt_pin_attach_irq(96, PIN_IRQ_MODE_RISING, pin_callback, RT_NULL) == -RT_EINVAL, 31);
     for (unsigned n = 0; n < 3; n++) {
         rt_base_t p = n * 32 + 3;
+        if (!hgb_soc_has(hgb_soc_presence, HGB_TARGET_GPIO0 + n)) {
+            CHECK(hgb_pin_mode_checked(p, PIN_MODE_OUTPUT) == -RT_EINVAL, 41);
+            CHECK(rt_pin_read(p) == -RT_EINVAL, 42);
+            CHECK(rt_pin_attach_irq(p, PIN_IRQ_MODE_RISING, pin_callback, RT_NULL) == -RT_EINVAL, 43);
+            CHECK(rt_pin_irq_enable(p, PIN_IRQ_ENABLE) == -RT_EINVAL &&
+                  rt_pin_detach_irq(p) == -RT_EINVAL && hgb_irq_enable(n + 4) == -RT_EINVAL, 44);
+            rt_set_errno(0);
+            rt_pin_write(p, PIN_HIGH);
+            CHECK(rt_get_errno() == -RT_EINVAL, 45);
+            missing_count++;
+            continue;
+        }
+        gpio_count++;
         rt_pin_write(p, PIN_LOW);
         rt_pin_mode(p, PIN_MODE_OUTPUT);
         CHECK(rt_pin_attach_irq(p, PIN_IRQ_MODE_HIGH_LEVEL, pin_callback, RT_NULL) == -RT_EINVAL, 32);
@@ -90,7 +117,15 @@ static void test_entry(void *arg)
         CHECK(rt_sem_take(&events, 2) == -RT_ETIMEOUT, 39);
         rt_pin_mode(p, PIN_MODE_INPUT);
     }
-    report("PASS rt GPIO 3 banks + edge IRQ + detach + unsupported modes\n");
+    if (gpio_count == 3)
+        report("PASS rt GPIO 3 banks + edge IRQ + detach + unsupported modes\n");
+    else
+        report("PASS rt present GPIO banks + edge IRQ + detach; absent GPIO APIs rejected\n");
+    rt_snprintf(summary, sizeof(summary),
+                "PASS rt capabilities profile=%u presence=0x%08x UART_count=%u GPIO_count=%u absent_checked=%u\n",
+                (unsigned)hgb_soc_profile, (unsigned)hgb_soc_presence,
+                uart_count, gpio_count, missing_count);
+    report(summary);
     stopped = 1;
     rt_thread_delay(4);
     CHECK(exited == 2, 40);

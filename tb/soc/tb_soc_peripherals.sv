@@ -24,6 +24,8 @@ module tb_soc_peripherals;
     bus_req_t s_request [4:14], request;
     bus_rsp_t s_response [4:14], response;
     bus_target_e target;
+    bus_target_e response_target_q;
+    logic response_pending_q;
     bus_error_e error;
     logic req_valid, req_ready, rsp_valid, rsp_ready;
     logic [31:0] value;
@@ -42,17 +44,37 @@ module tb_soc_peripherals;
     assign s_rsp_valid[14] = 1'b0;
     assign s_response[14] = '0;
     soc_peripherals #(.UART_DIVISOR(8)) dut (
+        .dma_block_rd_cmd_valid(), .dma_block_rd_cmd_ready(1'b0), .dma_block_rd_cmd(),
+        .dma_block_rd_valid(1'b0), .dma_block_rd_ready(), .dma_block_rd_data('0),
+        .dma_block_wr_cmd_valid(), .dma_block_wr_cmd_ready(1'b0), .dma_block_wr_cmd(),
+        .dma_block_wr_valid(), .dma_block_wr_ready(1'b0), .dma_block_wr_data(),
+        .dma_block_wr_rsp_valid(1'b0), .dma_block_wr_rsp_ready(), .dma_block_wr_rsp('0),
         .clk, .rst, .uart_rx, .uart_tx, .gpio_in, .gpio_out, .gpio_oe,
         .irq_software, .irq_timer, .irq_external, .cache_command_valid, .cache_command, .cache_command_ready,
         .cache_busy, .cache_fatal, .cache_error, .cache_fault_addr,
         .dma_req_valid, .dma_req_ready, .dma_request,
         .dma_rsp_valid, .dma_rsp_ready, .dma_response,
+        .dma_wide_req_valid(), .dma_wide_req_ready(1'b0), .dma_wide_request(),
+        .dma_wide_rsp_valid(1'b0), .dma_wide_rsp_ready(), .dma_wide_response('0),
         .s_req_valid(s_req_valid[13:4]), .s_req_ready(s_req_ready[13:4]),
         .s_request(s_request[4:13]), .s_rsp_valid(s_rsp_valid[13:4]),
         .s_rsp_ready(s_rsp_ready[13:4]), .s_response(s_response[4:13])
     );
 
     // 单主端口定向驱动，沿用真实地址译码；非法偏移由各外设返回 SLVERR。
+    // 响应按已接受的 owner 路由，不能借用当前请求地址掩盖设备丢失请求快照的问题。
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            response_pending_q <= 1'b0;
+            response_target_q <= TARGET_ERROR;
+        end else begin
+            if (rsp_valid && rsp_ready) response_pending_q <= 1'b0;
+            if (req_valid && req_ready) begin
+                response_pending_q <= 1'b1;
+                response_target_q <= target;
+            end
+        end
+    end
     always_comb begin
         s_req_valid = '0;
         s_rsp_ready = '0;
@@ -62,10 +84,12 @@ module tb_soc_peripherals;
         for (int s = 4; s <= 14; s++) s_request[s] = request;
         if (int'(target) >= 4 && int'(target) <= 14 && error == BUS_OK) begin
             s_req_valid[target] = req_valid;
-            s_rsp_ready[target] = rsp_ready;
             req_ready = s_req_ready[target];
-            rsp_valid = s_rsp_valid[target];
-            response = s_response[target];
+        end
+        if (response_pending_q) begin
+            s_rsp_ready[response_target_q] = rsp_ready;
+            rsp_valid = s_rsp_valid[response_target_q];
+            response = s_response[response_target_q];
         end
     end
 
@@ -94,13 +118,22 @@ module tb_soc_peripherals;
         end
         tick();
         req_valid = 0;
+        request = '1;
+        #1;
+        assert (!rsp_valid) else $fatal(1, "MMIO request boundary bypass addr=%h", addr);
+        timeout_count = 0;
+        while (!rsp_valid) begin
+            tick(); #1;
+            timeout_count++;
+            assert (timeout_count < 20) else $fatal(1, "MMIO response timeout addr=%h", addr);
+        end
         #1;
         assert (rsp_valid && response.error == want_error)
             else $fatal(1, "MMIO response addr=%h valid=%b error=%0d/%0d", addr, rsp_valid, response.error, want_error);
         held = response;
         repeat (hold_cycles) begin
             tick(); #1;
-            assert (rsp_valid && !req_ready && response == held)
+            assert (rsp_valid && !s_req_ready[response_target_q] && response == held)
                 else $fatal(1, "MMIO response changed under backpressure addr=%h", addr);
         end
         result = 64'(response.rdata >> ((addr % DBUS_BYTES)*8));

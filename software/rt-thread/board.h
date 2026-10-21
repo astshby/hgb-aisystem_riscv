@@ -3,6 +3,7 @@
 #include <rtthread.h>
 #include <rthw.h>
 #include <rtdevice.h>
+#include "../common/soc_capabilities.h"
 #define REG32(addr) (*(volatile rt_uint32_t *)(rt_ubase_t)(addr))
 #define UART_BASE(n) (0x10000000u + (n) * 0x1000u)
 #define GPIO_BASE(n) (0x10020000u + (n) * 0x1000u)
@@ -14,12 +15,13 @@ extern volatile unsigned int tohost;
 extern volatile unsigned char sim_console;
 extern volatile rt_uint32_t hgb_irq_count[8], hgb_tick_irqs, hgb_dma_bytes;
 extern volatile rt_uint32_t hgb_uart_errors[2];
+extern rt_uint32_t hgb_soc_presence, hgb_soc_profile;
 void hgb_finish(unsigned code) __attribute__((noreturn));
 void hgb_drivers_init(void);
 void hgb_uart_irq(unsigned n);
 void hgb_gpio_irq(unsigned n);
 void hgb_app_init(void);
-void hgb_irq_enable(unsigned id);
+rt_err_t hgb_irq_enable(unsigned id);
 rt_uint64_t hgb_mtime(void);
 rt_err_t hgb_pin_mode_checked(rt_base_t pin, rt_uint8_t mode);
 #endif

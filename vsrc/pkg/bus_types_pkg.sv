@@ -22,4 +22,21 @@ package bus_types_pkg;
         xlen_t rdata;
         bus_error_e error;
     } bus_rsp_t;
+
+    // DDR 数据通道独立于 CPU XLEN；窄请求保留 size/lane，DMA 整拍为 32 字节。
+    // 地址仍保留 XLEN，桥必须拒绝不能表示为物理 32 位地址的请求，不能静默截断。
+    localparam int unsigned DDR_DATA_W = 256;
+    localparam int unsigned DDR_BEAT_BYTES = DDR_DATA_W / 8;
+    typedef struct packed {
+        logic write;
+        logic execute;
+        logic [2:0] size;
+        xlen_t addr;
+        logic [DDR_DATA_W-1:0] wdata;
+        logic [DDR_BEAT_BYTES-1:0] wstrb;
+    } ddr_req_t;
+    typedef struct packed {
+        logic [DDR_DATA_W-1:0] rdata;
+        bus_error_e error;
+    } ddr_rsp_t;
 endpackage

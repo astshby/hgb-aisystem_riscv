@@ -1,0 +1,10 @@
+vsrc/pkg/core_config_pkg.sv
+vsrc/pkg/core_types_pkg.sv
+vsrc/pkg/riscv_unpriv_pkg.sv
+vsrc/pkg/predictor_types_pkg.sv
+vsrc/core/frontend/ras_decode.sv
+vsrc/core/frontend/ras.sv
+vsrc/core/frontend/local_history.sv
+vsrc/core/frontend/chooser.sv
+vsrc/core/frontend/btb.sv
+vsrc/core/frontend/gshare.sv

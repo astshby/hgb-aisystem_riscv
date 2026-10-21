@@ -2,6 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 xlen="${1:-32}"
+source scripts/soc_profile.sh
 app="${RT_APP:-smoke}"
 mode="${RT_COREMARK_MODE:-performance}"
 layout="${RT_COREMARK_LAYOUT:-tcm}"
@@ -13,7 +14,7 @@ rt="${RTTHREAD_ROOT:-build/rt-thread-v5.2.2}"
 revision=ddf52e2cdd977f14fc04035c88672ac204aec713
 [[ "$(git -C "$rt" rev-parse HEAD)" == "$revision" ]] || { echo 'RT-Thread revision mismatch'; exit 1; }
 [[ -z "$(git -C "$rt" status --porcelain --untracked-files=no)" ]] || { echo 'RT-Thread dependency is modified'; exit 1; }
-prefix="${CROSS_COMPILE:-${RISCV_TOOL_ROOT:-/opt/riscv/bin}/riscv64-unknown-elf-}"
+prefix="${CROSS_COMPILE:-${RISCV_TOOL_ROOT:?set RISCV_TOOL_ROOT to the toolchain bin directory}/riscv64-unknown-elf-}"
 bsp=software/rt-thread
 out="build/rt-thread/rv$xlen"
 linker="$bsp/link.ld"

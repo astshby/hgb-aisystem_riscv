@@ -1,0 +1,9 @@
+vsrc/pkg/core_config_pkg.sv
+vsrc/pkg/riscv_unpriv_pkg.sv
+vsrc/pkg/riscv_priv_pkg.sv
+vsrc/pkg/core_types_pkg.sv
+vsrc/pkg/predictor_types_pkg.sv
+vsrc/pkg/pipeline_pkg.sv
+vsrc/core/writeback/retire_gpr_query.sv
+vsrc/core/writeback/retire_queue.sv
+vsrc/core/common/regfile.sv

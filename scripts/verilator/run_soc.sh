@@ -1,23 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 xlen="${1:-32}"
+source scripts/verilator/core_build_config.sh
 export CCACHE_TEMPDIR="${PWD}/build/ccache-tmp"
 export CCACHE_DIR="${PWD}/build/ccache"
 mkdir -p "${CCACHE_TEMPDIR}" "${CCACHE_DIR}" logs
 # 镜像驱动 harness 由 benchmark/ISA runner 单独运行。
-for test_spec in tb_soc_fabric:0 tb_soc_fabric:1 tb_soc_peripherals:0 tb_local_to_axi:0 tb_dma_fabric:0; do
+for test_spec in tb_bus_request_register:0 tb_bus_transaction_register:0 tb_irq_register:0 tb_bus_locked_grant:0 tb_bus_locked_grant:1 tb_soc_fabric:0 tb_soc_fabric:1 tb_soc_peripherals:0 tb_soc_mmio_boundary:0 tb_local_to_axi:0 tb_dma_fabric:0 tb_dma_fabric:1; do
     test_name="${test_spec%:*}"
     priority="${test_spec#*:}"
     suffix=""
     parameters=()
-    if [[ "${test_name}" == "tb_soc_fabric" ]]; then
+    if [[ "${test_name}" == "tb_soc_fabric" || "${test_name}" == "tb_bus_locked_grant" ]]; then
         parameters+=("-GDATA_PRIORITY=${priority}")
         suffix="-p${priority}"
+    elif [[ "${test_name}" == "tb_dma_fabric" ]]; then
+        parameters+=("-GREGISTERED=${priority}")
+        suffix="-r${priority}"
     fi
-    out_dir="build/verilator/soc-rv${xlen}/${test_name}${suffix}"
+    out_dir="build/verilator/soc-rv${xlen}-${core_build_tag}/${test_name}${suffix}"
     mkdir -p "${out_dir}"
-    log="logs/${test_name}-rv${xlen}${suffix}.log"
-    verilator -Wall -Wno-fatal --assert --timing --binary \
+    log="logs/${test_name}-rv${xlen}-${core_build_tag}${suffix}.log"
+    verilator "${core_microarch_flags[@]}" -Wall -Wno-fatal --assert --timing --binary \
         -DCORE_XLEN="${xlen}" -Mdir "${out_dir}" \
         -f scripts/soc_files.f tb/soc/axi_memory_model.sv "tb/soc/${test_name}.sv" \
         "${parameters[@]}" --top-module "${test_name}" >"${log}" 2>&1

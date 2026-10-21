@@ -1,7 +1,12 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "board.h"
 static struct { void (*handler)(void *); void *arg; rt_uint8_t mode; } handlers[96];
-static int valid(rt_base_t pin) { return pin >= 0 && pin < 96; }
+static int valid(rt_base_t pin)
+{
+    /* 引脚号合法还须对应实际 bank；所有 API 在计算 MMIO 地址前共用此检查。 */
+    return pin >= 0 && pin < 96 &&
+           hgb_soc_has(hgb_soc_presence, HGB_TARGET_GPIO0 + (unsigned)pin / 32);
+}
 static unsigned bank(rt_base_t pin) { return GPIO_BASE((unsigned)pin / 32); }
 static rt_uint32_t bit(rt_base_t pin) { return 1u << ((unsigned)pin % 32); }
 
@@ -87,6 +92,8 @@ static const struct rt_pin_ops ops = {
 };
 void hgb_gpio_irq(unsigned n)
 {
+    if (n >= 3 || !hgb_soc_has(hgb_soc_presence, HGB_TARGET_GPIO0 + n))
+        hgb_finish(153);
     unsigned b = GPIO_BASE(n);
     rt_uint32_t pending = REG32(b + 24) & REG32(b + 12);
     /* 清除快照后再回调，避免回调期间新边沿被误清。 */
@@ -102,11 +109,12 @@ void hgb_drivers_init(void)
     REG32(IRQ_BASE + 0x200000) = 0;
     hgb_uart_init();
     for (unsigned n = 0; n < 3; n++) {
+        if (!hgb_soc_has(hgb_soc_presence, HGB_TARGET_GPIO0 + n)) continue;
         REG32(GPIO_BASE(n) + 12) = 0;
         REG32(GPIO_BASE(n) + 16) = 0;
         REG32(GPIO_BASE(n) + 20) = 0;
         REG32(GPIO_BASE(n) + 24) = 0xffffffffu;
-        hgb_irq_enable(n + 4);
+        if (hgb_irq_enable(n + 4) != RT_EOK) hgb_finish(154);
     }
     if (rt_device_pin_register("pin", &ops, RT_NULL)) hgb_finish(148);
 }

@@ -12,6 +12,12 @@ module tb_pango_ddr3_bridge;
     logic req_valid, req_ready, rsp_valid, rsp_ready;
     bus_req_t request;
     bus_rsp_t response;
+    logic memory_req_valid, memory_req_ready, memory_rsp_valid, memory_rsp_ready;
+    ddr_req_t memory_request;
+    ddr_rsp_t memory_response;
+    logic wide_req_valid = 0, wide_req_ready, wide_rsp_valid, wide_rsp_ready = 0;
+    ddr_req_t wide_request = '0;
+    ddr_rsp_t wide_response;
     logic [27:0] axi_awaddr, axi_araddr;
     logic axi_awuser_ap, axi_aruser_ap, axi_awvalid, axi_awready;
     logic axi_wready, axi_arvalid, axi_arready, axi_rlast, axi_rvalid;
@@ -20,7 +26,18 @@ module tb_pango_ddr3_bridge;
     logic [31:0] axi_wstrb;
     int checks;
 
-    pango_ddr3_bridge dut (.*);
+    // 保留原窄访存用例，经过与板级相同的 lane 适配后检查 256-bit 原生接口。
+    ddr_port_arbiter u_port (
+        .clk, .rst, .cpu_req_valid(req_valid), .cpu_req_ready(req_ready), .cpu_request(request),
+        .cpu_rsp_valid(rsp_valid), .cpu_rsp_ready(rsp_ready), .cpu_response(response),
+        .dma_req_valid(wide_req_valid), .dma_req_ready(wide_req_ready), .dma_request(wide_request),
+        .dma_rsp_valid(wide_rsp_valid), .dma_rsp_ready(wide_rsp_ready), .dma_response(wide_response),
+        .req_valid(memory_req_valid), .req_ready(memory_req_ready), .request(memory_request),
+        .rsp_valid(memory_rsp_valid), .rsp_ready(memory_rsp_ready), .response(memory_response)
+    );
+    pango_ddr3_bridge dut (.req_valid(memory_req_valid), .req_ready(memory_req_ready),
+        .request(memory_request), .rsp_valid(memory_rsp_valid), .rsp_ready(memory_rsp_ready),
+        .response(memory_response), .*);
 
     task automatic tick;
         @(posedge clk);
@@ -122,6 +139,8 @@ module tb_pango_ddr3_bridge;
         if (axi_arvalid || axi_awvalid) $fatal(1, "out-of-range request reached IP");
         take(BUS_DECERR, '0);
 
+        request = '0;
+        request.size = MEM_WORD;
         request.addr = xlen_t'(32'h8000_0000);
         send(request);
         axi_arready = 1;
@@ -132,6 +151,61 @@ module tb_pango_ddr3_bridge;
         tick();
         axi_rvalid = 0;
         take(BUS_SLVERR, '0);
+
+        // 非法多 beat 响应必须排空到 RLAST，期间不得报完成或接纳新 owner。
+        axi_rid = 0;
+        request = '0;
+        request.size = MEM_WORD;
+        request.addr = xlen_t'(32'h8000_0000);
+        send(request);
+        axi_arready = 1; tick(); axi_arready = 0;
+        axi_rvalid = 1; axi_rlast = 0; tick(); axi_rvalid = 0;
+        repeat (3) begin
+            #1;
+            assert (!rsp_valid && !req_ready) else $fatal(1, "Pango malformed read released owner early");
+            tick();
+        end
+        axi_rvalid = 1; axi_rlast = 1; tick(); axi_rvalid = 0;
+        take(BUS_SLVERR, '0);
+        request = '0;
+        request.size = MEM_WORD;
+        request.addr = xlen_t'(32'h8000_0000);
+        send(request);
+        axi_arready = 1; tick(); axi_arready = 0;
+        axi_rdata = '0; axi_rdata[31:0] = 32'h5a123456;
+        axi_rvalid = 1; tick(); axi_rvalid = 0;
+        take(BUS_OK, xlen_t'(32'h5a123456));
+
+        // 整拍 DMA 不能只检查低 XLEN；全部 32 字节逐一对应到真实 IP 256-bit 引脚。
+        wide_request = '0;
+        wide_request.write = 1;
+        wide_request.addr = xlen_t'(32'h80001000);
+        wide_request.size = 5;
+        wide_request.wstrb = '1;
+        for (int b = 0; b < 32; b++) wide_request.wdata[b*8 +: 8] = 8'(b*3+1);
+        wide_req_valid = 1; #1;
+        assert (wide_req_ready) else $fatal(1, "Pango native request blocked while idle");
+        tick(); wide_req_valid = 0;
+        #1;
+        assert (axi_awvalid && axi_awaddr == 28'h400 && axi_awlen == 0 &&
+                axi_wstrb == 32'hffffffff && axi_wdata == wide_request.wdata)
+            else $fatal(1, "Pango native wide payload truncated or wrong address units");
+        axi_awready = 1; tick(); axi_awready = 0;
+        axi_wready = 1; tick(); axi_wready = 0;
+        #1;
+        assert (wide_rsp_valid && wide_response.error == BUS_OK) else $fatal(1, "native write did not complete");
+        wide_rsp_ready = 1; tick(); wide_rsp_ready = 0;
+        wide_request.write = 0; wide_req_valid = 1; tick(); wide_req_valid = 0;
+        axi_arready = 1; tick(); axi_arready = 0;
+        axi_rdata = wide_request.wdata; axi_rvalid = 1; axi_rlast = 1; tick(); axi_rvalid = 0;
+        repeat (3) begin
+            #1;
+            assert (wide_rsp_valid && wide_response.error == BUS_OK && wide_response.rdata == wide_request.wdata)
+                else $fatal(1, "native read lost upper bytes or response backpressure");
+            tick();
+        end
+        wide_rsp_ready = 1; tick(); wide_rsp_ready = 0;
+        checks += 2;
 
         $display("PASS tb_pango_ddr3_bridge RV%0d checks=%0d", XLEN, checks);
         $finish;

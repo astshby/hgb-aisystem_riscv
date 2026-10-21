@@ -1,5 +1,7 @@
 # Benchmark Software
 
+> 写作约束：见工作区根目录的 `skills/regulation.md`。
+
 `bsp/` contains the shared bare-metal startup, linker layout, 64-bit cycle reader,
 simulation console, and RV32I/RV64I software arithmetic helpers. `smoke/`
 validates that C runtime before a long benchmark. `coremark/vendor/` is the fixed,

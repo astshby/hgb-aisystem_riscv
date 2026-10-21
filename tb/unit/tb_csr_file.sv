@@ -30,7 +30,7 @@ module tb_csr_file;
     xlen_t cycle_before;
 
     always #5 clk = ~clk;
-    csr_file dut (.*);
+    csr_file dut (.retire_extra(1'b0), .*);
 
     task automatic write_csr(input csr_addr_t address, input xlen_t data);
         @(negedge clk);

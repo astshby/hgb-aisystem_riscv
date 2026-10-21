@@ -5,7 +5,7 @@ module interrupt_entry (
     input logic irq_pending,
     input logic pipeline_busy,
     input logic retire_valid,
-    input pipeline_pkg::mem_wb_t commit_packet,
+    input core_types_pkg::xlen_t commit_next_pc,
     input pipeline_pkg::redirect_t wb_redirect,
     output logic interrupt_take,
     output core_types_pkg::xlen_t interrupt_pc
@@ -24,6 +24,6 @@ module interrupt_entry (
         else if (wb_redirect.valid)
             resume_pc_q <= wb_redirect.pc;
         else if (retire_valid)
-            resume_pc_q <= commit_packet.next_pc;
+            resume_pc_q <= commit_next_pc;
     end
 endmodule

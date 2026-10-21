@@ -5,6 +5,7 @@ module tb_core_m_trap;
     timeprecision 1ps;
     import core_config_pkg::*;
     import core_types_pkg::*;
+    import pipeline_pkg::*;
     import riscv_priv_pkg::*;
     import rv_asm_pkg::*;
 
@@ -26,9 +27,63 @@ module tb_core_m_trap;
     logic mul_retired = 1'b0;
     logic young_exception_waited = 1'b0;
     logic completed = 1'b0;
+    logic m_live [RETIRE_ENTRIES];
+    logic m_complete [RETIRE_ENTRIES];
+    retire_id_t m_id [RETIRE_ENTRIES];
+    xlen_t m_pc [RETIRE_ENTRIES];
+    int m_launches = 0, m_completions = 0, m_retirements = 0, mrets = 0;
 
     always #5 clk = ~clk;
-    sim_cpu_top dut (.*);
+    sim_cpu_top dut (.commit_trace(), .*);
+
+    // 同步异常可以先暂停前端，真正 trap 只能在老 M 的完整 ID 完成并退休后提交。
+    always @(posedge clk) begin
+        if (rst) begin
+            m_launches = 0;
+            m_completions = 0;
+            m_retirements = 0;
+            mrets = 0;
+            for (int i = 0; i < RETIRE_ENTRIES; i++) begin
+                m_live[i] = 1'b0;
+                m_complete[i] = 1'b0;
+                m_id[i] = '0;
+                m_pc[i] = '0;
+            end
+        end else begin
+            if (dut.u_core.mdu_req_valid && dut.u_core.mdu_req_ready) begin
+                assert (!m_live[dut.u_core.d2_ex_q.retire_id.slot] &&
+                        dut.u_core.d2_ex_q.pc inside {xlen_t'(16), xlen_t'(24), xlen_t'(32)})
+                    else $fatal(1, "unexpected/repeated trap-test MDU request");
+                m_live[dut.u_core.d2_ex_q.retire_id.slot] = 1'b1;
+                m_complete[dut.u_core.d2_ex_q.retire_id.slot] = 1'b0;
+                m_id[dut.u_core.d2_ex_q.retire_id.slot] = dut.u_core.d2_ex_q.retire_id;
+                m_pc[dut.u_core.d2_ex_q.retire_id.slot] = dut.u_core.d2_ex_q.pc;
+                m_launches++;
+            end
+            if (dut.u_core.mdu_complete_valid && dut.u_core.mdu_complete_ready) begin
+                assert (m_live[dut.u_core.mdu_completion.id.slot] &&
+                        !m_complete[dut.u_core.mdu_completion.id.slot] &&
+                        m_id[dut.u_core.mdu_completion.id.slot] == dut.u_core.mdu_completion.id &&
+                        !dut.u_core.mdu_completion.result.exc.valid)
+                    else $fatal(1, "stale or repeated trap-test MDU completion");
+                m_complete[dut.u_core.mdu_completion.id.slot] = 1'b1;
+                m_completions++;
+            end
+            if (commit_valid && dut.u_core.head_meta.kind == RET_MDU) begin
+                assert (m_live[dut.u_core.head_id.slot] && m_complete[dut.u_core.head_id.slot] &&
+                        m_id[dut.u_core.head_id.slot] == dut.u_core.head_id &&
+                        m_pc[dut.u_core.head_id.slot] == commit_pc)
+                    else $fatal(1, "trap-test MDU retired without its completion");
+                m_live[dut.u_core.head_id.slot] = 1'b0;
+                m_retirements++;
+            end
+            if (commit_valid && commit_pc == xlen_t'(144)) begin
+                assert (!commit_exception && m_retirements == mrets + 1)
+                    else $fatal(1, "MRET crossed older MDU work");
+                mrets++;
+            end
+        end
+    end
 
     initial begin
         for (int idx = 0; idx < 64; idx++) dut.u_imem.mem[idx] = nop();
@@ -54,15 +109,15 @@ module tb_core_m_trap;
 
         for (int cycles = 0; cycles < 1000; cycles++) begin
             @(negedge clk);
-            if ((dut.u_core.execution_stall || dut.u_core.mem_result_stall) &&
+            assert (!dmem_store_fire) else $fatal(1, "unexpected trap test Store");
+            if (dut.u_core.retire_query_result.any_unretired_mdu &&
                 (dut.u_core.d1_serialize_req || dut.u_core.d1_d2_q.exc.valid ||
                  dut.u_core.d2_ex_q.exc.valid)) begin
                 young_exception_waited = 1'b1;
-                assert (!dut.u_core.serialize_start)
-                    else $fatal(1, "younger exception overtook active MDU");
+                assert (!dut.u_core.trap_enter && !(commit_valid && commit_exception))
+                    else $fatal(1, "younger exception committed before older MDU retirement");
             end
             if (commit_valid) begin
-                assert (!dmem_store_fire) else $fatal(1, "unexpected trap test Store");
                 unique case (commit_pc)
                     xlen_t'(16): begin
                         assert (!commit_exception && commit_rd_we && commit_rd_data == xlen_t'(-7))
@@ -93,7 +148,8 @@ module tb_core_m_trap;
                         ((traps == 1) ? xlen_t'(20) : xlen_t'(28)))
                         else $fatal(1, "M trap MEPC");
                     xlen_t'(36): begin
-                        assert (traps == 2 && div_retired && mul_retired && young_exception_waited)
+                        assert (traps == 2 && div_retired && mul_retired && young_exception_waited &&
+                                m_launches == 3 && m_completions == 3 && m_retirements == 3 && mrets == 2)
                             else $fatal(1, "M trap coverage incomplete");
                         $display("PASS tb_core_m_trap RV%0d traps=%0d cycles=%0d", XLEN, traps, cycles);
                         completed = 1'b1;

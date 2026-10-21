@@ -1,7 +1,8 @@
 // Module: axi_memory_model
 // Description: Simulation-only single-beat external RAM with channel stalls and fault injection.
 module axi_memory_model #(
-    parameter int unsigned BYTES = 64 * 1024
+    parameter int unsigned BYTES = 64 * 1024,
+    parameter int unsigned DATA_W = core_config_pkg::XLEN
 ) (
     input logic clk, rst,
     input logic [31:0] fault_read_addr, fault_write_addr,
@@ -11,8 +12,8 @@ module axi_memory_model #(
     input logic [2:0] awsize,
     input logic wvalid,
     output logic wready,
-    input logic [core_config_pkg::XLEN-1:0] wdata,
-    input logic [core_config_pkg::DBUS_BYTES-1:0] wstrb,
+    input logic [DATA_W-1:0] wdata,
+    input logic [DATA_W/8-1:0] wstrb,
     input logic wlast,
     output logic bvalid,
     input logic bready,
@@ -25,22 +26,27 @@ module axi_memory_model #(
     output logic rvalid,
     input logic rready,
     output logic rid,
-    output logic [core_config_pkg::XLEN-1:0] rdata,
+    output logic [DATA_W-1:0] rdata,
     output logic [1:0] rresp,
     output logic rlast
 );
     import core_config_pkg::*;
     import soc_addr_pkg::*;
     localparam int WORDS = BYTES / DBUS_BYTES;
+    localparam int DATA_BYTES = DATA_W / 8;
+    // 存储数组仍用 XLEN 字，兼容既有 ELF/RT DDR hex 装载；AXI 单拍可真正覆盖 32 字节。
     logic [XLEN-1:0] mem [WORDS];
     logic [31:0] cycle_q, awaddr_q;
-    logic [XLEN-1:0] wdata_q;
-    logic [DBUS_BYTES-1:0] wstrb_q;
+    logic [DATA_W-1:0] wdata_q;
+    logic [DATA_BYTES-1:0] wstrb_q;
+    logic [2:0] awsize_q;
     logic aw_seen_q, w_seen_q, b_pending_q, r_pending_q;
     logic [2:0] b_delay_q, r_delay_q;
     logic [31:0] accepted_awaddr;
-    logic [XLEN-1:0] accepted_wdata;
-    logic [DBUS_BYTES-1:0] accepted_wstrb;
+    logic [DATA_W-1:0] accepted_wdata;
+    logic [DATA_BYTES-1:0] accepted_wstrb;
+    logic [2:0] accepted_awsize;
+    logic [31:0] write_base, read_base;
     logic aw_fire, w_fire, ar_fire;
     initial for (int w = 0; w < WORDS; w++) mem[w] = '0;
 
@@ -54,6 +60,9 @@ module axi_memory_model #(
     assign accepted_awaddr = aw_fire ? awaddr : awaddr_q;
     assign accepted_wdata = w_fire ? wdata : wdata_q;
     assign accepted_wstrb = w_fire ? wstrb : wstrb_q;
+    assign accepted_awsize = aw_fire ? awsize : awsize_q;
+    assign write_base = (accepted_awaddr-DDR_BASE) & ~(32'(DATA_BYTES)-1);
+    assign read_base = (araddr-DDR_BASE) & ~(32'(DATA_BYTES)-1);
     assign bid = 1'b0;
     assign rid = 1'b0;
     assign rlast = 1'b1;
@@ -63,6 +72,7 @@ module axi_memory_model #(
         if (rst) begin
             cycle_q <= '0;
             awaddr_q <= '0;
+            awsize_q <= '0;
             wdata_q <= '0;
             wstrb_q <= '0;
             aw_seen_q <= 1'b0;
@@ -81,6 +91,7 @@ module axi_memory_model #(
             if (aw_fire) begin
                 aw_seen_q <= 1'b1;
                 awaddr_q <= awaddr;
+                awsize_q <= awsize;
             end
             if (w_fire) begin
                 w_seen_q <= 1'b1;
@@ -94,11 +105,11 @@ module axi_memory_model #(
                 b_delay_q <= 3;
                 bresp <= accepted_awaddr == fault_write_addr ? 2'b10 : 2'b00;
                 if (accepted_awaddr >= DDR_BASE &&
-                    33'(accepted_awaddr) < 33'(DDR_BASE) + BYTES &&
+                    33'(accepted_awaddr) + (33'd1 << accepted_awsize) <= 33'(DDR_BASE) + BYTES &&
                     accepted_awaddr != fault_write_addr) begin
-                    for (int b = 0; b < DBUS_BYTES; b++)
-                        if (accepted_wstrb[b])
-                            mem[(accepted_awaddr-DDR_BASE) / DBUS_BYTES][b*8 +: 8] <=
+                    for (int b = 0; b < DATA_BYTES; b++)
+                        if (accepted_wstrb[b] && write_base + 32'(b) < BYTES)
+                            mem[(write_base + 32'(b)) / DBUS_BYTES][(b % DBUS_BYTES)*8 +: 8] <=
                                 accepted_wdata[b*8 +: 8];
                 end else bresp <= 2'b10;
             end
@@ -115,9 +126,12 @@ module axi_memory_model #(
                 r_delay_q <= 3;
                 rresp <= araddr == fault_read_addr ? 2'b10 : 2'b00;
                 rdata <= '0;
-                if (araddr >= DDR_BASE && 33'(araddr) < 33'(DDR_BASE) + BYTES &&
-                    araddr != fault_read_addr)
-                    rdata <= mem[(araddr-DDR_BASE) / DBUS_BYTES];
+                if (araddr >= DDR_BASE && 33'(araddr) + (33'd1 << arsize) <= 33'(DDR_BASE) + BYTES &&
+                    araddr != fault_read_addr) begin
+                    for (int b = 0; b < DATA_BYTES; b++)
+                        if (read_base + 32'(b) < BYTES)
+                            rdata[b*8 +: 8] <= mem[(read_base + 32'(b)) / DBUS_BYTES][(b % DBUS_BYTES)*8 +: 8];
+                end
                 else rresp <= 2'b10;
             end
             if (r_pending_q && !rvalid) begin
@@ -131,5 +145,5 @@ module axi_memory_model #(
         end
     end
     logic unused_size;
-    assign unused_size = ^{awsize, arsize, wlast};
+    assign unused_size = wlast;
 endmodule

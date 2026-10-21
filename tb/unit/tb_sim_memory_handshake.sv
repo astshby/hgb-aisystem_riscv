@@ -29,7 +29,7 @@ module tb_sim_memory_handshake;
 
     always #5 clk = ~clk;
 
-    sim_imem #(.DEPTH_WORDS(16)) u_imem (
+    sim_imem #(.DEPTH_WORDS(16), .DATA_W(32)) u_imem (
         .clk,
         .rst,
         .req_valid(imem_req_valid),

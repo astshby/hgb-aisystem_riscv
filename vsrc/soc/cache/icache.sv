@@ -4,7 +4,8 @@ module icache #(
     parameter bit ENABLE = 1'b1,
     parameter int unsigned DDR_BYTES = 0,
     parameter int unsigned CACHE_BYTES = 4096,
-    parameter int unsigned LINE_BYTES = 32
+    parameter int unsigned LINE_BYTES = 32,
+    parameter bit BLOCK_ENABLE = 1'b0
 ) (
     input logic clk, rst, invalidate,
     input logic req_valid,
@@ -18,7 +19,13 @@ module icache #(
     output bus_types_pkg::bus_req_t mem_request,
     input logic mem_rsp_valid,
     output logic mem_rsp_ready,
-    input bus_types_pkg::bus_rsp_t mem_response
+    input bus_types_pkg::bus_rsp_t mem_response,
+    output logic rd_cmd_valid,
+    input logic rd_cmd_ready,
+    output block_types_pkg::block_cmd_t rd_cmd,
+    input logic rd_valid,
+    output logic rd_ready,
+    input block_types_pkg::block_r_t rd_data
 );
     import core_config_pkg::*;
     import core_types_pkg::*;
@@ -78,12 +85,14 @@ module icache #(
 
     // 已接受的填行即使遇到失效也继续排空，最终仍交付一次旧 CPU 响应供 IF kill 消费。
     assign fill_start = state_q == FILL && !refill_started_q;
-    cache_refill #(.LINE_BYTES(LINE_BYTES)) u_refill (
+    // 块口仅服务DDR整行miss；TCM/MMIO/边界回退仍由cache_port的标量接口负责。
+    cache_refill #(.LINE_BYTES(LINE_BYTES), .BLOCK_ENABLE(BLOCK_ENABLE)) u_refill (
         .clk, .rst, .fallback_enable(1'b1), .start_valid(fill_start), .start_ready(fill_ready), .request(request_q),
         .done_valid(fill_done), .done_ready(state_q == FILL), .installable(fill_installable),
         .response(fill_response), .write_valid(fill_write), .write_word(fill_word), .write_data(fill_data),
         .mem_req_valid(refill_req_valid), .mem_req_ready(refill_req_ready), .mem_request(refill_request),
-        .mem_rsp_valid(refill_rsp_valid), .mem_response(refill_response)
+        .mem_rsp_valid(refill_rsp_valid), .mem_response(refill_response),
+        .rd_cmd_valid, .rd_cmd_ready, .rd_cmd, .rd_valid, .rd_ready, .rd_data
     );
 
     // 控制与请求快照；失效是粘滞标记，不能只屏蔽 FENCE.I 出现的那一拍。

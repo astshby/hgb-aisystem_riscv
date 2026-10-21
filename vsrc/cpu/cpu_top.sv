@@ -28,6 +28,7 @@ module cpu_top (
         .imem_rsp_valid(1'b0),
         .imem_rsp_data('0),
         .imem_rsp_error(1'b0),
+        .imem_rsp_error_1(1'b0),
         .imem_rsp_ready(),
         .dmem_req_valid,
         .dmem_req_write,
@@ -47,6 +48,7 @@ module cpu_top (
         .commit_rd_we(),
         .commit_rd_data(),
         .commit_exception(),
+        .commit_trace(),
         .fence_i_commit()
     );
 endmodule

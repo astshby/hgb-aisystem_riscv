@@ -2,13 +2,16 @@ param(
     [Parameter(Mandatory=$true)][string]$ReferenceIdf,
     [Parameter(Mandatory=$true)][string]$IpArchive,
     [Parameter(Mandatory=$true)][string]$WorkRoot,
-    [string]$PdsHome = 'F:\pango\PDS_2025.2-ads',
+    [string]$PdsHome = $env:PDS_HOME,
     [string]$PythonExe = 'python',
     [switch]$UseWslPython,
     [string]$Distribution = 'Ubuntu-22.04',
     [string]$WslUser = ''
 )
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($PdsHome)) {
+    throw 'Set PDS_HOME or pass -PdsHome; no installation path is hardcoded.'
+}
 . (Join-Path $PSScriptRoot 'wsl_helpers.ps1')
 $root = [IO.Path]::GetFullPath($WorkRoot)
 $pdsRoot = [IO.Path]::GetFullPath($PdsHome).TrimEnd('\')

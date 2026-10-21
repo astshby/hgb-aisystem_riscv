@@ -11,6 +11,11 @@ module tb_core_config;
     initial begin
         assert ((XLEN == 32) || (XLEN == 64)) else $fatal(1, "invalid XLEN");
         assert (DBUS_BYTES == (XLEN / 8)) else $fatal(1, "invalid data bus width");
+        assert (PREDICTOR_MODE <= 1) else $fatal(1, "invalid predictor mode");
+        assert ((`CORE_RAS_ENABLE == 0) || (`CORE_RAS_ENABLE == 1))
+            else $fatal(1, "invalid RAS selection");
+        assert ((RETIRE_ENTRIES == 2) || (RETIRE_ENTRIES == 4) || (RETIRE_ENTRIES == 8))
+            else $fatal(1, "CORE_RETIRE_ENTRIES must be 2, 4, or 8");
         $display("PASS tb_core_config RV%0d", XLEN);
         $finish;
     end

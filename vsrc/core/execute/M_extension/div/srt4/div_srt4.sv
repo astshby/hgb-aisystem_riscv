@@ -25,6 +25,7 @@ module div_srt4 #(
     logic [COUNT_W-1:0] count_q;
     logic [REMAINDER_SHIFT_W-1:0] remainder_shift_q;
     logic active_q;
+    logic prepare_q; // 已保存归一化幅值，下一拍形成 -D，再开始迭代。
 
     partial_t partial_start, scaled_divisor_start;
     partial_t partial_sum_q, partial_carry_q;
@@ -121,16 +122,19 @@ module div_srt4 #(
         end
     end
 
-    // 每拍生成一个 {-2,-1,0,1,2} 商位，非末轮将余数两行同时左移两位。
+    // 启动沿只保存归一化的 D/P0；准备拍再形成 -D，避免 LZC/移位与宽减法串接。
+    // 进入 active 后每拍生成一个 {-2,-1,0,1,2} 商位，非末轮将余数两行同时左移两位。
     always_ff @(posedge clk) begin
         if (rst || cancel) begin
             active_q <= 1'b0;
+            prepare_q <= 1'b0;
             count_q <= '0;
             done <= 1'b0;
         end else begin
             done <= 1'b0;
             if (start) begin
-                active_q <= 1'b1;
+                active_q <= 1'b0;
+                prepare_q <= 1'b1;
                 count_q <= (active_width >> 1) + COUNT_W'(1);
                 remainder_shift_q <= REMAINDER_SHIFT_W'(WIDTH) +
                                      REMAINDER_SHIFT_W'(operand_padding) +
@@ -138,9 +142,12 @@ module div_srt4 #(
                 partial_sum_q <= partial_start;
                 partial_carry_q <= '0;
                 divisor_q <= scaled_divisor_start;
-                negative_divisor_q <= -scaled_divisor_start;
                 quotient_q <= '0;
                 minus_one_q <= '1;
+            end else if (prepare_q) begin
+                prepare_q <= 1'b0;
+                negative_divisor_q <= -divisor_q;
+                active_q <= 1'b1;
             end else if (active_q) begin
                 quotient_q <= next_quotient;
                 minus_one_q <= next_minus_one;

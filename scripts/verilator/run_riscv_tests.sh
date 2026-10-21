@@ -2,20 +2,39 @@
 set -euo pipefail
 
 xlen="${1:-32}"
+source scripts/verilator/core_build_config.sh
 tests_root="${RISCV_TESTS_DIR:-tb/riscv_tests/vendor/riscv-tests}"
-tool_root="${RISCV_TOOL_ROOT:-/opt/riscv/bin}"
+tool_root="${RISCV_TOOL_ROOT:?set RISCV_TOOL_ROOT to the toolchain bin directory}"
 tool_prefix="${tool_root}/riscv64-unknown-elf-"
-platform_suffix=""
+platform_suffix="-${core_build_tag}"
 tb_top=tb_riscv_test
 tb_file=tb/riscv_tests/tb_riscv_test.sv
 source_list=scripts/sim_files.f
 linker=tb/riscv_tests/env/link.ld
+source scripts/soc_profile.sh
+platform_options=()
+result_options=()
 if [[ "${SOC:-0}" == "1" ]]; then
-    platform_suffix=-soc
+    local_tcm="${SOC_LOCAL_TCM_ENABLE:-0}"
+    dma_wide="${SOC_DMA_WIDE_ENABLE:-0}"
+    dma_block="${SOC_DMA_BLOCK_ENABLE:-0}"
+    cache_block="${SOC_CACHE_BLOCK_ENABLE:-0}"
+    [[ "$local_tcm" =~ ^[01]$ ]] || { echo 'SOC_LOCAL_TCM_ENABLE must be 0 or 1' >&2; exit 2; }
+    [[ "$dma_wide" =~ ^[01]$ ]] || { echo 'SOC_DMA_WIDE_ENABLE must be 0 or 1' >&2; exit 2; }
+    [[ "$dma_block" =~ ^[01]$ ]] || { echo 'SOC_DMA_BLOCK_ENABLE must be 0 or 1' >&2; exit 2; }
+    [[ "$cache_block" =~ ^[01]$ ]] || { echo 'SOC_CACHE_BLOCK_ENABLE must be 0 or 1' >&2; exit 2; }
+    platform_suffix="-${core_build_tag}-soc-p${soc_profile}-ltcm${local_tcm}-dw${dma_wide}-cb${cache_block}-db${dma_block}"
+    platform_options+=("-GLOCAL_TCM_ENABLE=${local_tcm}")
+    platform_options+=("-GDMA_WIDE_ENABLE=${dma_wide}")
+    platform_options+=("-GDMA_BLOCK_ENABLE=${dma_block}")
+    platform_options+=("-GCACHE_BLOCK_ENABLE=${cache_block}")
+    platform_options+=("-GSOC_PROFILE=${soc_profile_id}")
     tb_top=tb_soc_benchmark
     tb_file=tb/soc/tb_soc_benchmark.sv
     source_list=scripts/soc_files.f
     linker=tb/riscv_tests/env/link_soc.ld
+    # ISA 的 .dword tohost 由两笔 SW 报告；bare/RT 的 unsigned int 仍使用默认四字节。
+    result_options=(-GRESULT_BYTES=8)
 fi
 build_root="build/riscv-tests/rv${xlen}${platform_suffix}"
 sim_dir="build/verilator/riscv-tests-rv${xlen}${platform_suffix}"
@@ -61,8 +80,9 @@ fi
 mkdir -p "${CCACHE_TEMPDIR}" "${CCACHE_DIR}" "${build_root}" "${sim_dir}" logs
 host_cflags=()
 if [[ "${DIV_IMPL:-0}" == 1 ]]; then host_cflags=(-CFLAGS -O0); fi
+if [[ "$core_backend" == scoreboard ]]; then host_cflags=(-CFLAGS -O1); fi
 
-verilator -Wall -Wno-fatal --assert --timing --binary \
+verilator "${core_microarch_flags[@]}" -Wall -Wno-fatal --assert --timing --binary -j 2 "${result_options[@]}" \
     "${host_cflags[@]}" \
     -DCORE_XLEN="${xlen}" \
     -DCORE_MUL_IMPL="${MUL_IMPL:-0}" -DCORE_DIV_IMPL="${DIV_IMPL:-0}" \
@@ -70,7 +90,7 @@ verilator -Wall -Wno-fatal --assert --timing --binary \
     -f "${source_list}" \
     tb/common/store_result_monitor.sv \
     "${tb_file}" \
-    --top-module "${tb_top}" \
+    "${platform_options[@]}" --top-module "${tb_top}" \
     >"logs/riscv-tests-build-rv${xlen}${platform_suffix}.log" 2>&1
 
 failures=0

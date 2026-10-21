@@ -89,6 +89,7 @@ module dcache_wt #(
     // 读填行按 XLEN；原始窄读保存在 refill 中，错误回退绝不沿用扩宽后的 size。
     assign fill_start = state_q == FILL && !refill_started_q;
     cache_refill #(.LINE_BYTES(LINE_BYTES), .WORD_BYTES(DBUS_BYTES)) u_refill (
+        .rd_cmd_valid(), .rd_cmd_ready(1'b0), .rd_cmd(), .rd_valid(1'b0), .rd_ready(), .rd_data('0),
         .clk, .rst, .fallback_enable(1'b1), .start_valid(fill_start), .start_ready(fill_ready), .request(request_q),
         .done_valid(fill_done), .done_ready(state_q == FILL), .installable(fill_installable),
         .response(fill_response), .write_valid(fill_write), .write_word(fill_word), .write_data(fill_data),

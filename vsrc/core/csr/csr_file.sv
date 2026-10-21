@@ -19,7 +19,8 @@ module csr_file (
     input  logic                         mret_commit, // mret必要
     input  logic                         retire_valid, //指令计数相关
     output core_types_pkg::xlen_t        mtvec,
-    output core_types_pkg::xlen_t        mepc
+    output core_types_pkg::xlen_t        mepc,
+    input logic retire_extra
 );
     import core_config_pkg::*;
     import core_types_pkg::*;
@@ -134,7 +135,7 @@ module csr_file (
         // RV32 写任一半都替代本指令对整个 MINSTRET 的增量，未写的半部保持原值。
         if (retire_valid && !(write_valid &&
             ((write_addr == CSR_MINSTRET) || ((XLEN == 32) && (write_addr == CSR_MINSTRETH)))))
-            minstret_d = minstret_q + 64'd1;
+            minstret_d = minstret_q + 64'd1 + 64'(retire_extra);
 
         if (write_valid) begin
             unique case (write_addr)

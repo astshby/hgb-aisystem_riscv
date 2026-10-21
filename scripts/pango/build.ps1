@@ -6,9 +6,17 @@ param(
     [Parameter(Mandatory=$true)][string]$WorkRoot,
     [string]$Distribution = 'Ubuntu-22.04',
     [string]$WslUser = '',
-    [string]$CrossCompile = '/usr/bin/riscv64-linux-gnu-'
+    [string]$CrossCompile = '',
+    [ValidateSet('full','lite')][string]$SocProfile = 'full',
+    [ValidateSet(0,1)][int]$LocalTcmEnable = 0
 )
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($CrossCompile)) {
+    if ([string]::IsNullOrWhiteSpace($env:RISCV_TOOL_ROOT)) {
+        throw 'Set RISCV_TOOL_ROOT or pass -CrossCompile.'
+    }
+    $CrossCompile = (Join-Path $env:RISCV_TOOL_ROOT 'riscv64-unknown-elf-')
+}
 . (Join-Path $PSScriptRoot 'wsl_helpers.ps1')
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $root = [IO.Path]::GetFullPath($WorkRoot)
@@ -32,9 +40,22 @@ Invoke-PangoLogged -Executable 'wsl.exe' -Arguments ($options + @('--cd', $wslRe
 Write-Output 'RUN isolated HMIC_S 1.10 generation from checked-in board configuration'
 & (Join-Path $PSScriptRoot 'generate_ddr_ip.ps1') -ReferenceIdf (Join-Path $repo 'ip\pango\mes2l676_200hp_ddr3.idf') -IpArchive $archive -WorkRoot (Join-Path $root 'ddr-ip') -PdsHome $pdsRoot -UseWslPython -Distribution $Distribution -WslUser $WslUser
 Write-Output 'RUN WSL staging into native Windows PDS directory'
-Invoke-PangoLogged -Executable 'wsl.exe' -Arguments ($options + @('--cd', $wslRepo, '--exec', 'python3', 'scripts/pango/prepare_project.py', '--xlen', '32', '--ip-dir', "$wslRoot/ddr-ip/candidate/ddr3_test", '--output', "$wslRoot/soc-rv32")) -Log (Join-Path $logRoot 'staging.log')
+Invoke-PangoLogged -Executable 'wsl.exe' -Arguments ($options + @('--cd', $wslRepo, '--exec', 'python3', 'scripts/pango/prepare_project.py', '--xlen', '32', '--soc-profile', $SocProfile, '--local-tcm', "$LocalTcmEnable", '--ip-dir', "$wslRoot/ddr-ip/candidate/ddr3_test", '--output', "$wslRoot/soc-rv32")) -Log (Join-Path $logRoot 'staging.log')
 $project = Join-Path $root 'soc-rv32'
+Invoke-PangoLogged -Executable 'wsl.exe' -Arguments ($options + @('--cd', $wslRepo, '--exec', 'python3', 'scripts/pango/verify_synthesis.py', "$wslRoot/soc-rv32", '--staging-only')) -Log (Join-Path $logRoot 'staging-verification.log')
+$manifest = Get-Content -LiteralPath (Join-Path $project 'manifest.json') -Raw | ConvertFrom-Json
+$profileId = if ($SocProfile -eq 'lite') { 1 } else { 0 }
+if ($manifest.schema_version -ne 3 -or $manifest.xlen -ne 32 -or
+    $manifest.mul -ne 0 -or $manifest.div -ne 1 -or
+    $manifest.soc_profile -cne $SocProfile -or $manifest.soc_profile_id -ne $profileId -or
+    $manifest.local_tcm_enable -ne $LocalTcmEnable -or
+    $manifest.dma_wide_enable -ne 1 -or $manifest.ddr_data_bits -ne 256 -or
+    $manifest.cache_block_enable -ne 1 -or $manifest.dma_block_enable -ne 1 -or
+    $manifest.core_issue_width -ne 1) {
+    throw 'Staged manifest does not match the requested board configuration.'
+}
 Write-Output 'RUN native PDS ADS compile and synthesis (RV32 DSP/SRT)'
+& (Join-Path $PSScriptRoot 'memory_gate.ps1') -LogDirectory $logRoot -Phase 'synthesis'
 Invoke-PangoLogged -Executable (Join-Path $pdsRoot 'bin\pds_shell.exe') -Arguments @('-work_dir', $project, '-project_name', 'soc_rv32', '-file', (Join-Path $project 'synthesize.tcl')) -Log (Join-Path $logRoot 'synthesis.log')
 if (-not (Select-String -LiteralPath (Join-Path $logRoot 'synthesis.log') -SimpleMatch 'Executing : synthesize -ads -selected_syn_tool_opt 2 successfully.' -Quiet)) { throw 'Missing successful synthesis marker.' }
 Write-Output 'RUN strict full-image TCM INIT and staged-byte checks'
@@ -56,10 +77,21 @@ $receipt = [ordered]@{
     pds_home = $pdsRoot
     ddr_ip_archive_sha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLower()
     board_config_sha256 = (Get-FileHash -LiteralPath (Join-Path $repo 'ip\pango\mes2l676_200hp_ddr3.idf') -Algorithm SHA256).Hash.ToLower()
-    xlen = 32
-    mul_impl = 0
-    div_impl = 1
-    soc_user_clock_hz = 125000000
+    manifest_schema_version = $manifest.schema_version
+    xlen = $manifest.xlen
+    mul_impl = $manifest.mul
+    div_impl = $manifest.div
+    soc_profile = $manifest.soc_profile
+    soc_profile_id = $manifest.soc_profile_id
+    local_tcm_enable = $manifest.local_tcm_enable
+    dma_wide_enable = $manifest.dma_wide_enable
+    ddr_data_bits = $manifest.ddr_data_bits
+    cache_block_enable = $manifest.cache_block_enable
+    dma_block_enable = $manifest.dma_block_enable
+    core_issue_width = $manifest.core_issue_width
+    soc_presence = $manifest.soc_presence
+    slow_presence = $manifest.slow_presence
+    soc_user_clock_hz = $manifest.soc_clock_hz
     target_soc_clock_hz = 100000000
     work_root = $root
     synthesis_summary = 'soc-rv32/synthesis-summary.json'

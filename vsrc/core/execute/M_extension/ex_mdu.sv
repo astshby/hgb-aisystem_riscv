@@ -1,5 +1,5 @@
 // Module: ex_mdu
-// Description: Tracks EX request acceptance while registered MDU results are consumed by MEM.
+// Description: Tracks a single EX request transfer to the independently completing MDU.
 // 乘除法处理的统一入口，通过req与muldiv_unit握手
 module ex_mdu (
     input logic clk, rst, cancel, mdu_operands_ready, advance,
@@ -11,17 +11,17 @@ module ex_mdu (
     output core_types_pkg::muldiv_req_t request
 );
     // 控制分工：cancel、mdu_operands_ready、advance。
-    // cancel：取消乘除法,wb重定向才需要启动
+    // cancel：同步 WB 异常/MRET/FENCE 取消乘除法；排空后的 IRQ 不取消空闲单元
     // mdu_operands_ready：确认实际选中的前递操作数已经就绪
-    // advance：EX 元数据是否进入 MEM；不再表示运算结果被消费
+    // advance：EX 指令是否离开；正常 M 不再复制元数据到 MEM
     import core_types_pkg::*;
     logic req_fire;
     logic issued_q;
 
     // 前递后的操作数只在请求握手时进入 MDU；依赖的较老结果尚未就绪时不启动运算。
-    // EX 只等待请求接收；算法未完成时，由携带元数据的 MEM 阻塞年轻指令，结果经过融合直接交给MEM。
+    // EX 只等待请求接收；结果由独立完成口交队列，年轻普通 ALU 可继续执行。
     always_comb begin
-        // selected在不同阶段（EX，MEM）处理的指令不同
+        // 当前 EX 的有效正常 M 指令才可转交独立运算单元。
         selected = packet_valid && !exception_valid && (uop.fu == FU_MULDIV);
         // 按照上下文赋值
         request = '{operation:uop.muldiv_op, op_width:uop.op_width,
@@ -32,9 +32,9 @@ module ex_mdu (
     end
 
     // issued_q表示EX阶段是否已经被接收
-    // 由于此处是主动入口，必须有接收确认缓存，被动出口（mem_mdu）没有类似的
+    // 旧 WB/MEM 阻塞时可提前发射，直到 EX 真正离开才释放，避免 RESULT 已消费后重复请求。
     always_ff @(posedge clk) begin
-        if (rst || cancel || advance) // 允许前进，意味着rsp已经被消费，EX阶段可以发起新的请求
+        if (rst || cancel || advance)
             issued_q <= 1'b0;
         else if (req_fire)
             issued_q <= 1'b1;

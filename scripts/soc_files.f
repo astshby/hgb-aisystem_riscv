@@ -1,10 +1,21 @@
 -f scripts/rtl_files.f
 vsrc/pkg/cache_pkg.sv
 vsrc/soc/bus/bus_interconnect.sv
+vsrc/soc/bus/soc_memory_router.sv
+vsrc/soc/bus/tcm_local_fabric.sv
 vsrc/soc/bus/local_to_axi.sv
+vsrc/soc/bus/ddr_port_arbiter.sv
+vsrc/soc/bus/ddr_to_axi.sv
+vsrc/soc/bus/ddr_block_adapter.sv
+vsrc/soc/bus/block_arbiter.sv
+vsrc/soc/bus/ddr_block_fabric.sv
+vsrc/soc/bus/block_to_axi.sv
 vsrc/soc/memory/tcm_controller.sv
 vsrc/soc/memory/boot_rom.sv
 vsrc/soc/common/mmio_endpoint.sv
+vsrc/soc/common/bus_request_register.sv
+vsrc/soc/common/bus_transaction_register.sv
+vsrc/soc/common/tagged_request_queue.sv
 vsrc/soc/common/sync_bits.sv
 vsrc/soc/common/soc_info.sv
 vsrc/soc/peripheral/timer/machine_timer.sv
@@ -14,7 +25,10 @@ vsrc/soc/peripheral/uart/uart_tx.sv
 vsrc/soc/peripheral/uart/uart_rx.sv
 vsrc/soc/peripheral/uart/uart.sv
 vsrc/soc/interrupt/irq_controller.sv
+vsrc/soc/interrupt/irq_register.sv
 vsrc/soc/dma/dma_engine.sv
+vsrc/soc/dma/dma_legacy_engine.sv
+vsrc/soc/dma/dma_block_engine.sv
 vsrc/soc/dma/dma_regs.sv
 vsrc/soc/dma/dma_controller.sv
 vsrc/soc/peripheral/soc_peripherals.sv
@@ -28,4 +42,9 @@ vsrc/soc/cache/dcache_meta_array.sv
 vsrc/soc/cache/dcache_wt.sv
 vsrc/soc/cache/dcache.sv
 vsrc/soc/cache/cache_maintenance_controller.sv
+vsrc/soc/bus/bus_pair_arbiter.sv
+vsrc/soc/memory/tcm_dual_bank.sv
+vsrc/soc/cache/dcache_banked.sv
+vsrc/soc/cache/icache_native.sv
+vsrc/soc/memory/scoreboard_soc_memory.sv
 vsrc/soc/soc_top.sv

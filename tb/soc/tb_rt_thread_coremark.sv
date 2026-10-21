@@ -1,12 +1,20 @@
 // Module: tb_rt_thread_coremark
 // Description: Checks RT-Thread CoreMark really visits DDR, DMA-loaded hot code and UART TX.
-module tb_rt_thread_coremark;
+module tb_rt_thread_coremark #(
+    parameter bit LOCAL_TCM_ENABLE = 1'b0,
+    parameter bit CACHE_BLOCK_ENABLE = 1'b0,
+    parameter bit DMA_WIDE_ENABLE = 1'b0,
+    parameter bit DMA_BLOCK_ENABLE = 1'b0,
+    parameter int unsigned SOC_PROFILE = soc_config_pkg::SOC_PROFILE_FULL
+);
     timeunit 1ns;
     timeprecision 1ps;
     import core_config_pkg::*;
     import bus_types_pkg::*;
 
-    tb_soc_benchmark #(.DDR_BYTES(256 * 1024)) test();
+    tb_soc_benchmark #(.DDR_BYTES(256 * 1024), .LOCAL_TCM_ENABLE(LOCAL_TCM_ENABLE),
+                       .SOC_PROFILE(SOC_PROFILE), .CACHE_BLOCK_ENABLE(CACHE_BLOCK_ENABLE),
+                       .DMA_WIDE_ENABLE(DMA_WIDE_ENABLE), .DMA_BLOCK_ENABLE(DMA_BLOCK_ENABLE)) test();
     string ddr_image;
     initial begin
         // 仅此仿真阶段预装模型；不代表 UART 下载或板级 DDR 已初始化。
@@ -44,16 +52,23 @@ module tb_rt_thread_coremark;
                             test.dut.m_request[2].addr < XLEN'('h0110c000 + hot_bytes))
                         else $fatal(1, "hot DMA source outside D-TCM load image");
             end
-            if (test.commit_valid && test.commit_pc >= XLEN'('h0100e000) &&
-                test.commit_pc < XLEN'('h01010000)) begin
-                assert (copied_bytes == hot_bytes && test.fence_commits > 0)
-                    else $fatal(1, "hot code ran before DMA and FENCE.I");
-                hot_commits++;
-            end
+            for (int lane = 0; lane < 2; lane++)
+                if (test.commit_trace[lane].valid && test.commit_trace[lane].pc >= XLEN'('h0100e000) &&
+                    test.commit_trace[lane].pc < XLEN'('h01010000)) begin
+                    assert (copied_bytes == hot_bytes && test.fence_commits > 0)
+                        else $fatal(1, "hot code ran before DMA and FENCE.I");
+                    hot_commits++;
+                end
             if (test.ddr_req_valid && test.ddr_req_ready) begin
                 if (test.ddr_request.write) ddr_writes++;
                 else ddr_reads++;
             end
+            for (int client = 0; client < 2; client++) begin
+                if (test.cache_rd_cmd_valid[client] && test.cache_rd_cmd_ready[client]) ddr_reads++;
+                if (test.cache_wr_cmd_valid[client] && test.cache_wr_cmd_ready[client]) ddr_writes++;
+            end
+            if (test.dma_block_rd_cmd_valid && test.dma_block_rd_cmd_ready) ddr_reads++;
+            if (test.dma_block_wr_cmd_valid && test.dma_block_wr_cmd_ready) ddr_writes++;
             if (test.uart_tx[0] != uart_tx_q) uart_edges++;
             uart_tx_q <= test.uart_tx[0];
         end

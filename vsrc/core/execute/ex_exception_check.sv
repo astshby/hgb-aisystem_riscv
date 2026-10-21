@@ -3,6 +3,8 @@
 // 处理ex级检查出来的异常：检查 CSR 权限、访存地址及实际控制流目标是否有效。
 module ex_exception_check (
     input  pipeline_pkg::d2_ex_t      in_packet,
+    input  logic                      operands_ready,
+    input  logic                      branch_ready,
     input  core_types_pkg::xlen_t     effective_address,
     input  logic                      branch_taken,
     input  core_types_pkg::xlen_t     branch_target,
@@ -45,7 +47,8 @@ module ex_exception_check (
     // 已有异常优先，后续阶段只能在没有异常时补充新的异常信息。
     always_comb begin
         exception = in_packet.exc;
-        if (in_packet.valid && !exception.valid) begin
+        // 未解析的依赖不能用旧 RF 值产生地址异常；前级异常始终原样传递。
+        if (in_packet.valid && !exception.valid && operands_ready) begin
             if (in_packet.uop.csr_valid && csr_access_illegal) begin
                 exception.valid = 1'b1;
                 exception.cause = EXC_ILLEGAL_INST;
@@ -59,7 +62,7 @@ module ex_exception_check (
                                 : EXC_STORE_ADDR_MISALIGNED;
                 exception.tval = effective_address;
             end
-            else if (control_op && branch_taken && (branch_target[1:0] != 2'b00)) begin
+            else if (control_op && branch_ready && branch_taken && (branch_target[1:0] != 2'b00)) begin
                 exception.valid = 1'b1;
                 exception.cause = EXC_INST_ADDR_MISALIGNED;
                 exception.tval = branch_target;

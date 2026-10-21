@@ -36,7 +36,11 @@ module tb_dcache_wb #(
     always_ff @(posedge clk) if (fault_valid) last_fault_addr <= reported_addr;
     int cycles = 0, delay_q = 0, transfers = 0, checks = 0, writes = 0;
 
-    dcache #(.ENABLE(ENABLE), .CACHE_BYTES(CACHE_BYTES), .DDR_BYTES(DDR_BYTES)) dut (.fault_addr(reported_addr), .*);
+    dcache #(.ENABLE(ENABLE), .CACHE_BYTES(CACHE_BYTES), .DDR_BYTES(DDR_BYTES)) dut (
+        .fault_addr(reported_addr),
+        .rd_cmd_valid(), .rd_cmd_ready(1'b0), .rd_cmd(), .rd_valid(1'b0), .rd_ready(), .rd_data('0),
+        .wr_cmd_valid(), .wr_cmd_ready(1'b0), .wr_cmd(), .wr_valid(), .wr_ready(1'b0), .wr_data(),
+        .wr_rsp_valid(1'b0), .wr_rsp_ready(), .wr_rsp('0), .*);
     address_decode #(.DDR_BYTES(DDR_BYTES)) decoder (
         .request(saved_request), .target, .error(decoded_error)
     );
