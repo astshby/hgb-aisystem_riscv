@@ -14,9 +14,14 @@ Store owner、拒绝响应与容量；现有 LSU 测试另覆盖单类队列满�
 LSU 差分检查。四次 RV32 M0/M1 同镜像比较的 CRC、ROI/TB 周期和全部统计相同。
 新镜像由 GCC 11.4 编译，M0/M1 performance 为 2.633659/2.317931 CoreMark/MHz。
 DDR IP 已用厂商 HMIC_S 1.10 包自行生成，32/32 DQ 元数据匹配；新完整 SoC 工程
-的 228 项输入已校验。Windows 物理可用/提交余量复查为 14.59/12.69 GiB，
-标准 PDS 综合已启动，尚无物理结果。
-后续 ROB32/IQ 分离、局部乱序和路径候选未应用。以下 r15 数据保持其历史归属。
+的 228 项输入已校验。P1.1a 标准 PDS 已完成：86.1721 MHz、85 MHz WNS +0.160 ns、
+TNS 0、12 类 STA 零失败、零未布通。物理 40,181 LUT、32,188 FF、36 DRM、4 APM；
+最差路径仍由 Store 地址经转发、IQ 操作数选择进入分支，20 级、11.135 ns。
+结果为 `logs/p1/p1-1a/pds-result.json`，实测源码 `a23b65c`，未上板。
+P1.1b 位于 `core/p1-1b-rob32-split-iq`，显式选择 `RETIRE_ENTRIES=32 SPLIT_ISSUE_QUEUE=1`。
+`split_scoreboard_queue.sv` 分别保存 int8/mem4 操作数并合并全局最老两项，
+先维持按序发射，定向测试正在运行；局部乱序和路径候选未应用。
+以下 r15 数据保持其历史归属。
 
 新 P0 按工作区 [Codex B11](../../../OPTIMIZATION_PLAN.md#b11-core-完善后建立新-p0scoreboard-双发射)
 实施。r15 已通过 RV32 完整 SoC 的 85 MHz 内部 STA，用户已决定冻结为新 P0，

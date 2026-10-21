@@ -65,7 +65,7 @@ module scoreboard_queue #(
     assign second_read = read_q + PTR_W'(1);
     assign second_write = write_q + PTR_W'(1);
     assign occupancy = count_q;
-    // 容量只由已寄存占用确定，切断执行 ready 到双分配的组合链；8 项吸收短暂反压。
+    // 容量只由已寄存占用确定，切断执行 ready 到双分配的组合链；队列吸收短暂反压。
     always_comb begin
         available = DEPTH - int'(count_q);
         push_capacity = 0;

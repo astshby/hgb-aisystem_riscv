@@ -1,6 +1,16 @@
 # FPGA 适配与 PDS
 
-> 写作约束：[skills/regulation.md](../../../skills/regulation.md)。本文记录工具、流程、约束和结果，不把工具 Fmax 写成板上频率。
+> 写作约束：[regulation.md](../../../regulation.md)。本文记录工具、流程、约束和结果，不把工具 Fmax 写成板上频率。
+
+P1.1a 实测源码为 `core/p1-1a-split-lq-sq@a23b65c`，LQ/SQ 拆分后保持 ROB16/IQ8。
+标准综合、dev_map、place、route、route_optimize、report_timing 均完成，得到
+86.1721 MHz、85 MHz WNS +0.160 ns、TNS 0、12 类 STA 零失败，57,149 条网络全部布通。
+物理为 40,181 LUT、32,188 FF、36 DRM、4 APM、77 IO；综合为 37,486 LUT、32,057 FF、
+零 latch。228 项输入哈希和 I/D-TCM 各 64 KiB 初值均匹配。最差路径由 Store 地址
+经转发资格、提示标签、IQ 操作数选择到分支事件，20 级、11.135 ns，逻辑/布线
+4.481/6.654 ns，最高扇出 38。证据为 `logs/p1/p1-1a/pds-result.json`，原生工程在
+`$PDS_WORK_ROOT/work/p1-1a-lsq-split-20261022/soc-rv32`。85 MHz 为内部 STA，
+IP 实际配置仍为 125 MHz，35/73 项 I/O 延迟缺失，未上板。
 
 ## 1. 目标
 

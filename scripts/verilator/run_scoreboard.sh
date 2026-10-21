@@ -7,17 +7,23 @@ export CCACHE_TEMPDIR="$PWD/build/ccache-tmp" CCACHE_DIR="$PWD/build/ccache"
 mkdir -p "$CCACHE_TEMPDIR" "$CCACHE_DIR" logs/p0
 tests=("$@")
 tests=("${tests[@]:1}")
-[[ ${#tests[@]} -gt 0 ]] || tests=(contracts rename operands operands_wide operands_issue issue recovery retirement completion completion_wide completion_queue lsu lsu_slots lsu_forward metrics core events)
-predictor="${PREDICTOR_MODE:-0}"
-ras="${RAS_ENABLE:-0}"
+[[ ${#tests[@]} -gt 0 ]] || tests=(contracts rename operands operands_wide operands_issue split_iq split_iq_small issue recovery retirement completion completion_wide completion_queue lsu lsu_slots lsu_forward metrics core events)
+export CORE_BACKEND=scoreboard ISSUE_WIDTH=2
+export RETIRE_ENTRIES="${RETIRE_ENTRIES:-32}" SPLIT_ISSUE_QUEUE="${SPLIT_ISSUE_QUEUE:-1}"
+source scripts/verilator/core_build_config.sh
+predictor="$core_predictor_mode"
+ras="$core_ras_enable"
 [[ "$predictor" =~ ^[01]$ && "$ras" =~ ^[01]$ ]] || exit 2
-suffix=""
-if [[ "$predictor$ras" != 00 ]]; then suffix="-p${predictor}r${ras}"; fi
+suffix="-$core_build_tag"
 if [[ "${LSQ_EQUIVALENCE:-0}" == 1 ]]; then suffix="${suffix}-lsq-equivalence"; fi
 for test in "${tests[@]}"; do
     [[ "$test" =~ ^[a-z_]+$ ]] || exit 2
     top="tb_scoreboard_$test"
     extra_options=()
+    if [[ "$test" == split_iq_small ]]; then
+        top=tb_scoreboard_split_iq
+        extra_options+=(-GINTEGER_DEPTH=4 -GMEMORY_DEPTH=2)
+    fi
     if [[ "$test" == completion_wide ]]; then
         top=tb_scoreboard_completion
         extra_options+=(-GSOURCES=11)
@@ -39,8 +45,8 @@ for test in "${tests[@]}"; do
     fi
     mkdir -p "$out"
     verilator -Wall -Wno-fatal --assert --timing --binary -j 2 -CFLAGS -O1 \
-        -DCORE_XLEN="$width" -DCORE_ISSUE_WIDTH=2 -DCORE_RETIRE_ENTRIES=16 \
-        -DCORE_MUL_IMPL=0 -DCORE_DIV_IMPL=1 -DCORE_PREDICTOR_MODE="$predictor" -DCORE_RAS_ENABLE="$ras" \
+        -DCORE_XLEN="$width" "${core_microarch_flags[@]}" \
+        -DCORE_MUL_IMPL=0 -DCORE_DIV_IMPL=1 \
         -Mdir "$out" -f scripts/rtl_files.f tb/common/rv_asm_pkg.sv "${extra_sources[@]}" \
         "tb/unit/scoreboard/$top.sv" "${extra_options[@]}" --top-module "$top" \
         >"$log.build.log" 2>&1 || {

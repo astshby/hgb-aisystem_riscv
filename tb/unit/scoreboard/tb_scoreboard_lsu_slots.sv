@@ -28,7 +28,7 @@ module tb_scoreboard_lsu_slots;
     logic [SOURCES-1:0] source_valid, source_ready;
     logic [1:0] selected_valid;
     logic [2:0] accepted_synthetic;
-    int order [7] = '{14, 15, 0, 1, 2, 3, 4};
+    int order [7] = '{RETIRE_ENTRIES-2, RETIRE_ENTRIES-1, 0, 1, 2, 3, 4};
     int checked, dual_completions;
     always #5 clk = ~clk;
     initial begin
@@ -79,19 +79,19 @@ module tb_scoreboard_lsu_slots;
         mem_rsp_valid[portno] = 1; mem_response[portno] = '{id:id, data:value, error:error};
     endtask
     initial begin
-        head_slot = RETIRE_IDX_W'(14); head_id = tag(14); head_valid = 0;
+        head_slot = RETIRE_IDX_W'(RETIRE_ENTRIES-2); head_id = tag(RETIRE_ENTRIES-2); head_valid = 0;
         synthetic_valid = 0; checked = 0; dual_completions = 0;
         for (int src = 0; src < 3; src++) synthetic[src] = '0;
         idle(); tick(); rst = 0;
         // 四笔 Load 先全部外发，再让年轻响应跨口先到，结果保持在各自物理槽。
-        enqueue(load(14,256), load(15,264), 1);
+        enqueue(load(RETIRE_ENTRIES-2,256), load(RETIRE_ENTRIES-1,264), 1);
         enqueue(load(0,272), load(1,280), 1);
         mem_req_ready = 3; tick(); mem_req_ready = 3; tick();
         reply(1,tag(0),30); reply(0,tag(1),40); tick();
         #1; assert (complete_valid == ENTRIES'(12) && completion[2].id == tag(0) &&
                     completion[3].id == tag(1)) else $fatal(1, "fixed Load completion slots");
         held_completion = completion[2]; tick();
-        reply(1,tag(14),10); reply(0,tag(15),20,1); tick();
+        reply(1,tag(RETIRE_ENTRIES-2),10); reply(0,tag(RETIRE_ENTRIES-1),20,1); tick();
         #1; assert (complete_valid == ENTRIES'(15) && completion[2] == held_completion &&
                     completion[0].result.gpr_data == 10 && completion[1].result.exc.valid &&
                     completion[1].result.exc.cause == EXC_LOAD_ACCESS_FAULT &&

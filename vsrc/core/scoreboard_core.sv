@@ -47,6 +47,7 @@ module scoreboard_core (
     xlen_t ras_top_addr;
     logic fetch_fire, fetch_second, fetch_busy;
     logic [1:0] fetch_pop_count, dispatch_count, issue_count, iq_capacity, iq_ready;
+    logic [1:0] iq_push_memory;
     logic [1:0] alloc_fire, alloc_ready, retire_fire, head_valid, head_complete;
     logic [1:0] completion_valid, completion_reject, complete_ready, training_capacity;
     logic [1:0] retire_ready, lane_ready, integer_ready;
@@ -74,7 +75,7 @@ module scoreboard_core (
     csr_forward_t csr_write [2];
     xlen_t rf_rs1 [2], rf_rs2 [2];
     logic [RETIRE_COUNT_W-1:0] rob_occupancy;
-    logic [$clog2(ISSUE_QUEUE_ENTRIES+1)-1:0] iq_occupancy;
+    logic [$clog2(SCHEDULER_ENTRIES+1)-1:0] iq_occupancy;
     logic [RETIRE_IDX_W-1:0] head_slot;
     // 两个局部视图与 ROB 使用同一退休增量；不是延迟一拍的 head。
     // ADS UG990102 8.2.17：保留等价寄存器，避免综合重新合并跨模块年龄网络。
@@ -182,6 +183,10 @@ module scoreboard_core (
         .imem_rsp_data, .imem_rsp_error, .imem_rsp_error_1, .imem_rsp_ready, .busy(fetch_busy)
     );
     for (genvar lane = 0; lane < 2; lane++) begin : g_decode
+        // 类型容量只读静态译码字段，不能经 RAT 的当拍分配旁路返回 alloc_ready。
+        assign iq_push_memory[lane] = !decode_q[lane].exc.valid && !decode_q[lane].uop.csr_valid &&
+            decode_q[lane].uop.sys_op == SYS_NONE && decode_q[lane].uop.branch_op == BR_NONE &&
+            decode_q[lane].uop.fu != FU_MULDIV && (decode_q[lane].uop.mem_read || decode_q[lane].uop.mem_write);
         d1_stage u_decode (.in_packet(fetched[lane]), .out_packet(decoded[lane]),
                            .redirect(d1_redirect[lane]), .serialize_req());
         d2_stage u_rename_packet (
@@ -251,12 +256,22 @@ module scoreboard_core (
         .decode(decode_q), .retire(commit_trace), .source(rename_source),
         .checkpoint_ready, .branch_resolved, .resolved_id, .recovery, .head_slot
     );
-    scoreboard_queue #(.BROADCAST_PORTS(COMPLETION_SOURCES+2), .ISSUE_BYPASS(1)) u_scoreboard (
-        .clk, .rst, .flush(wb_redirect.valid), .recovery, .head_slot,
-        .push_count(dispatch_count), .push_packet(renamed), .push_capacity(iq_capacity),
-        .producers, .broadcast, .issue_packet(queued), .operands_ready(iq_ready),
-        .pop_count(issue_enqueue_count), .occupancy(iq_occupancy)
-    );
+    if (SPLIT_ISSUE_QUEUE) begin : g_split_iq
+        split_scoreboard_queue #(.BROADCAST_PORTS(COMPLETION_SOURCES+2)) u_scoreboard (
+            .clk, .rst, .flush(wb_redirect.valid), .recovery, .head_slot,
+            .push_memory(iq_push_memory),
+            .push_count(dispatch_count), .push_packet(renamed), .push_capacity(iq_capacity),
+            .producers, .broadcast, .issue_packet(queued), .operands_ready(iq_ready),
+            .pop_count(issue_enqueue_count), .occupancy(iq_occupancy)
+        );
+    end else begin : g_unified_iq
+        scoreboard_queue #(.BROADCAST_PORTS(COMPLETION_SOURCES+2), .ISSUE_BYPASS(1)) u_scoreboard (
+            .clk, .rst, .flush(wb_redirect.valid), .recovery, .head_slot,
+            .push_count(dispatch_count), .push_packet(renamed), .push_capacity(iq_capacity),
+            .producers, .broadcast, .issue_packet(queued), .operands_ready(iq_ready),
+            .pop_count(issue_enqueue_count), .occupancy(iq_occupancy)
+        );
+    end
 
     // IQ→ISS 只接纳已就绪年龄前缀；执行反压由两项寄存包保持完整数据和 ID。
     always_comb begin

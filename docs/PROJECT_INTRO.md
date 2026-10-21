@@ -1,6 +1,12 @@
 # 项目介绍
 
-> 写作约束：[skills/regulation.md](../../skills/regulation.md)。本文给项目目录、参数、环境、仿真和 FPGA 的当前状态，不把规划写成已实现。
+> 写作约束：[regulation.md](../../regulation.md)。本文给项目目录、参数、环境、仿真和 FPGA 的当前状态，不把规划写成已实现。
+
+P1.1a 的 LQ/SQ 控制与数据已拆分，实测源码 `core/p1-1a-split-lq-sq@a23b65c`。
+双宽完整仿真及 RV32 四次同镜像比较通过，标准 PDS 为 86.1721 MHz、85 MHz WNS
++0.160 ns、零未布通，详见 [双发射](understand/DUAL_ISSUE.md) 和
+[FPGA 适配](fpga/FPGA_ADAPTATION.md)。`core/p1-1b-rob32-split-iq` 正在验证
+ROB32、int8/mem4 IQ，仍按全局年龄顺序发射，尚未完成该检查点验收。
 
 ## 1. 项目是什么
 

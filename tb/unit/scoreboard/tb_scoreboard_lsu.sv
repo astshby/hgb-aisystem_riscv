@@ -163,10 +163,10 @@ module tb_scoreboard_lsu;
         #1; assert (issue_ready == 2 && mem_req_valid == 0)
             else $fatal(1, "full LQ blocked independent SQ capacity or MMIO authorization");
         idle(); clear_queue();
-        // ROB 跨尾部回绕后，slot 15 的 Store 比 slot 14 新，又比 slot 0 的 Load 老。
-        head_slot = RETIRE_IDX_W'(14);
-        enqueue(store(14,256,xlen_t'(32'h11223344),DBUS_BYTES'(15),MEM_WORD),
-                store(15,257,xlen_t'(32'h00005500),DBUS_BYTES'(2),MEM_BYTE),1);
+        // ROB 跨尾部回绕后，末槽 Store 比倒数第二槽新，又比 slot 0 的 Load 老。
+        head_slot = RETIRE_IDX_W'(RETIRE_ENTRIES-2);
+        enqueue(store(RETIRE_ENTRIES-2,256,xlen_t'(32'h11223344),DBUS_BYTES'(15),MEM_WORD),
+                store(RETIRE_ENTRIES-1,257,xlen_t'(32'h00005500),DBUS_BYTES'(2),MEM_BYTE),1);
         enqueue(load(0,256),'0); tick();
         #1; assert (complete_valid[0] && completion[0].result.gpr_data == xlen_t'(32'h11225544))
             else $fatal(1, "wrapped Store age forwarding");

@@ -32,8 +32,12 @@ P0 LSU 差分；RV32 四次 M0/M1 同镜像比较的周期、CRC 和全部统计
 同镜像入口为 `scripts/verilator/compare_coremark.py`，新镜像使用 GCC 11.4，
 M0/M1 为 2.633659/2.317931 CoreMark/MHz，不能与下文 GCC 16.1 历史镜像混算。
 DDR IP 已生成，32/32 DQ 元数据匹配；完整 SoC 的 228 项暂存输入已校验。
-Windows 物理可用/提交余量复查为 14.59/12.69 GiB，标准 PDS 综合已启动，
-P1.1a 仍待物理验证。
+P1.1a 标准 PDS 已完成：86.1721 MHz、85 MHz WNS +0.160 ns、TNS 0，12 类 STA
+零失败，57,149 条网络全部布通；物理为 40,181 LUT、32,188 FF、36 DRM、4 APM。
+最差路径仍经 Store 地址、转发和 IQ 到分支，20 级、11.135 ns；结果绑定源码 `a23b65c`，
+记录为 `logs/p1/p1-1a/pds-result.json`。85 MHz 为内部 STA，未上板。
+后续 `core/p1-1b-rob32-split-iq` 正在验证 ROB32 和 int8/mem4 IQ，仍按序发射；
+显式选择为 `RETIRE_ENTRIES=32 SPLIT_ISSUE_QUEUE=1`，P1.1b 尚未完成验收。
 以下 r15 数值为历史 P0 记录。
 
 新 P0 发布基线为 `publish/p0-r15`，实测 RTL 为 `dffb8a2`；原开发分支

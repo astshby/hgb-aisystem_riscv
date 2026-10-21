@@ -31,6 +31,12 @@
 `ifndef CORE_ISSUE_QUEUE_ENTRIES
 `define CORE_ISSUE_QUEUE_ENTRIES 8
 `endif
+`ifndef CORE_MEMORY_QUEUE_ENTRIES
+`define CORE_MEMORY_QUEUE_ENTRIES 4
+`endif
+`ifndef CORE_SPLIT_ISSUE_QUEUE
+`define CORE_SPLIT_ISSUE_QUEUE 0
+`endif
 `ifndef CORE_LOAD_QUEUE_ENTRIES
 `define CORE_LOAD_QUEUE_ENTRIES 4
 `endif
@@ -57,6 +63,10 @@ package core_config_pkg;
     localparam int unsigned FETCH_DATA_W = 32 * ISSUE_WIDTH;
     localparam int unsigned FETCH_QUEUE_DEPTH = 8;
     localparam int unsigned ISSUE_QUEUE_ENTRIES = `CORE_ISSUE_QUEUE_ENTRIES;
+    localparam int unsigned MEMORY_QUEUE_ENTRIES = `CORE_MEMORY_QUEUE_ENTRIES;
+    localparam bit SPLIT_ISSUE_QUEUE = `CORE_SPLIT_ISSUE_QUEUE;
+    localparam int unsigned SCHEDULER_ENTRIES = ISSUE_QUEUE_ENTRIES +
+        (SPLIT_ISSUE_QUEUE ? MEMORY_QUEUE_ENTRIES : 0);
     localparam int unsigned LOAD_QUEUE_ENTRIES = `CORE_LOAD_QUEUE_ENTRIES;
     localparam int unsigned STORE_QUEUE_ENTRIES = `CORE_STORE_QUEUE_ENTRIES;
     localparam int unsigned BRANCH_CHECKPOINTS = `CORE_BRANCH_CHECKPOINTS;
