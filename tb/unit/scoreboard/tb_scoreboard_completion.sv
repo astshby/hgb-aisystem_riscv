@@ -74,7 +74,8 @@ module tb_scoreboard_completion #(
                     #1; check_arbitration();
                 end
         @(negedge clk); source_valid = 0;
-        for (int cycle = 0; cycle < 100; cycle++) begin
+        // 80 拍注入结束后按实际训练队列深度排空，ROB32 不能沿用固定 20 拍窗口。
+        for (int cycle = 0; cycle < 80 + RETIRE_ENTRIES + 2; cycle++) begin
             incoming[0] = '0; incoming[1] = '0;
             if (cycle < 80) begin
                 incoming[0].valid = 1; incoming[0].pc = xlen_t'(serial * 4); serial++;
@@ -93,7 +94,8 @@ module tb_scoreboard_completion #(
             @(negedge clk);
         end
         assert (expected.size() == 0 && checked == serial - 1 && pair_pushes > 0 && full_cycles > 0)
-            else $fatal(1, "training coverage or draining incomplete");
+            else $fatal(1, "training coverage/drain remaining=%0d checked=%0d offered=%0d pair=%0d full=%0d",
+                        expected.size(), checked, serial-1, pair_pushes, full_cycles);
         $display("PASS tb_scoreboard_completion XLEN=%0d collision_sources=%0d arbitration=%0d training=%0d full_cycles=%0d",
                  XLEN, SOURCES, arbitration_checks, checked, full_cycles);
         $finish;
