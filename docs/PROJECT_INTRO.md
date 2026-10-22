@@ -18,7 +18,11 @@ P1.2 开发分支为 `core/p1-2-limited-integer-ooo`，开关 `LIMITED_INTEGER_O
 M0/M1 为 2.670535/2.378539 CoreMark/MHz，较重建 P0 提高 1.4002%/2.6147%。
 P1.3 开发分支为 `core/p1-3-iq-forward-timing`。已编写并行年龄序位选择，以及全部
 旁路、分支屏蔽、全部 LSU 捕获、仅 Store 提示捕获四种模式；分配捕获在分流前共享。
-四模式双宽定向各 17 PASS/0 SKIP，Core 均为 492/510 拍，完整测量待完成。
+四模式双宽定向各 17 PASS/0 SKIP，Core 均为 492/510 拍，新增统计计数器双宽各 1 PASS、
+解析器 8 PASS；新双宽 P0 LSU 差分各 5 PASS/0 SKIP。`ea3fb0a` 五组、二十次固定镜像
+比较通过，选模式 3 + Tournament/RAS，M0/M1 为 2.933400/2.566781/MHz，较同镜像重建
+P0 提高 11.3812%/10.7359%。配置入口为 `scripts/verilator/p1_core_config.sh`，完整回归、
+八次重放和最终 PDS 待完成，保留 ALU/Load/DSP 8/10/10 级。
 P1.1b 中间布线第 13 轮仍有 24,179/69,295 条未布通，已主动终止，没有最终时序报告。
 
 ## 1. 项目是什么
@@ -216,7 +220,7 @@ Core：
 
 - RV32/RV64 I/M/Zicsr，scoreboard 后端支持顺序前缀双发射、独立完成和按序双退休。
 - DSP/Booth-Wallace/移位乘法，SRT/移位除法。
-- ROB16、RAT 标签重命名、IQ8；精确异常、机器中断、CSR。
+- P0 为 ROB16/IQ8；P1 配置为 ROB32/int8/mem4、有限整数乱序；RAT、精确异常、机器中断、CSR。
 - 分支预测、BTB、GShare/Local/chooser、RAS。
 - 双 ALU/AGU、LQ4/SQ4、两个带标签数据口、Store 到 Load 的逐字节转发。
 - Store/MMIO 只在队头发起，D$ 同 bank 冲突串行，共享 DDR 填充/写回带宽。
@@ -234,14 +238,13 @@ AI：
 
 - 目标接口是文本输入、模型推理、文本输出。
 - 加速器尚未交付；DMA 和 MMIO 接口先准备。
-- 当前先完成顺序双发射 Core 的联合性能验收；C 扩展和乱序发射暂缓，AI 接口单独规划。
+- 当前完成 P1 有限整数乱序 Core 的联合验收；C 扩展暂缓，AI 接口单独规划。
 
 ## 8. 未来
 
-1. 按 CMP、ISS 完成 8–10 级，每级测 M0/M1 和标准 PDS；CMT 仅在合并已有边界后评估；
-   RV32 完整 SoC 达到 85 MHz 且两个指标通过后，再冻结新 P0。
-2. 按工作区 `OPTIMIZATION_PLAN.md` 的 P1 至 P6 分阶段优化，每轮复测
-   CoreMark/MHz 与 Fmax；保持同域，整体提频受阻后再评估多域时钟。
+1. P0 已冻结，完成 P1 的最终双宽回归、八次重放和完整 SoC 85 MHz 标准 PDS。
+2. 按工作区 `OPTIMIZATION_PLAN.md` 的 P1 Core、P2 Memory/SoC、P3 Clock/CDC 推进，
+   每轮复测 CoreMark/MHz 与 Fmax；本轮保持 ALU/Load/DSP 8/10/10 级，不增加 CMT。
 3. 补 DDR 执行、外设背景负载和资源效率成绩，保留 M0/M1 分项。
 4. 恢复 RT-Thread 依赖并完成真实 DDR/UART/ILA、十秒 CoreMark、功耗和 AI 接口。
 

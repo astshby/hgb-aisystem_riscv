@@ -49,9 +49,13 @@ Core 各观察到 30 次越过阻塞整数项。
 `5963d72` 完整回归为 RV32 229 PASS/5 SKIP、RV64 265 PASS/5 SKIP，四次同镜像比较通过。
 M0/M1 为 2.670535/2.378539 CoreMark/MHz，较重建 P0 提高 1.4002%/2.6147%；
 参数、命令、源码及镜像哈希为 `logs/p1/p1-2-precise/regression/summary.json`。
-P1.3 开发分支为 `core/p1-3-iq-forward-timing`，正在比较并行年龄选择及四种
-`SCHEDULER_FORWARD_MODE`，四模式双宽定向各 17 PASS/0 SKIP，完整测量待完成；
-模式说明见 [双发射](docs/understand/DUAL_ISSUE.md)。P1.1b 中间布线严重拥塞，已主动终止，未记作时序通过。
+P1.3 在 `core/p1-3-iq-forward-timing` 完成五组、二十次固定镜像比较，实测源码 `ea3fb0a`。
+选择模式 3 + Tournament/RAS，M0/M1 为 2.933400/2.566781 CoreMark/MHz，
+较同镜像重建 P0 提高 11.3812%/10.7359%。四模式双宽定向各 17 PASS/0 SKIP，
+新增统计计数器各 1 PASS/0 SKIP、解析器 8 PASS；双宽 P0 LSU 差分各 5 PASS/0 SKIP。
+配置入口为 `source scripts/verilator/p1_core_config.sh`，随后调用原有 make/测试入口。
+完整回归、八次重放及最终标准 PDS 待完成；模式说明见 [双发射](docs/understand/DUAL_ISSUE.md)。
+P1.1b 中间布线严重拥塞，已主动终止，未记作时序通过。
 以下 r15 数值为历史 P0 记录。
 
 新 P0 发布基线为 `publish/p0-r15`，实测 RTL 为 `dffb8a2`；原开发分支

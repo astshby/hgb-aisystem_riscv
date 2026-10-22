@@ -12,6 +12,15 @@ P1.1a 实测源码为 `core/p1-1a-split-lq-sq@a23b65c`，LQ/SQ 拆分后保持 R
 `$PDS_WORK_ROOT/work/p1-1a-lsq-split-20261022/soc-rv32`。85 MHz 为内部 STA，
 IP 实际配置仍为 125 MHz，35/73 项 I/O 延迟缺失，未上板。
 
+P1.1b `f547da3` 原生综合为 46,184 LUT、38,941 FF、36 DRM、4 APM、零 latch，
+229 项输入及双 TCM 初值通过。标准布局完成，place 内存池峰值 14,879.289 MB；
+布线第 13 轮仍有 24,179/69,295 条未布通、154,582 项 overused，主动取消中间运行。
+只停止已核对身份和项目路径的自有 route，父 PDS 随后退出；没有最终 Fmax/WNS。
+工程和原始报告保留在 `$PDS_WORK_ROOT/work/p1-1b-rob32-split-iq-20261022/`，
+取消记录为 `logs/p1/p1-1b-drain/pds-cancelled.json`，`Flow-0189/-1` 随取消出现。
+P1.3 选择 ROB32/int8/mem4、有限整数乱序、转发模式 3、Tournament/RAS，完整回归后
+在新目录运行相同 85 MHz 约束的标准 PDS；不能将 P1.1a 的物理结果代替最终 P1.3。
+
 ## 1. 目标
 
 - RV32 统一承担性能优化与完整 SoC 标准 PDS ≥85 MHz 验收；RV64 只做功能/ISA/SoC 仿真，不设性能门槛、不启动 P&R。
