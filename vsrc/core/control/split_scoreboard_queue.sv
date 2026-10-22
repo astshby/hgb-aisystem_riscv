@@ -1,11 +1,12 @@
 // Module: split_scoreboard_queue
-// Description: Independent integer/memory operand banks merged into a globally in-order issue prefix.
+// Description: Independent operand banks with ordered or limited oldest-ready integer issue.
 module split_scoreboard_queue #(
     parameter int unsigned INTEGER_DEPTH = core_config_pkg::ISSUE_QUEUE_ENTRIES,
     parameter int unsigned MEMORY_DEPTH = core_config_pkg::MEMORY_QUEUE_ENTRIES,
-    parameter int unsigned BROADCAST_PORTS = 2
+    parameter int unsigned BROADCAST_PORTS = 2,
+    parameter bit LIMITED_OOO = core_config_pkg::LIMITED_INTEGER_OOO
 ) (
-    input logic clk, rst, flush,
+    input logic clk, rst, flush, mdu_available,
     input scoreboard_pkg::branch_recovery_t recovery,
     input logic [core_config_pkg::RETIRE_IDX_W-1:0] head_slot,
     input logic [1:0] push_count,
@@ -29,13 +30,26 @@ module split_scoreboard_queue #(
     logic selected_memory [2];
     integer demand [2], next_index [2];
     integer bank, index;
+    logic serial_pending;
+    retire_id_t serial_id;
 
-    scoreboard_queue #(.DEPTH(INTEGER_DEPTH), .BROADCAST_PORTS(BROADCAST_PORTS), .ISSUE_BYPASS(1)) u_integer (
-        .clk, .rst, .flush, .recovery, .head_slot,
-        .push_count(bank_push_count[0]), .push_packet(bank_push[0]), .push_capacity(bank_capacity[0]),
-        .producers, .broadcast, .issue_packet(bank_issue[0]), .operands_ready(bank_ready[0]),
-        .pop_count(bank_pop_count[0]), .occupancy(integer_occupancy)
-    );
+    if (LIMITED_OOO) begin : g_ready_integer
+        integer_issue_queue #(.DEPTH(INTEGER_DEPTH), .BROADCAST_PORTS(BROADCAST_PORTS)) u_integer (
+            .clk, .rst, .flush, .recovery, .head_slot, .mdu_available,
+            .push_count(bank_push_count[0]), .push_packet(bank_push[0]), .push_capacity(bank_capacity[0]),
+            .producers, .broadcast, .issue_packet(bank_issue[0]), .operands_ready(bank_ready[0]),
+            .pop_count(bank_pop_count[0]), .occupancy(integer_occupancy), .serial_pending, .serial_id
+        );
+    end else begin : g_ordered_integer
+        assign serial_pending = 0;
+        assign serial_id = '0;
+        scoreboard_queue #(.DEPTH(INTEGER_DEPTH), .BROADCAST_PORTS(BROADCAST_PORTS), .ISSUE_BYPASS(1)) u_integer (
+            .clk, .rst, .flush, .recovery, .head_slot,
+            .push_count(bank_push_count[0]), .push_packet(bank_push[0]), .push_capacity(bank_capacity[0]),
+            .producers, .broadcast, .issue_packet(bank_issue[0]), .operands_ready(bank_ready[0]),
+            .pop_count(bank_pop_count[0]), .occupancy(integer_occupancy)
+        );
+    end
     scoreboard_queue #(.DEPTH(MEMORY_DEPTH), .BROADCAST_PORTS(BROADCAST_PORTS), .ISSUE_BYPASS(1)) u_memory (
         .clk, .rst, .flush, .recovery, .head_slot,
         .push_count(bank_push_count[1]), .push_packet(bank_push[1]), .push_capacity(bank_capacity[1]),
@@ -72,7 +86,8 @@ module split_scoreboard_queue #(
         end
     end
 
-    // 两个队列各保留年龄顺序；先合并最老两项，再检查就绪，不能跳过阻塞头项。
+    // 按年龄合并两类候选。按序模式保留阻塞头项；局部乱序模式只跳过整数等待项，
+    // 内存仍只消费 FIFO 的连续就绪前缀，并检查尚未接纳的串行屏障。
     always_comb begin
         next_index[0] = 0;
         next_index[1] = 0;
@@ -82,9 +97,13 @@ module split_scoreboard_queue #(
         for (int lane = 0; lane < 2; lane++) begin
             selected_memory[lane] = 0;
             issue_packet[lane] = '0;
-            if (bank_issue[0][next_index[0]].valid || bank_issue[1][next_index[1]].valid) begin
+            if (bank_issue[0][next_index[0]].valid || (bank_issue[1][next_index[1]].valid &&
+                (!LIMITED_OOO || (bank_ready[1][next_index[1]] &&
+                 (!serial_pending || !younger_than(bank_issue[1][next_index[1]].retire_id, serial_id, head_slot)))))) begin
                 bank = !bank_issue[0][next_index[0]].valid ||
-                    (bank_issue[1][next_index[1]].valid && younger_than(
+                    (bank_issue[1][next_index[1]].valid &&
+                     (!LIMITED_OOO || (bank_ready[1][next_index[1]] &&
+                      (!serial_pending || !younger_than(bank_issue[1][next_index[1]].retire_id, serial_id, head_slot)))) && younger_than(
                         bank_issue[0][next_index[0]].retire_id,
                         bank_issue[1][next_index[1]].retire_id, head_slot)) ? 1 : 0;
                 index = next_index[bank];

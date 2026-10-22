@@ -37,6 +37,9 @@
 `ifndef CORE_SPLIT_ISSUE_QUEUE
 `define CORE_SPLIT_ISSUE_QUEUE 0
 `endif
+`ifndef CORE_LIMITED_INTEGER_OOO
+`define CORE_LIMITED_INTEGER_OOO 0
+`endif
 `ifndef CORE_LOAD_QUEUE_ENTRIES
 `define CORE_LOAD_QUEUE_ENTRIES 4
 `endif
@@ -65,6 +68,7 @@ package core_config_pkg;
     localparam int unsigned ISSUE_QUEUE_ENTRIES = `CORE_ISSUE_QUEUE_ENTRIES;
     localparam int unsigned MEMORY_QUEUE_ENTRIES = `CORE_MEMORY_QUEUE_ENTRIES;
     localparam bit SPLIT_ISSUE_QUEUE = `CORE_SPLIT_ISSUE_QUEUE;
+    localparam bit LIMITED_INTEGER_OOO = `CORE_LIMITED_INTEGER_OOO;
     localparam int unsigned SCHEDULER_ENTRIES = ISSUE_QUEUE_ENTRIES +
         (SPLIT_ISSUE_QUEUE ? MEMORY_QUEUE_ENTRIES : 0);
     localparam int unsigned LOAD_QUEUE_ENTRIES = `CORE_LOAD_QUEUE_ENTRIES;

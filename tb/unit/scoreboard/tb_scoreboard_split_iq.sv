@@ -11,6 +11,7 @@ module tb_scoreboard_split_iq #(
     import pipeline_pkg::*;
     import scoreboard_pkg::*;
     logic clk = 0, rst = 1, flush = 0;
+    logic mdu_available = 1;
     branch_recovery_t recovery;
     logic [RETIRE_IDX_W-1:0] head_slot;
     logic [1:0] push_count, push_capacity, pop_count, operands_ready;
@@ -19,7 +20,7 @@ module tb_scoreboard_split_iq #(
     retire_gpr_entry_t producers [RETIRE_ENTRIES];
     retire_gpr_forward_t broadcast [2];
     logic [$clog2(INTEGER_DEPTH+MEMORY_DEPTH+1)-1:0] occupancy;
-    split_scoreboard_queue #(.INTEGER_DEPTH(INTEGER_DEPTH), .MEMORY_DEPTH(MEMORY_DEPTH)) dut (.*);
+    split_scoreboard_queue #(.INTEGER_DEPTH(INTEGER_DEPTH), .MEMORY_DEPTH(MEMORY_DEPTH), .LIMITED_OOO(0)) dut (.*);
     always #5 clk = ~clk;
     function automatic retire_id_t tag(input int age, input int generation = 1);
         return '{slot:RETIRE_IDX_W'(int'(head_slot) + age), generation:RETIRE_GEN_W'(generation)};

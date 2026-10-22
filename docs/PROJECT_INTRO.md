@@ -9,6 +9,9 @@ P1.1a 的 LQ/SQ 控制与数据已拆分，实测源码 `core/p1-1a-split-lq-sq@
 ROB32、int8/mem4 IQ，按全局年龄顺序发射。完整回归 RV32 228 PASS/5 SKIP、
 RV64 264 PASS/5 SKIP；四次同镜像比较通过，标准 PDS 尚未完成。
 M0/M1 为 2.635803/2.335916 CoreMark/MHz，较本次 GCC 11.4 重建 P0 提高 0.0814%/0.7759%。
+P1.2 开发分支为 `core/p1-2-limited-integer-ooo`，开关 `LIMITED_INTEGER_OOO=1`。
+整数队列选择最老就绪项，访存保持 FIFO 和串行屏障，精确退休沿用原 ROB。
+双宽各三项定向通过，Core 各观察到 30 次越过阻塞整数项；完整回归待完成。
 
 ## 1. 项目是什么
 

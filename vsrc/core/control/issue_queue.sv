@@ -1,5 +1,5 @@
 // Module: issue_queue
-// Description: Registers two ready instructions before execution and retains an in-order prefix.
+// Description: Registers two selected ready instructions and retains their admission order under backpressure.
 module issue_queue (
     input logic clk, rst, flush,
     input scoreboard_pkg::branch_recovery_t recovery,

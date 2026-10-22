@@ -4,7 +4,7 @@ RV32 优先的 RISC-V Core/SoC 协作仓库。目标是 RT-Thread 上的文本�
 推理、文本输出；RV64 跟随共享架构验证。近期不把 Linux、MMU、F/V、图像链路作为
 交付前提。
 
-`CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16` 选择正在验收的新 P0：
+`CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16` 选择冻结 P0：
 RAT 绑定 ROB 标签、IQ8 顺序双发射、两个完整 ALU、共享分支/MDU、LQ4/SQ4 双 AGU，
 两个完成口与按序双退休。原生 IF64 和双数据口已接入 SoC；MMIO/Store 受队头许可。
 默认 `CORE_BACKEND=legacy` 保留旧 IF→D1→D2→EX→MEM→WB 控制组。
@@ -40,6 +40,10 @@ P1.1a 标准 PDS 已完成：86.1721 MHz、85 MHz WNS +0.160 ns、TNS 0，12 类
 显式选择为 `RETIRE_ENTRIES=32 SPLIT_ISSUE_QUEUE=1`。完整回归为 RV32 228 PASS/5 SKIP、
 RV64 264 PASS/5 SKIP，M0/M1 同镜像 performance 为 2.635803/2.335916 CoreMark/MHz。
 标准 PDS 尚未完成，原始命令和逐项哈希在 `logs/p1/p1-1b-drain/regression/summary.json`。
+P1.2 在 `core/p1-2-limited-integer-ooo` 开发。增加 `LIMITED_INTEGER_OOO=1` 时，
+整数 IQ 按完整标签保存操作数、选择最老就绪项；访存保持 FIFO，CSR/系统指令保留屏障。
+忙 MDU 留在 IQ，独立 ALU 可继续推进；ROB 仍按序退休。双宽各三项定向通过，
+Core 各观察到 30 次越过阻塞整数项，精确事件八场景通过；完整回归尚未完成。
 以下 r15 数值为历史 P0 记录。
 
 新 P0 发布基线为 `publish/p0-r15`，实测 RTL 为 `dffb8a2`；原开发分支

@@ -1,5 +1,5 @@
 // Module: scoreboard_core
-// Description: In-order dual-issue backend with ROB-tag renaming, independent completion and precise retirement.
+// Description: Dual-issue backend with tagged scheduling, independent completion and precise retirement.
 module scoreboard_core (
     input logic clk, rst,
     input logic irq_software, irq_timer, irq_external,
@@ -36,6 +36,7 @@ module scoreboard_core (
     d2_ex_t renamed [2], queued [2], scheduled [2];
     logic [1:0] issue_enqueue_count, issue_capacity, issue_occupancy;
     logic issue_busy;
+    logic iq_mdu_available;
     branch_result_t queued_branch [2], scheduled_branch [2];
     logic input_branch_lane, input_branch_taken;
     xlen_t input_branch_target;
@@ -258,7 +259,7 @@ module scoreboard_core (
     );
     if (SPLIT_ISSUE_QUEUE) begin : g_split_iq
         split_scoreboard_queue #(.BROADCAST_PORTS(COMPLETION_SOURCES+2)) u_scoreboard (
-            .clk, .rst, .flush(wb_redirect.valid), .recovery, .head_slot,
+            .clk, .rst, .flush(wb_redirect.valid), .recovery, .head_slot, .mdu_available(iq_mdu_available),
             .push_memory(iq_push_memory),
             .push_count(dispatch_count), .push_packet(renamed), .push_capacity(iq_capacity),
             .producers, .broadcast, .issue_packet(queued), .operands_ready(iq_ready),
@@ -273,7 +274,11 @@ module scoreboard_core (
         );
     end
 
-    // IQ→ISS 只接纳已就绪年龄前缀；执行反压由两项寄存包保持完整数据和 ID。
+    // 忙 MDU 留在整数 IQ；ISS 中已有 MDU 时不再接纳另一条，独立 ALU 仍可越过。
+    assign iq_mdu_available = mdu_req_ready &&
+        !(scheduled[0].valid && schedule_class(scheduled[0]) == SCHED_MDU) &&
+        !(scheduled[1].valid && schedule_class(scheduled[1]) == SCHED_MDU);
+    // IQ→ISS 接纳所选就绪前缀；执行反压由两项寄存包保持完整数据和 ID。
     always_comb begin
         issue_enqueue_count = 0;
         if (iq_ready[0] && issue_capacity != 0) begin
@@ -537,6 +542,7 @@ module scoreboard_core (
 `ifndef SYNTHESIS
     initial begin
         assert (ISSUE_WIDTH == 2) else $fatal(1, "scoreboard backend requires ISSUE_WIDTH=2");
+        assert (!LIMITED_INTEGER_OOO || SPLIT_ISSUE_QUEUE) else $fatal(1, "limited issue requires split IQ");
     end
     always_ff @(posedge clk) if (!rst) begin
         assert (!issue_fire[1] || issue_fire[0]) else $fatal(1, "non-prefix issue");

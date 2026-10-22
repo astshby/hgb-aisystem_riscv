@@ -79,6 +79,7 @@ vsrc/core/control/pipeline_ctrl.sv
 vsrc/core/control/issue_pairing.sv
 vsrc/core/control/rename_table.sv
 vsrc/core/control/scoreboard_queue.sv
+vsrc/core/control/integer_issue_queue.sv
 vsrc/core/control/split_scoreboard_queue.sv
 vsrc/core/control/issue_queue.sv
 vsrc/core/control/serialize_controller.sv

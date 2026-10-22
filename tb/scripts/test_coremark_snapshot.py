@@ -32,7 +32,7 @@ class SnapshotTest(unittest.TestCase):
             if key.startswith(("COREMARK_", "SOC_")) or key in (
                     "SOC", "STUB_BAD", "PREDICTOR_MODE", "RAS_ENABLE", "RETIRE_ENTRIES",
                     "ISSUE_WIDTH", "CORE_BACKEND", "SPLIT_ISSUE_QUEUE",
-                    "INTEGER_QUEUE_ENTRIES", "MEMORY_QUEUE_ENTRIES"):
+                    "INTEGER_QUEUE_ENTRIES", "MEMORY_QUEUE_ENTRIES", "LIMITED_INTEGER_OOO"):
                 self.env.pop(key)
         self.env.update(MUL_IMPL="0", DIV_IMPL="1", RISCV_TOOL_ROOT=str(self.tools))
         self.executable(self.tools / "riscv64-unknown-elf-nm", "print('00004000 B tohost\\n00004008 B sim_console')\n")
@@ -260,7 +260,8 @@ print(text, end='')
                         "issue_width": None, "issue_width_parameter_supported": False,
                         "split_issue_queue": None, "split_issue_queue_parameter_supported": False,
                         "integer_queue_entries": None, "integer_queue_entries_parameter_supported": False,
-                        "memory_queue_entries": None, "memory_queue_entries_parameter_supported": False})
+                        "memory_queue_entries": None, "memory_queue_entries_parameter_supported": False,
+                        "limited_integer_ooo": None, "limited_integer_ooo_parameter_supported": False})
                     self.assertNotIn("local_tcm_enable", report["config"])
                     self.assertEqual((self.root / "frozen/manifest.json").read_bytes(), original)
                 shutil.rmtree(self.root / "frozen")
@@ -388,6 +389,18 @@ print(text, end='')
             self.assertEqual(report["rtl_parameters"][key], value)
         (self.root / "rtl-build-was-called").unlink()
         self.replay(explicit=False, success=False, MEMORY_QUEUE_ENTRIES="2")
+        self.assertFalse((self.root / "rtl-build-was-called").exists())
+
+    def test_limited_issue_parameter_is_reported_without_changing_images(self):
+        self.freeze()
+        original = (self.root / "frozen/manifest.json").read_bytes()
+        self.core_helper({"core_limited_integer_ooo": "1"})
+        self.replay(explicit=False, LIMITED_INTEGER_OOO="1")
+        report = json.loads(next((self.root / "logs").glob('*/result.json')).read_text())
+        self.assertEqual(report["rtl_parameters"]["limited_integer_ooo"], 1)
+        self.assertEqual((self.root / "frozen/manifest.json").read_bytes(), original)
+        (self.root / "rtl-build-was-called").unlink()
+        self.replay(explicit=False, success=False, LIMITED_INTEGER_OOO="0")
         self.assertFalse((self.root / "rtl-build-was-called").exists())
 
     def test_unreported_core_parameter_is_not_guessed_from_environment(self):

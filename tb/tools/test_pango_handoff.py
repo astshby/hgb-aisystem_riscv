@@ -95,7 +95,7 @@ class HandoffTests(unittest.TestCase):
                     output, _ = self.stage(width=width, local=local, backend="scoreboard")
                     manifest = json.loads((output / "manifest.json").read_text())
                     configuration = verify_staged_manifest(output, manifest)
-                    self.assertEqual(manifest["schema_version"], 5)
+                    self.assertEqual(manifest["schema_version"], 6)
                     self.assertEqual(manifest["memory_guard_version"], 1)
                     for name in MEMORY_SCRIPTS:
                         self.assertIn(name, manifest["files"])
@@ -103,6 +103,7 @@ class HandoffTests(unittest.TestCase):
                     self.assertEqual(configuration["core_retire_entries"], 32)
                     self.assertEqual(configuration["core_split_issue_queue"], 1)
                     self.assertEqual(configuration["core_memory_queue_entries"], 4)
+                    self.assertEqual(configuration["core_limited_integer_ooo"], 0)
                     self.assertEqual(configuration["data_ports"], 2)
                     self.assertEqual(configuration["slow_presence"], "0x7ff3")
                     self.assertIn("CORE_SCOREBOARD=1", (output / "compile.tcl").read_text())
@@ -175,6 +176,29 @@ class HandoffTests(unittest.TestCase):
         checked = verify_staged_manifest(output, old)
         self.assertEqual(checked["core_retire_entries"], 16)
         self.assertNotIn("core_split_issue_queue", checked)
+
+    def test_limited_integer_issue_and_schema5_compatibility(self):
+        output, _ = self.stage(backend="scoreboard", extra=("--limited-integer-ooo", "1"))
+        manifest = json.loads((output / "manifest.json").read_text())
+        self.assertEqual(verify_staged_manifest(output, manifest)["core_limited_integer_ooo"], 1)
+        for value in (None, True, 2):
+            changed = copy.deepcopy(manifest)
+            if value is None:
+                del changed["core_limited_integer_ooo"]
+            else:
+                changed["core_limited_integer_ooo"] = value
+            with self.assertRaisesRegex(ValueError, "scheduler configuration"):
+                verify_staged_manifest(output, changed)
+        changed = dict(manifest, core_split_issue_queue=0)
+        with self.assertRaisesRegex(ValueError, "requires split"):
+            verify_staged_manifest(output, changed)
+        old = copy.deepcopy(manifest)
+        old["schema_version"] = 5
+        del old["core_limited_integer_ooo"]
+        path = output / "compile.tcl"
+        path.write_text(path.read_text().replace(" CORE_LIMITED_INTEGER_OOO=1", ""))
+        old["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        self.assertNotIn("core_limited_integer_ooo", verify_staged_manifest(output, old))
 
     def verify_cli(self, output, staging=True, success=True):
         command = [sys.executable, "-B", str(REPO / "scripts/pango/verify_synthesis.py"), str(output)]
@@ -283,7 +307,7 @@ class HandoffTests(unittest.TestCase):
             del changed["files"][name]
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "not covered by manifest"):
                 verify_staged_manifest(output, changed)
-        for version in (True, 0, 6):
+        for version in (True, 0, 7):
             changed = dict(manifest, schema_version=version)
             with self.subTest(version=version), self.assertRaisesRegex(ValueError, "unsupported staging"):
                 verify_staged_manifest(output, changed)
