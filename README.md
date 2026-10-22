@@ -4,10 +4,12 @@ RV32 优先的 RISC-V Core/SoC 协作仓库。目标是 RT-Thread 上的文本�
 推理、文本输出；RV64 跟随共享架构验证。近期不把 Linux、MMU、F/V、图像链路作为
 交付前提。
 
-`CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16` 选择冻结 P0：
+关闭 P1 开关时，`CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16` 选择冻结 P0：
 RAT 绑定 ROB 标签、IQ8 顺序双发射、两个完整 ALU、共享分支/MDU、LQ4/SQ4 双 AGU，
 两个完成口与按序双退休。原生 IF64 和双数据口已接入 SoC；MMIO/Store 受队头许可。
 默认 `CORE_BACKEND=legacy` 保留旧 IF→D1→D2→EX→MEM→WB 控制组。
+P1 使用 `source scripts/verilator/p1_core_config.sh`，选择 ROB32、int8/mem4、有限整数
+乱序和按序双退休；预测器、转发策略及完整参数由该配置入口固定。
 
 ## 当前能力
 
@@ -54,7 +56,11 @@ P1.3 在 `core/p1-3-iq-forward-timing` 完成五组、二十次固定镜像比�
 较同镜像重建 P0 提高 11.3812%/10.7359%。四模式双宽定向各 17 PASS/0 SKIP，
 新增统计计数器各 1 PASS/0 SKIP、解析器 8 PASS；双宽 P0 LSU 差分各 5 PASS/0 SKIP。
 配置入口为 `source scripts/verilator/p1_core_config.sh`，随后调用原有 make/测试入口。
-完整回归、八次重放及最终标准 PDS 待完成；模式说明见 [双发射](docs/understand/DUAL_ISSUE.md)。
+`8c072c0` 最终回归已完成：RV32 237 PASS/4 SKIP、RV64 269 PASS/4 SKIP，RV32 包含八次
+固定镜像重放。两轮 CRC、ROI/TB、新旧统计和镜像哈希逐项相同，并与选定候选一致。
+最终综合通过，57,437 LUT、41,497 FF、零 latch，双 TCM 初值匹配。首轮标准 place
+在 20,193 MB 内存池峰值时分配失败，尚无最终 STA；已准备同源综合快照的新目录重试。
+模式说明见 [双发射](docs/understand/DUAL_ISSUE.md)。
 P1.1b 中间布线严重拥塞，已主动终止，未记作时序通过。
 以下 r15 数值为历史 P0 记录。
 

@@ -18,8 +18,20 @@ P1.1b `f547da3` 原生综合为 46,184 LUT、38,941 FF、36 DRM、4 APM、零 la
 只停止已核对身份和项目路径的自有 route，父 PDS 随后退出；没有最终 Fmax/WNS。
 工程和原始报告保留在 `$PDS_WORK_ROOT/work/p1-1b-rob32-split-iq-20261022/`，
 取消记录为 `logs/p1/p1-1b-drain/pds-cancelled.json`，`Flow-0189/-1` 随取消出现。
-P1.3 选择 ROB32/int8/mem4、有限整数乱序、转发模式 3、Tournament/RAS，完整回归后
-在新目录运行相同 85 MHz 约束的标准 PDS；不能将 P1.1a 的物理结果代替最终 P1.3。
+P1.3 选择 ROB32/int8/mem4、有限整数乱序、转发模式 3、Tournament/RAS。
+`8c072c0` 完整回归为 RV32 237 PASS/4 SKIP、RV64 269 PASS/4 SKIP，八次 RV32 固定镜像
+重放全部逐项一致。最终工程为 `$PDS_WORK_ROOT/work/p1-3-store-forward-tournament-20261022/soc-rv32`，
+230 项输入哈希、216 个 HDL 及全部参数通过，全部 FDC 与 P1.1a 逐字节相同，未修改 false path。
+综合入口物理可用/提交余量为 13.707/6.914 GiB，最终综合为 57,437 LUT、41,497 FF、
+零 latch、36 DRM、4 APM、77 IO，230 项输入和双 TCM 各 64 KiB 初值全部匹配。
+首轮标准实现入口为 17.859/20.725 GiB，place 入口为 17.314/20.179 GiB。标准 place
+在 EP_DL 阶段申请 51,145,552 字节失败，耗时 10 分 15 秒、内存池峰值 20,193 MB；
+没有进入 route，没有最终 Fmax/WNS，失败收据为 `logs/p1/p1-3-final/pds-place-failed.json`。
+原工程及全部原始报告保留，未主动取消。已从综合完成快照复制到全新目录
+`$PDS_WORK_ROOT/work/p1-3-memory-retry-20261022/soc-rv32`，283 个文件哈希一致，
+230 项输入及双 TCM 初值复查通过，未重编 RTL 或改约束。
+重试启动前额外要求物理至少 16 GiB、提交余量至少 24 GiB，标准各阶段仍检查双 6 GiB。
+不能将 P1.1a 的物理结果代替最终 P1.3。
 
 ## 1. 目标
 

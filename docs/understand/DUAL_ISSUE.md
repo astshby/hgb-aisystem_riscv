@@ -81,7 +81,16 @@ Store 提示仍在同口合法返回有效时关闭；请求、取消、响应�
 新 IQ 统计使用完整生产者标签区分 RAW 来源，计数可重叠；模式 0 的 M0/M1 全程
 MDU 资源等待只有 741/742 拍，Load RAW 为 11,140,475/14,601,178 拍。IQ 无候选
 不等于 Core 无发射，访存 bank 同拍仍可能工作；不将这些计数与旧 `no_issue` 分类相加。
-本轮保留 ALU/MDU 级数。完整回归、八次重放和最终 PDS 待完成。
+本轮保留 ALU/MDU 级数。`8c072c0` 最终回归为 RV32 237 PASS/4 SKIP、
+RV64 269 PASS/4 SKIP，RV32 包含八次固定镜像重放。两轮的 CRC、ROI/TB、新旧统计和
+镜像哈希逐项一致，也与选定候选一致；原始日志和实际仿真器已封存。
+结果为 `logs/p1/p1-3-final/regression/summary.json` 和 `replay-audit.json`。
+另外双宽各五项 LSU 差分通过，RTL/TB 与最终提交逐文件相同。
+最终原生工程包含 230 项已校验输入、216 个 HDL，全部 FDC 与已通过 P1.1a 的版本逐字节
+相同，没有修改 false path。综合为 57,437 LUT、41,497 FF、零 latch、36 DRM、4 APM，
+230 项输入及 I/D-TCM 各 64 KiB 初值匹配。首轮标准 place 在 20,193 MB 内存池峰值
+时申请 51,145,552 字节失败，没有布线或最终 STA。从综合完成快照复制到全新目录，
+283 个文件哈希一致，230 项输入和双 TCM 再次通过；待提交余量达到 24 GiB 后重试。
 P1.1b 中间工程标准布局完成，布线第 13 轮仍有 24,179/69,295 条未布通，已主动终止并
 保留全部日志，没有最终 Fmax/WNS。记录为 `logs/p1/p1-1b-drain/pds-cancelled.json`。
 以下 r15 数据保持其历史归属。
@@ -94,9 +103,9 @@ P1.1b 中间工程标准布局完成，布线第 13 轮仍有 24,179/69,295 条�
 
 ## 1. 流水与状态所有权
 
-主配置为 `CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16 MUL_IMPL=0 DIV_IMPL=1`，
+P0 冻结配置为 `CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16 MUL_IMPL=0 DIV_IMPL=1`，
 IQ8、LQ4/SQ4、checkpoint4、p0/r0。`CORE_BACKEND=legacy` 保留原控制组。
-当前开发分支 `core/pipe-lsu-forward-format` 基于完成预选测量文档检查点 `57ca4d2`。
+r15 开发分支 `core/pipe-lsu-forward-format` 基于完成预选测量文档检查点 `57ca4d2`。
 已将转发值按 Load 槽提前格式化，再按原选择向量送两个输出；提示有效与载荷分离，
 保留全部资格/取消规则和请求/完成时点。双宽 LSQ/Core/events 共 10 PASS，新增
 双口不同偏移/类型及旧错误响应同拍的用例。`dffb8a2` 完整测量已完成，RV32

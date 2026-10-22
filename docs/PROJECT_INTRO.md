@@ -21,9 +21,13 @@ P1.3 开发分支为 `core/p1-3-iq-forward-timing`。已编写并行年龄序位
 四模式双宽定向各 17 PASS/0 SKIP，Core 均为 492/510 拍，新增统计计数器双宽各 1 PASS、
 解析器 8 PASS；新双宽 P0 LSU 差分各 5 PASS/0 SKIP。`ea3fb0a` 五组、二十次固定镜像
 比较通过，选模式 3 + Tournament/RAS，M0/M1 为 2.933400/2.566781/MHz，较同镜像重建
-P0 提高 11.3812%/10.7359%。配置入口为 `scripts/verilator/p1_core_config.sh`，完整回归、
-八次重放和最终 PDS 待完成，保留 ALU/Load/DSP 8/10/10 级。
+P0 提高 11.3812%/10.7359%。配置入口为 `scripts/verilator/p1_core_config.sh`。
+`8c072c0` 最终回归为 RV32 237 PASS/4 SKIP、RV64 269 PASS/4 SKIP，含八次 RV32 重放，
+两轮的 CRC、ROI/TB、统计和镜像哈希完全相同。最终综合为 57,437 LUT、41,497 FF、
+零 latch、36 DRM、4 APM，双 TCM 初值匹配，保留 8/10/10 级。首轮标准 place 在
+20,193 MB 内存池峰值时分配失败，新目录复查通过，等待补足提交余量后重试，尚无最终 STA。
 P1.1b 中间布线第 13 轮仍有 24,179/69,295 条未布通，已主动终止，没有最终时序报告。
+下文 r15 和旧控制组的数据保留原镜像、配置及历史归属；当前 P1 结果见本文开头。
 
 ## 1. 项目是什么
 
@@ -115,7 +119,7 @@ RT-Thread 和 UART loader 需要先恢复依赖或用 `RTTHREAD_ROOT` 指向已�
 
 ## 5. 仿真性能
 
-当前实测源码为 `core/pipe-lsu-forward-format@dffb8a2`，RV32 四次重放与 ISS
+历史 r15 实测源码为 `core/pipe-lsu-forward-format@dffb8a2`，RV32 四次重放与 ISS
 `85ab1ca`、完成预选 `180f6fc` 的 ROI/TB、CRC 和全部计数相同；CMP `2b49c77`
 作为联合阶段父对照。p0/r0、DSP/SRT、双发射、ROB16，固定 64 次迭代：
 
@@ -218,7 +222,7 @@ r15 最差路径转为 LSQ 地址比较/转发资格/请求选择，经提示标
 
 Core：
 
-- RV32/RV64 I/M/Zicsr，scoreboard 后端支持顺序前缀双发射、独立完成和按序双退休。
+- RV32/RV64 I/M/Zicsr，scoreboard 后端支持双发射、有限整数乱序选择、独立完成和按序双退休。
 - DSP/Booth-Wallace/移位乘法，SRT/移位除法。
 - P0 为 ROB16/IQ8；P1 配置为 ROB32/int8/mem4、有限整数乱序；RAT、精确异常、机器中断、CSR。
 - 分支预测、BTB、GShare/Local/chooser、RAS。
