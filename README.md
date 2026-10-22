@@ -58,8 +58,11 @@ P1.3 在 `core/p1-3-iq-forward-timing` 完成五组、二十次固定镜像比�
 配置入口为 `source scripts/verilator/p1_core_config.sh`，随后调用原有 make/测试入口。
 `8c072c0` 最终回归已完成：RV32 237 PASS/4 SKIP、RV64 269 PASS/4 SKIP，RV32 包含八次
 固定镜像重放。两轮 CRC、ROI/TB、新旧统计和镜像哈希逐项相同，并与选定候选一致。
-最终综合通过，57,437 LUT、41,497 FF、零 latch，双 TCM 初值匹配。首轮标准 place
-在 20,193 MB 内存池峰值时分配失败，尚无最终 STA；已准备同源综合快照的新目录重试。
+最终综合通过，57,437 LUT、41,497 FF、零 latch，双 TCM 初值匹配。两次标准 place
+分别在 20,193/22,191 MB 内存池峰值时分配失败；重试前物理可用/提交余量为
+19.988/24.021 GiB，运行中 Windows 事件记录 PDS 提交量 42,237,083,648 字节及虚拟内存不足。
+用户已要求暂停布局，原工程和失败日志保留，尚无最终 Fmax/WNS 或未布通数量。
+本分支提交代码和仿真结果供评审，最终 P1 物理验收未完成，详见 [FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。
 模式说明见 [双发射](docs/understand/DUAL_ISSUE.md)。
 P1.1b 中间布线严重拥塞，已主动终止，未记作时序通过。
 以下 r15 数值为历史 P0 记录。
