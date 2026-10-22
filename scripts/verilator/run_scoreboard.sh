@@ -7,7 +7,7 @@ export CCACHE_TEMPDIR="$PWD/build/ccache-tmp" CCACHE_DIR="$PWD/build/ccache"
 mkdir -p "$CCACHE_TEMPDIR" "$CCACHE_DIR" logs/p0
 tests=("$@")
 tests=("${tests[@]:1}")
-[[ ${#tests[@]} -gt 0 ]] || tests=(contracts rename operands operands_wide operands_issue split_iq split_iq_small integer_ooo integer_select forward_modes issue recovery retirement completion completion_wide completion_queue lsu lsu_slots lsu_forward metrics core events)
+[[ ${#tests[@]} -gt 0 ]] || tests=(contracts rename operands operands_wide operands_issue split_iq split_iq_small integer_ooo integer_select forward_modes issue recovery retirement completion completion_wide completion_queue lsu lsu_slots lsu_forward metrics scheduler_metrics core events)
 export CORE_BACKEND=scoreboard ISSUE_WIDTH=2
 export RETIRE_ENTRIES="${RETIRE_ENTRIES:-32}" SPLIT_ISSUE_QUEUE="${SPLIT_ISSUE_QUEUE:-1}"
 source scripts/verilator/core_build_config.sh
@@ -40,6 +40,7 @@ for test in "${tests[@]}"; do
     log="logs/p0/$test-rv$width$suffix"
     extra_sources=()
     if [[ "$test" == metrics ]]; then extra_sources+=(tb/common/scoreboard_metrics.sv); fi
+    if [[ "$test" == scheduler_metrics ]]; then extra_sources+=(tb/common/scoreboard_scheduler_metrics.sv); fi
     if [[ "${LSQ_EQUIVALENCE:-0}" == 1 ]]; then
         extra_sources+=(build/p1-reference/load_store_queue_reference.sv tb/unit/scoreboard/lsq_equivalence_checker.sv)
     fi

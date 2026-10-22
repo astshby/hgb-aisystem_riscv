@@ -17,6 +17,38 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def scheduler_fields(path, expected_cycles, required=False):
+    rows = re.findall(r'^SCHEDULER_STATS (.+)$', path.read_text(), re.M)
+    if not rows and not required:
+        return None
+    if len(rows) != 1:
+        raise ValueError('expected exactly one scheduler metrics record')
+    result = json.loads(rows[0])
+    counters = {'cycles', 'occupied_cycles', 'ready_cycles', 'full_cycles', 'raw_cycles',
+                'raw_alu_cycles', 'raw_mdu_cycles', 'raw_load_cycles', 'mdu_resource_cycles',
+                'mdu_iq_idle_cycles', 'accepted_cycles', 'accepted_operations',
+                'bypass_raw_cycles', 'bypass_mdu_cycles'}
+    if set(result) != counters | {'window'} or result['window'] != 'whole_run':
+        raise ValueError('invalid scheduler metrics schema/window')
+    if any(type(result[key]) is not int or result[key] < 0 for key in counters):
+        raise ValueError('invalid scheduler counter type/value')
+    cycles = result['cycles']
+    if cycles != expected_cycles or any(result[key] > cycles for key in counters - {'accepted_operations'}):
+        raise ValueError('scheduler metrics cycle boundary mismatch')
+    bounds = (
+        ('ready_cycles', 'occupied_cycles'), ('full_cycles', 'occupied_cycles'),
+        ('raw_cycles', 'occupied_cycles'), ('mdu_resource_cycles', 'occupied_cycles'),
+        ('raw_alu_cycles', 'raw_cycles'), ('raw_mdu_cycles', 'raw_cycles'), ('raw_load_cycles', 'raw_cycles'),
+        ('mdu_iq_idle_cycles', 'mdu_resource_cycles'), ('accepted_cycles', 'ready_cycles'),
+        ('bypass_raw_cycles', 'accepted_cycles'), ('bypass_mdu_cycles', 'accepted_cycles'),
+        ('bypass_raw_cycles', 'raw_cycles'), ('bypass_mdu_cycles', 'mdu_resource_cycles'),
+    )
+    if any(result[a] > result[b] for a, b in bounds) or not (
+            result['accepted_cycles'] <= result['accepted_operations'] <= 2 * result['accepted_cycles']):
+        raise ValueError('inconsistent scheduler counter bounds')
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
@@ -114,9 +146,14 @@ def main():
             with log.open('x') as stream:
                 subprocess.run(command, stdout=stream, stderr=subprocess.STDOUT, check=True)
             observed = snapshot.result_fields(log, mode, args.xlen)
+            scheduler = scheduler_fields(log, (observed.get('scoreboard_metrics') or {}).get(
+                                             'cycles', observed['harness_cycles'] + 1),
+                                         required=rtl_parameters.get('limited_integer_ooo') == 1)
             for field in ('iterations', 'crc', 'compiler_version', 'compiler_flags'):
                 snapshot.require(observed[field] == records[mode][field], f'{mode} {field} mismatch')
             report['modes'][mode]['observed'] = observed
+            if scheduler is not None:
+                report['modes'][mode]['scheduler_metrics'] = scheduler
             report['modes'][mode]['coremark_per_mhz'] = observed['iterations'] * 1e6 / observed['ticks']
             report['modes'][mode]['speedup_over_p0'] = records[mode]['ticks'] / observed['ticks']
             equal = all(observed.get(key) == records[mode].get(key)
