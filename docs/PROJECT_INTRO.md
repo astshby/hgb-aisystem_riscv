@@ -5,8 +5,10 @@
 P1.1a 的 LQ/SQ 控制与数据已拆分，实测源码 `core/p1-1a-split-lq-sq@a23b65c`。
 双宽完整仿真及 RV32 四次同镜像比较通过，标准 PDS 为 86.1721 MHz、85 MHz WNS
 +0.160 ns、零未布通，详见 [双发射](understand/DUAL_ISSUE.md) 和
-[FPGA 适配](fpga/FPGA_ADAPTATION.md)。`core/p1-1b-rob32-split-iq` 正在验证
-ROB32、int8/mem4 IQ，仍按全局年龄顺序发射，尚未完成该检查点验收。
+[FPGA 适配](fpga/FPGA_ADAPTATION.md)。`core/p1-1b-rob32-split-iq@f547da3` 为
+ROB32、int8/mem4 IQ，按全局年龄顺序发射。完整回归 RV32 228 PASS/5 SKIP、
+RV64 264 PASS/5 SKIP；四次同镜像比较通过，标准 PDS 尚未完成。
+M0/M1 为 2.635803/2.335916 CoreMark/MHz，较本次 GCC 11.4 重建 P0 提高 0.0814%/0.7759%。
 
 ## 1. 项目是什么
 

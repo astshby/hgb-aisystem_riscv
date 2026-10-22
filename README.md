@@ -36,8 +36,10 @@ P1.1a 标准 PDS 已完成：86.1721 MHz、85 MHz WNS +0.160 ns、TNS 0，12 类
 零失败，57,149 条网络全部布通；物理为 40,181 LUT、32,188 FF、36 DRM、4 APM。
 最差路径仍经 Store 地址、转发和 IQ 到分支，20 级、11.135 ns；结果绑定源码 `a23b65c`，
 记录为 `logs/p1/p1-1a/pds-result.json`。85 MHz 为内部 STA，未上板。
-后续 `core/p1-1b-rob32-split-iq` 正在验证 ROB32 和 int8/mem4 IQ，仍按序发射；
-显式选择为 `RETIRE_ENTRIES=32 SPLIT_ISSUE_QUEUE=1`，P1.1b 尚未完成验收。
+`core/p1-1b-rob32-split-iq@f547da3` 使用 ROB32 和 int8/mem4 IQ，保持按序发射；
+显式选择为 `RETIRE_ENTRIES=32 SPLIT_ISSUE_QUEUE=1`。完整回归为 RV32 228 PASS/5 SKIP、
+RV64 264 PASS/5 SKIP，M0/M1 同镜像 performance 为 2.635803/2.335916 CoreMark/MHz。
+标准 PDS 尚未完成，原始命令和逐项哈希在 `logs/p1/p1-1b-drain/regression/summary.json`。
 以下 r15 数值为历史 P0 记录。
 
 新 P0 发布基线为 `publish/p0-r15`，实测 RTL 为 `dffb8a2`；原开发分支

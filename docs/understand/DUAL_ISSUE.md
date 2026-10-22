@@ -20,7 +20,9 @@ TNS 0、12 类 STA 零失败、零未布通。物理 40,181 LUT、32,188 FF、36
 结果为 `logs/p1/p1-1a/pds-result.json`，实测源码 `a23b65c`，未上板。
 P1.1b 位于 `core/p1-1b-rob32-split-iq`，显式选择 `RETIRE_ENTRIES=32 SPLIT_ISSUE_QUEUE=1`。
 `split_scoreboard_queue.sv` 分别保存 int8/mem4 操作数并合并全局最老两项，
-先维持按序发射，定向测试正在运行；局部乱序和路径候选未应用。
+保持按序发射，提交 `f547da3` 完整回归为 RV32 228 PASS/5 SKIP、RV64 264 PASS/5 SKIP。
+四次同镜像比较通过，M0/M1 为 2.635803/2.335916 CoreMark/MHz，标准 PDS 尚未完成。
+局部乱序和路径候选未应用。
 以下 r15 数据保持其历史归属。
 
 新 P0 按工作区 [Codex B11](../../../OPTIMIZATION_PLAN.md#b11-core-完善后建立新-p0scoreboard-双发射)
