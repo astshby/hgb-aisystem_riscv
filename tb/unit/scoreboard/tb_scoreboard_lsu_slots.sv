@@ -36,6 +36,7 @@ module tb_scoreboard_lsu_slots;
         $fatal(1, "fixed-slot test timeout");
     end
     retire_gpr_forward_t early_forward [2];
+    retire_gpr_forward_t load_return [2], store_forward_hint [2];
     load_store_queue #(.COMPLETION_PORTS(ENTRIES)) dut (.*);
     completion_select #(.SOURCES(SOURCES)) u_select (
         .rst, .head_slot, .source_valid, .source_ready, .source_completion,

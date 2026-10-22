@@ -3,7 +3,8 @@
 module scoreboard_queue #(
     parameter int unsigned DEPTH = core_config_pkg::ISSUE_QUEUE_ENTRIES,
     parameter int unsigned BROADCAST_PORTS = 2,
-    parameter bit ISSUE_BYPASS = 0
+    parameter bit ISSUE_BYPASS = 0,
+    parameter bit CAPTURE_PUSH_OPERANDS = 1
 ) (
     input logic clk, rst, flush,
     input scoreboard_pkg::branch_recovery_t recovery,
@@ -31,7 +32,7 @@ module scoreboard_queue #(
     integer available;
 
     // 按完整标签捕获数据，生产者退休或槽复用之后仍使用保存的值。
-    function automatic d2_ex_t capture(input d2_ex_t packet, input logic probe_rob);
+    function automatic d2_ex_t capture(input d2_ex_t packet, input logic probe_rob, input logic issue_view);
         d2_ex_t value;
         retire_gpr_entry_t rs1_producer, rs2_producer;
         value = packet;
@@ -48,7 +49,7 @@ module scoreboard_queue #(
             value.rs2_dependency.pending = 1'b0;
         end
         for (int portno = 0; portno < BROADCAST_PORTS; portno++) begin
-            if (broadcast[portno].valid) begin
+            if (broadcast[portno].valid && operand_forward_enabled(packet, portno, issue_view)) begin
                 if (packet.rs1_dependency.pending && broadcast[portno].id == packet.rs1_dependency.id) begin
                     value.rs1_data = broadcast[portno].data;
                     value.rs1_dependency.pending = 1'b0;
@@ -71,18 +72,19 @@ module scoreboard_queue #(
         push_capacity = 0;
         if (!rst && !flush && !recovery.valid)
             push_capacity = available >= 2 ? 2'd2 : 2'(available);
-        // ISSUE_BYPASS 仅供后接寄存 ISS 的实例：当拍结果在进入 ISS 的沿捕获。
-        issue_packet[0] = ISSUE_BYPASS ? capture(packet_q[read_q], 1'b0) : packet_q[read_q];
-        issue_packet[1] = ISSUE_BYPASS ? capture(packet_q[second_read], 1'b0) : packet_q[second_read];
+        // ISSUE_BYPASS 仅供后接寄存 ISS 的实例；普通完成当拍捕获，LSU 提示由唤醒模式决定。
+        issue_packet[0] = ISSUE_BYPASS ? capture(packet_q[read_q], 1'b0, 1'b1) : packet_q[read_q];
+        issue_packet[1] = ISSUE_BYPASS ? capture(packet_q[second_read], 1'b0, 1'b1) : packet_q[second_read];
         issue_packet[0].valid = count_q != 0 && !rst && !flush && !recovery.valid;
         issue_packet[1].valid = count_q >= 2 && !rst && !flush && !recovery.valid;
         for (int lane = 0; lane < 2; lane++) begin
             operands_ready[lane] = issue_packet[lane].valid &&
                 (!issue_packet[lane].rs1_dependency.pending && !issue_packet[lane].rs2_dependency.pending);
-            captured[lane] = capture(push_packet[lane], 1'b1);
+            // 分离 IQ 在分流前已捕获，直接保存，避免每个 bank 重复实例化 ROB 数据读口。
+            captured[lane] = CAPTURE_PUSH_OPERANDS ? capture(push_packet[lane], 1'b1, 1'b0) : push_packet[lane];
         end
         for (int slot = 0; slot < DEPTH; slot++)
-            packet_d[slot] = capture(packet_q[slot], 1'b0);
+            packet_d[slot] = capture(packet_q[slot], 1'b0, 1'b0);
         survivors = '0;
         for (int age = 0; age < DEPTH; age++) begin
             if (age < int'(count_q) &&

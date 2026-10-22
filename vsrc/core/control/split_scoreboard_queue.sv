@@ -23,7 +23,7 @@ module split_scoreboard_queue #(
     import core_config_pkg::*;
     import pipeline_pkg::*;
     import scoreboard_pkg::*;
-    d2_ex_t bank_push [2][2], bank_issue [2][2], memory_issue [2];
+    d2_ex_t bank_push [2][2], bank_issue [2][2], memory_issue [2], dispatch_captured [2];
     logic [1:0] bank_push_count [2], bank_capacity [2], bank_pop_count [2], bank_ready [2];
     logic [$clog2(INTEGER_DEPTH+1)-1:0] integer_occupancy;
     logic [$clog2(MEMORY_DEPTH+1)-1:0] memory_occupancy;
@@ -37,8 +37,42 @@ module split_scoreboard_queue #(
     integer integer_boundary;
     assign bank_issue[1] = memory_issue;
 
+    // ROB 数据读取与当拍广播先于类型分流，只实例化两条分配指令的四个源读口。
+    // bank 只保存已捕获包；未就绪标签和各槽后续广播捕获仍由 bank 自己持有。
+    function automatic d2_ex_t capture_dispatch(input d2_ex_t packet);
+        d2_ex_t value;
+        retire_gpr_entry_t p1, p2;
+        value = packet;
+        p1 = producers[packet.rs1_dependency.id.slot];
+        p2 = producers[packet.rs2_dependency.id.slot];
+        if (packet.rs1_dependency.pending && p1.valid && p1.ready && p1.id == packet.rs1_dependency.id) begin
+            value.rs1_data = p1.data;
+            value.rs1_dependency.pending = 0;
+        end
+        if (packet.rs2_dependency.pending && p2.valid && p2.ready && p2.id == packet.rs2_dependency.id) begin
+            value.rs2_data = p2.data;
+            value.rs2_dependency.pending = 0;
+        end
+        for (int portno = 0; portno < BROADCAST_PORTS; portno++) begin
+            if (broadcast[portno].valid && operand_forward_enabled(packet, portno, 0)) begin
+                if (packet.rs1_dependency.pending && broadcast[portno].id == packet.rs1_dependency.id) begin
+                    value.rs1_data = broadcast[portno].data;
+                    value.rs1_dependency.pending = 0;
+                end
+                if (packet.rs2_dependency.pending && broadcast[portno].id == packet.rs2_dependency.id) begin
+                    value.rs2_data = broadcast[portno].data;
+                    value.rs2_dependency.pending = 0;
+                end
+            end
+        end
+        return value;
+    endfunction
+    always_comb begin
+        for (int lane = 0; lane < 2; lane++) dispatch_captured[lane] = capture_dispatch(push_packet[lane]);
+    end
+
     if (LIMITED_OOO) begin : g_ready_integer
-        integer_issue_queue #(.DEPTH(INTEGER_DEPTH), .BROADCAST_PORTS(BROADCAST_PORTS)) u_integer (
+        integer_issue_queue #(.DEPTH(INTEGER_DEPTH), .BROADCAST_PORTS(BROADCAST_PORTS), .CAPTURE_PUSH_OPERANDS(0)) u_integer (
             .clk, .rst, .flush, .recovery, .head_slot, .mdu_available,
             .memory_pending(memory_issue[0].valid), .memory_id(memory_issue[0].retire_id),
             .push_count(bank_push_count[0]), .push_packet(bank_push[0]), .push_capacity(bank_capacity[0]),
@@ -52,14 +86,14 @@ module split_scoreboard_queue #(
         assign oldest_integer_pending = 0;
         assign oldest_integer_id[0] = '0;
         assign oldest_integer_id[1] = '0;
-        scoreboard_queue #(.DEPTH(INTEGER_DEPTH), .BROADCAST_PORTS(BROADCAST_PORTS), .ISSUE_BYPASS(1)) u_integer (
+        scoreboard_queue #(.DEPTH(INTEGER_DEPTH), .BROADCAST_PORTS(BROADCAST_PORTS), .ISSUE_BYPASS(1), .CAPTURE_PUSH_OPERANDS(0)) u_integer (
             .clk, .rst, .flush, .recovery, .head_slot,
             .push_count(bank_push_count[0]), .push_packet(bank_push[0]), .push_capacity(bank_capacity[0]),
             .producers, .broadcast, .issue_packet(bank_issue[0]), .operands_ready(bank_ready[0]),
             .pop_count(bank_pop_count[0]), .occupancy(integer_occupancy)
         );
     end
-    scoreboard_queue #(.DEPTH(MEMORY_DEPTH), .BROADCAST_PORTS(BROADCAST_PORTS), .ISSUE_BYPASS(1)) u_memory (
+    scoreboard_queue #(.DEPTH(MEMORY_DEPTH), .BROADCAST_PORTS(BROADCAST_PORTS), .ISSUE_BYPASS(1), .CAPTURE_PUSH_OPERANDS(0)) u_memory (
         .clk, .rst, .flush, .recovery, .head_slot,
         .push_count(bank_push_count[1]), .push_packet(bank_push[1]), .push_capacity(bank_capacity[1]),
         .producers, .broadcast, .issue_packet(memory_issue), .operands_ready(bank_ready[1]),
@@ -89,7 +123,7 @@ module split_scoreboard_queue #(
         end
         for (int lane = 0; lane < 2; lane++) begin
             if (lane < int'(push_count)) begin
-                bank_push[push_memory[lane]][bank_push_count[push_memory[lane]]] = push_packet[lane];
+                bank_push[push_memory[lane]][bank_push_count[push_memory[lane]]] = dispatch_captured[lane];
                 bank_push_count[push_memory[lane]]++;
             end
         end

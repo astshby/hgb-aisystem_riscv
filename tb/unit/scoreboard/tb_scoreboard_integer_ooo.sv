@@ -52,6 +52,14 @@ module tb_scoreboard_integer_ooo;
         idle(); head_slot = RETIRE_IDX_W'(RETIRE_ENTRIES-2);
         for (int slot = 0; slot < RETIRE_ENTRIES; slot++) producers[slot] = '0;
         tick(); rst = 0;
+        // 两个 bank 共用分配捕获；ROB 就绪值随后复用也不改变已保存操作数。
+        producers[RETIRE_ENTRIES-3] = '{valid:1, ready:1, id:dependency(), data:xlen_t'(42), kind:RET_EXEC, default:'0};
+        offer(0, 0, 0, 1); offer(1, 1, 1, 1); push_count = 2;
+        broadcast[0] = '{valid:1, id:dependency(), data:xlen_t'(55)}; tick();
+        producers[RETIRE_ENTRIES-3] = '0;
+        #1; assert (operands_ready == 3 && issue_packet[0].rs1_data == 55 && issue_packet[1].rs1_data == 55)
+            else $fatal(1, "shared dispatch capture priority or producer reuse");
+        pop_count = 2; tick();
         // 年轻同名写者及旧值使用者越过阻塞整数项，标签 RAW 仍保留。
         offer(0, 0, 0, 1); offer(1, 1); push_count = 2;
         push_packet[0].rd = 5; push_packet[1].rd = 5; tick();

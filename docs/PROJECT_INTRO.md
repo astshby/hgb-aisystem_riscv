@@ -16,6 +16,10 @@ P1.2 开发分支为 `core/p1-2-limited-integer-ooo`，开关 `LIMITED_INTEGER_O
 十场景精确事件通过，Core ISA 为 RV32 58 PASS/2 SKIP、RV64 78 PASS/2 SKIP。
 `5963d72` 完整回归为 RV32 229 PASS/5 SKIP、RV64 265 PASS/5 SKIP，四次同镜像比较通过。
 M0/M1 为 2.670535/2.378539 CoreMark/MHz，较重建 P0 提高 1.4002%/2.6147%。
+P1.3 开发分支为 `core/p1-3-iq-forward-timing`。已编写并行年龄序位选择，以及全部
+旁路、分支屏蔽、全部 LSU 捕获、仅 Store 提示捕获四种模式；分配捕获在分流前共享。
+四模式双宽定向各 17 PASS/0 SKIP，Core 均为 492/510 拍，完整测量待完成。
+P1.1b 中间布线第 13 轮仍有 24,179/69,295 条未布通，已主动终止，没有最终时序报告。
 
 ## 1. 项目是什么
 

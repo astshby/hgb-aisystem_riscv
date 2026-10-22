@@ -23,6 +23,7 @@ module tb_scoreboard_lsu;
     retire_id_t store_owner_id;
     int completions, dual_requests, rejects;
     retire_gpr_forward_t early_forward [2];
+    retire_gpr_forward_t load_return [2], store_forward_hint [2];
     load_store_queue dut (.*);
     always #5 clk = ~clk;
     function automatic retire_id_t tag(input int slot, input int generation = 1);

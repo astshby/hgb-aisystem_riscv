@@ -48,6 +48,8 @@ def compile_command(xlen, profile_id, local_tcm, dma_wide=1,
                                 f" CORE_MEMORY_QUEUE_ENTRIES={scoreboard_config['core_memory_queue_entries']}")
             if "core_limited_integer_ooo" in scoreboard_config:
                 issue_directive += f" CORE_LIMITED_INTEGER_OOO={scoreboard_config['core_limited_integer_ooo']}"
+            if "core_scheduler_forward_mode" in scoreboard_config:
+                issue_directive += f" CORE_SCHEDULER_FORWARD_MODE={scoreboard_config['core_scheduler_forward_mode']}"
     return ("compile -top_module pango_200hp_top -verilog_standard SystemVerilog "
             f"-compiler_directives {{CORE_XLEN={xlen} CORE_MUL_IMPL=0 CORE_DIV_IMPL=1{issue_directive}}} "
             '-defined_parameters {ITCM_INIT_FILE "firmware/imem.hex" '
@@ -71,7 +73,7 @@ def verify_staged_manifest(root, manifest):
                     slow_presence="unknown", dma_wide_enable="unknown", ddr_data_bits="unknown",
                     cache_block_enable="unknown", dma_block_enable="unknown", core_issue_width="unknown",
                     evidence="legacy: generated Tcl/configuration unverified")
-    if type(manifest["schema_version"]) is not int or manifest["schema_version"] not in (1, 2, 3, 4, 5, 6):
+    if type(manifest["schema_version"]) is not int or manifest["schema_version"] not in (1, 2, 3, 4, 5, 6, 7):
         raise ValueError("unsupported staging manifest schema")
     schema = manifest["schema_version"]
     if schema >= 2 and (type(manifest.get("dma_wide_enable")) is not int or
@@ -89,6 +91,8 @@ def verify_staged_manifest(root, manifest):
                    "core_predictor_mode": (0, 1), "core_ras_enable": (0, 1)}
         if schema >= 6:
             choices["core_limited_integer_ooo"] = (0, 1)
+        if schema >= 7:
+            choices["core_scheduler_forward_mode"] = (0, 1, 2, 3)
         for key, allowed in choices.items():
             if type(manifest.get(key)) is not int or manifest[key] not in allowed:
                 raise ValueError(f"invalid staged scheduler configuration: {key}")
@@ -185,6 +189,7 @@ def main():
     parser.add_argument("--retire-entries", type=int, choices=(16, 32), default=32)
     parser.add_argument("--split-issue-queue", type=int, choices=(0, 1), default=1)
     parser.add_argument("--limited-integer-ooo", type=int, choices=(0, 1), default=0)
+    parser.add_argument("--scheduler-forward-mode", type=int, choices=(0, 1, 2, 3), default=0)
     parser.add_argument("--integer-queue-entries", type=int, choices=(2, 4, 8, 16), default=8)
     parser.add_argument("--memory-queue-entries", type=int, choices=(2, 4, 8), default=4)
     parser.add_argument("--predictor-mode", type=int, choices=(0, 1), default=0)
@@ -192,6 +197,8 @@ def main():
     args = parser.parse_args()
     if args.limited_integer_ooo and (args.core_backend != "scoreboard" or not args.split_issue_queue):
         parser.error("limited integer issue requires scoreboard and split queues")
+    if args.scheduler_forward_mode and args.core_backend != "scoreboard":
+        parser.error("scheduler forward mode requires scoreboard")
     repo = Path(__file__).resolve().parents[2]
     root = args.output.resolve()
     # WSL 负责固件与 Python，PDS 仍在 Windows 本地盘运行；只接受可映射的原生盘目录。
@@ -260,7 +267,7 @@ def main():
     profile_id = 0 if args.soc_profile == "full" else 1
     present = 0x7fff if profile_id == 0 else 0x727f
     scoreboard = args.core_backend == "scoreboard"
-    manifest = {"schema_version": 6 if scoreboard else 3, "xlen": args.xlen, "mul": 0, "div": 1,
+    manifest = {"schema_version": 7 if scoreboard else 3, "xlen": args.xlen, "mul": 0, "div": 1,
                 "dma_wide_enable": 1, "ddr_data_bits": 256,
                 "cache_block_enable": 1, "dma_block_enable": 1, "core_issue_width": 1,
                 "soc_profile": args.soc_profile, "soc_profile_id": profile_id,
@@ -275,6 +282,7 @@ def main():
         manifest.update(core_retire_entries=args.retire_entries,
                         core_split_issue_queue=args.split_issue_queue,
                         core_limited_integer_ooo=args.limited_integer_ooo,
+                        core_scheduler_forward_mode=args.scheduler_forward_mode,
                         core_issue_queue_entries=args.integer_queue_entries,
                         core_memory_queue_entries=args.memory_queue_entries,
                         core_predictor_mode=args.predictor_mode, core_ras_enable=args.ras_enable)

@@ -25,21 +25,25 @@ case "$core_backend" in
         core_build_tag="${core_build_tag}-scoreboard"
         core_split_issue_queue="${SPLIT_ISSUE_QUEUE:-0}"
         core_limited_integer_ooo="${LIMITED_INTEGER_OOO:-0}"
+        core_scheduler_forward_mode="${SCHEDULER_FORWARD_MODE:-0}"
         core_integer_queue_entries="${INTEGER_QUEUE_ENTRIES:-8}"
         core_memory_queue_entries="${MEMORY_QUEUE_ENTRIES:-4}"
         [[ "$core_split_issue_queue" =~ ^[01]$ && "$core_limited_integer_ooo" =~ ^[01]$ &&
+           "$core_scheduler_forward_mode" =~ ^[0123]$ &&
            ( "$core_limited_integer_ooo" == 0 || "$core_split_issue_queue" == 1 ) && "$core_integer_queue_entries" =~ ^(2|4|8|16)$ &&
            "$core_memory_queue_entries" =~ ^(2|4|8)$ ]] || {
             echo 'invalid split IQ configuration' >&2; return 2;
         }
         core_microarch_flags+=("-DCORE_SPLIT_ISSUE_QUEUE=$core_split_issue_queue"
             "-DCORE_LIMITED_INTEGER_OOO=$core_limited_integer_ooo"
+            "-DCORE_SCHEDULER_FORWARD_MODE=$core_scheduler_forward_mode"
             "-DCORE_ISSUE_QUEUE_ENTRIES=$core_integer_queue_entries"
             "-DCORE_MEMORY_QUEUE_ENTRIES=$core_memory_queue_entries")
         if [[ "$core_split_issue_queue" != 0 || "$core_integer_queue_entries" != 8 || "$core_memory_queue_entries" != 4 ]]; then
             core_build_tag+="-s${core_split_issue_queue}j${core_integer_queue_entries}m${core_memory_queue_entries}"
         fi
         if [[ "$core_limited_integer_ooo" == 1 ]]; then core_build_tag+="-o1"; fi
+        if [[ "$core_scheduler_forward_mode" != 0 ]]; then core_build_tag+="-f${core_scheduler_forward_mode}"; fi
         ;;
     *) echo "invalid CORE_BACKEND=$core_backend" >&2; return 2 ;;
 esac

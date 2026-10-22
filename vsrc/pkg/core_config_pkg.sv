@@ -40,6 +40,9 @@
 `ifndef CORE_LIMITED_INTEGER_OOO
 `define CORE_LIMITED_INTEGER_OOO 0
 `endif
+`ifndef CORE_SCHEDULER_FORWARD_MODE
+`define CORE_SCHEDULER_FORWARD_MODE 0
+`endif
 `ifndef CORE_LOAD_QUEUE_ENTRIES
 `define CORE_LOAD_QUEUE_ENTRIES 4
 `endif
@@ -69,6 +72,10 @@ package core_config_pkg;
     localparam int unsigned MEMORY_QUEUE_ENTRIES = `CORE_MEMORY_QUEUE_ENTRIES;
     localparam bit SPLIT_ISSUE_QUEUE = `CORE_SPLIT_ISSUE_QUEUE;
     localparam bit LIMITED_INTEGER_OOO = `CORE_LIMITED_INTEGER_OOO;
+    typedef enum int unsigned {
+        IQ_FORWARD_ALL, IQ_FORWARD_BRANCH_COMPLETION, IQ_FORWARD_LSU_CAPTURE, IQ_FORWARD_STORE_CAPTURE
+    } iq_forward_mode_e;
+    localparam iq_forward_mode_e SCHEDULER_FORWARD_MODE = iq_forward_mode_e'(`CORE_SCHEDULER_FORWARD_MODE);
     localparam int unsigned SCHEDULER_ENTRIES = ISSUE_QUEUE_ENTRIES +
         (SPLIT_ISSUE_QUEUE ? MEMORY_QUEUE_ENTRIES : 0);
     localparam int unsigned LOAD_QUEUE_ENTRIES = `CORE_LOAD_QUEUE_ENTRIES;

@@ -20,18 +20,35 @@ module tb_scoreboard_lsu_forward;
     memory_response_t mem_response [2];
     retire_completion_t completion [2], held;
     retire_gpr_forward_t early_forward [2];
+    retire_gpr_forward_t load_return [2], store_forward_hint [2];
     logic busy, draining, store_owner_valid;
     retire_id_t store_owner_id;
     int cases = 0;
+    int return_hints = 0, store_hints = 0;
     load_store_queue dut (
         .clk, .rst, .flush, .recovery, .head_slot, .head_valid, .head_id,
         .offer_valid, .issue_fire, .descriptor, .issue_ready,
         .mem_req_valid, .mem_req_ready, .mem_request,
         .mem_rsp_valid, .mem_rsp_ready, .mem_response, .response_reject,
-        .complete_valid, .complete_ready, .completion, .early_forward,
+        .complete_valid, .complete_ready, .completion, .early_forward, .load_return, .store_forward_hint,
         .busy, .draining, .store_owner_valid, .store_owner_id
     );
     always #5 clk = ~clk;
+    always @(posedge clk) if (!rst) begin
+        for (int portno = 0; portno < 2; portno++) begin
+            assert (!(load_return[portno].valid && store_forward_hint[portno].valid) &&
+                    early_forward[portno].valid == (load_return[portno].valid || store_forward_hint[portno].valid))
+                else $fatal(1, "split forward source priority");
+            if (load_return[portno].valid) begin
+                return_hints++;
+                assert (early_forward[portno] == load_return[portno]) else $fatal(1, "load return source data");
+            end
+            if (store_forward_hint[portno].valid) begin
+                store_hints++;
+                assert (early_forward[portno] == store_forward_hint[portno]) else $fatal(1, "Store hint source data");
+            end
+        end
+    end
     function automatic retire_id_t tag(input int slot, generation = 1);
         return '{slot:RETIRE_IDX_W'(slot), generation:RETIRE_GEN_W'(generation)};
     endfunction
@@ -170,6 +187,8 @@ module tb_scoreboard_lsu_forward;
         // Store 的成功响应不包含可广播的 GPR 值。
         head_valid = 1; head_id = tag(0); mem_req_ready = 1; tick();
         reply(1,tag(0),'0); expect_none(); tick(); consume(); cases++;
+        assert (return_hints > 0 && store_hints > 0) else $fatal(1, "split forwarding source coverage");
+        $display("FORWARD_SOURCES returns=%0d store_hints=%0d", return_hints, store_hints);
         $display("PASS tb_scoreboard_lsu_forward XLEN=%0d cases=%0d formatted tagged duplicate error cancel backpressure",XLEN,cases);
         $finish;
     end

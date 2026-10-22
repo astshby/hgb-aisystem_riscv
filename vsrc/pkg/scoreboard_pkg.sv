@@ -68,6 +68,24 @@ package scoreboard_pkg;
             return SCHED_ALU;
     endfunction
 
+    // 前五口来自已完成结果和 ALU/MDU 入 CMP，随后分开合法读返回和 Store 转发提示。
+    // 分支屏蔽提示时，捕获与当拍视图同时屏蔽；寄存模式仍允许 ALU/MDU 保存提示数据。
+    localparam int unsigned LSU_RETURN_FIRST = 5;
+    localparam int unsigned LSU_HINT_FIRST = 7;
+    function automatic logic operand_forward_enabled(
+        input d2_ex_t packet, input int unsigned portno, input logic issue_view
+    );
+        if (portno < LSU_RETURN_FIRST) return 1;
+        unique case (SCHEDULER_FORWARD_MODE)
+            IQ_FORWARD_ALL: return 1;
+            IQ_FORWARD_BRANCH_COMPLETION: return schedule_class(packet) != SCHED_BRANCH;
+            IQ_FORWARD_LSU_CAPTURE: return !issue_view && schedule_class(packet) != SCHED_BRANCH;
+            IQ_FORWARD_STORE_CAPTURE: return portno < LSU_HINT_FIRST ||
+                (!issue_view && schedule_class(packet) != SCHED_BRANCH);
+            default: return 0;
+        endcase
+    endfunction
+
     // 资源契约不做寄存器名比较；真实 RAW 由绑定标签的 scoreboard 决定。
     // 单分支/MDU 资源共享，CSR/系统指令独占；两条访存允许进入两个 AGU。
     function automatic logic resources_pair(

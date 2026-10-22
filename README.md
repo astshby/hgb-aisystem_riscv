@@ -49,6 +49,9 @@ Core 各观察到 30 次越过阻塞整数项。
 `5963d72` 完整回归为 RV32 229 PASS/5 SKIP、RV64 265 PASS/5 SKIP，四次同镜像比较通过。
 M0/M1 为 2.670535/2.378539 CoreMark/MHz，较重建 P0 提高 1.4002%/2.6147%；
 参数、命令、源码及镜像哈希为 `logs/p1/p1-2-precise/regression/summary.json`。
+P1.3 开发分支为 `core/p1-3-iq-forward-timing`，正在比较并行年龄选择及四种
+`SCHEDULER_FORWARD_MODE`，四模式双宽定向各 17 PASS/0 SKIP，完整测量待完成；
+模式说明见 [双发射](docs/understand/DUAL_ISSUE.md)。P1.1b 中间布线严重拥塞，已主动终止，未记作时序通过。
 以下 r15 数值为历史 P0 记录。
 
 新 P0 发布基线为 `publish/p0-r15`，实测 RTL 为 `dffb8a2`；原开发分支

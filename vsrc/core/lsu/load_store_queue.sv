@@ -22,6 +22,7 @@ module load_store_queue #(
     input logic [COMPLETION_PORTS-1:0] complete_ready,
     output pipeline_pkg::retire_completion_t completion [COMPLETION_PORTS],
     output pipeline_pkg::retire_gpr_forward_t early_forward [2],
+    output pipeline_pkg::retire_gpr_forward_t load_return [2], store_forward_hint [2],
     output logic busy, draining,
     output logic store_owner_valid,
     output pipeline_pkg::retire_id_t store_owner_id
@@ -214,6 +215,7 @@ module load_store_queue #(
     end
     // 同口合法返回优先于 Store 转发；错误/旧响应不能遮住同拍合法转发。
     for (genvar portno = 0; portno < 2; portno++) begin : g_early_forward
+        assign load_return[portno] = response_forward[portno];
         always_comb begin
             forwarded_data[portno] = '0;
             for (int slot = 0; slot < LQ; slot++)
@@ -221,6 +223,9 @@ module load_store_queue #(
             // 无有效提示时保留载荷，forward_fire 只决定是否允许捕获。
             early_forward[portno] = '{valid:forward_fire[portno], id:selected_descriptor[portno].id,
                 data:forwarded_data[portno]};
+            // 分源视图保留原同口优先级，分开唤醒不会增加原来被返回遮住的提示。
+            store_forward_hint[portno] = '{valid:forward_fire[portno] && !response_forward[portno].valid,
+                id:selected_descriptor[portno].id, data:forwarded_data[portno]};
             if (response_forward[portno].valid) early_forward[portno] = response_forward[portno];
         end
     end
