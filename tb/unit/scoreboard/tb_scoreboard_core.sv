@@ -27,9 +27,26 @@ module tb_scoreboard_core;
     int length, stop_pc, cycles, retired, issue_streak, retire_streak, max_issue_streak, max_retire_streak;
     int live_waw, background_alu, branches, requests, dual_requests, pair_counts [5][5];
     int decode_jals [2], frontend_jumps;
+    int integer_bypasses = 0;
+    bit fence_executed = 0;
     logic [31:0] random_state = 32'h6532af01;
     bit done;
     always #5 clk = ~clk;
+    if (LIMITED_INTEGER_OOO && SPLIT_ISSUE_QUEUE) begin : g_ooo_coverage
+        always @(posedge clk) if (!rst && !done) begin
+            for (int lane = 0; lane < 2; lane++) begin
+                for (int slot = 0; slot < ISSUE_QUEUE_ENTRIES; slot++) begin
+                    if (int'(dut.issue_enqueue_count) > lane && schedule_class(dut.queued[lane]) == SCHED_ALU &&
+                        dut.g_split_iq.u_scoreboard.g_ready_integer.u_integer.valid_q[slot] &&
+                        (dut.g_split_iq.u_scoreboard.g_ready_integer.u_integer.operand_view[slot].rs1_dependency.pending ||
+                         dut.g_split_iq.u_scoreboard.g_ready_integer.u_integer.operand_view[slot].rs2_dependency.pending) &&
+                        younger_than(dut.queued[lane].retire_id,
+                            dut.g_split_iq.u_scoreboard.g_ready_integer.u_integer.packet_q[slot].retire_id, dut.head_slot))
+                        integer_bypasses++;
+                end
+            end
+        end
+    end
     scoreboard_core dut (.irq_software(1'b0), .irq_timer(1'b0), .irq_external(1'b0),
         .imem_rsp_error(1'b0), .imem_rsp_error_1(1'b0), .*);
     assign imem_req_ready = !rst && (!imem_rsp_valid || imem_rsp_ready);
@@ -153,6 +170,7 @@ module tb_scoreboard_core;
                 assert (inst[31:20] == 12'(CSR_MINSTRET)) else $fatal(1, "test CSR unsupported");
                 value = xlen_t'(retired);
             end
+            7'h0f: assert (inst == 32'h0ff0000f) else $fatal(1, "unsupported fence encoding");
             default: $fatal(1, "reference unsupported instruction=%h", inst);
         endcase
         assert (item.rd_we == (writes && rd != 0)) else $fatal(1, "write-enable pc=%h", reference_pc);
@@ -177,6 +195,10 @@ module tb_scoreboard_core;
         if ((mem_req_valid & mem_req_ready) == 3) dual_requests++;
         if (|issue_fire && !dut.mdu_req_ready && dut.lane_class[0] == SCHED_ALU) background_alu++;
         for (int lane = 0; lane < 2; lane++) begin
+            if (issue_fire[lane] && dut.scheduled[lane].uop.sys_op == SYS_FENCE) begin
+                assert (!dut.lsu_busy) else $fatal(1, "FENCE executed before LSU drain");
+                fence_executed = 1;
+            end
             if ($test$plusargs("DEBUG") && issue_fire[lane] && dut.scheduled[lane].uop.branch_op != BR_NONE)
                 $display("BR issue cycle=%0d lane=%0d pc=%h op=%0d shared_lane=%0d taken=%0d target=%h computed_next=%h",
                     cycles, lane, dut.scheduled[lane].pc, dut.scheduled[lane].uop.branch_op, dut.branch_lane,
@@ -186,7 +208,11 @@ module tb_scoreboard_core;
                     dut.producers[slot].valid && dut.producers[slot].gpr_write &&
                     dut.producers[slot].rd == dut.alloc_meta[lane].rd) live_waw++;
             end
-            if (mem_req_valid[lane] && mem_req_ready[lane]) requests++;
+            if (mem_req_valid[lane] && mem_req_ready[lane]) begin
+                requests++;
+                if (mem_request[lane].address == 548)
+                    assert (fence_executed) else $fatal(1, "younger memory crossed FENCE");
+            end
             if (commit_trace[lane].valid) check_retire(commit_trace[lane]);
         end
         assert (cycles < 20000) else $fatal(1, "timeout pc=%h ROB=%0d IQ=%0d", reference_pc, dut.rob_occupancy, dut.iq_occupancy);
@@ -212,10 +238,13 @@ module tb_scoreboard_core;
         emit(enc_sw(2, 0, 544)); emit(enc_addi(6, 5, 4));
         for (int i = 0; i < 256; i++) emit(enc_addi(gpr_addr_t'(1+i%30), 0, i));
         emit(enc_addi(1, 0, 2003)); emit(enc_addi(2, 0, 7)); emit(enc_divu(3, 1, 2));
+        // RAW 消费者在前，独立 ALU 在后，局部乱序须在除法结果前推进独立项。
+        emit(enc_addi(4, 3, 1));
         for (int i = 0; i < 8; i++) emit(enc_addi(gpr_addr_t'(10+i), 0, i+9));
         emit(enc_addi(1, 0, 13)); emit(enc_addi(3, 3, 4)); emit(enc_addi(3, 3, 2));
         emit(enc_mul(4, 1, 2)); emit(enc_addi(4, 0, 71)); emit(enc_add(5, 4, 3));
         emit(enc_sw(5, 0, 512)); emit(enc_lw(6, 0, 512)); emit(enc_addi(7, 6, 1));
+        emit(32'h0ff0000f); emit(enc_lw(29, 0, 548));
         // 错路的同名写者、访存与 MDU 都必须被恢复取消。
         emit(enc_beq(7, 7, 16)); emit(enc_addi(7, 0, 999)); emit(enc_sw(7, 0, 516)); emit(enc_divu(8, 7, 2));
         emit(enc_addi(8, 7, 2)); emit(enc_addi(9, 0, 1));
@@ -242,12 +271,15 @@ module tb_scoreboard_core;
         assert (max_issue_streak >= 64 && max_retire_streak >= 64)
             else $fatal(1, "sustained dual throughput issue=%0d retire=%0d", max_issue_streak, max_retire_streak);
         assert (live_waw > 0 && background_alu > 0 && branches >= 3) else $fatal(1, "coverage WAW/MDU/branch missing");
+        if (LIMITED_INTEGER_OOO) assert (integer_bypasses > 0) else $fatal(1, "integer bypass coverage missing");
+        assert (fence_executed) else $fatal(1, "FENCE coverage missing");
         assert (dual_requests > 0 && pair_counts[int'(SCHED_MEMORY)][int'(SCHED_MEMORY)] > 0)
             else $fatal(1, "dual LSU issue/request coverage missing");
         assert (ram[516] == 0 && ram[520] == 0 && ram[544] == 0) else $fatal(1, "wrong-path Store");
         assert (decode_jals[0] > 0 && decode_jals[1] > 0 && frontend_jumps > 0 &&
                 frontend_jumps <= decode_jals[0] + decode_jals[1]) else $fatal(1, "D1 JAL lane coverage");
         $display("FRONTEND JAL lane0=%0d lane1=%0d redirects=%0d", decode_jals[0], decode_jals[1], frontend_jumps);
+        $display("SCHEDULER integer_bypasses=%0d", integer_bypasses);
         $display("PASS tb_scoreboard_core XLEN=%0d retired=%0d cycles=%0d issue_streak=%0d retire_streak=%0d live_waw=%0d background_alu=%0d",
                  XLEN, retired, cycles, max_issue_streak, max_retire_streak, live_waw, background_alu);
         for (int a = 0; a < 5; a++)

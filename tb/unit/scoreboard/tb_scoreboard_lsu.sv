@@ -23,6 +23,7 @@ module tb_scoreboard_lsu;
     retire_id_t store_owner_id;
     int completions, dual_requests, rejects;
     retire_gpr_forward_t early_forward [2];
+    retire_gpr_forward_t load_return [2], store_forward_hint [2];
     load_store_queue dut (.*);
     always #5 clk = ~clk;
     function automatic retire_id_t tag(input int slot, input int generation = 1);
@@ -144,16 +145,29 @@ module tb_scoreboard_lsu;
         head_valid = 0;
         enqueue(store(0,256,1,DBUS_BYTES'(1),MEM_BYTE),store(1,256,2,DBUS_BYTES'(1),MEM_BYTE),1);
         enqueue(store(2,256,3,DBUS_BYTES'(1),MEM_BYTE),store(3,256,4,DBUS_BYTES'(1),MEM_BYTE),1);
+        // SQ 满时仍可独立接纳 Load，同拍 Store 只对自己的队列反压。
+        descriptor[0] = load(4,256); descriptor[1] = store(8,256,5,DBUS_BYTES'(1),MEM_BYTE);
+        offer_valid = 3;
+        #1; assert (issue_ready == 1) else $fatal(1, "full SQ blocked independent LQ capacity");
+        idle();
         enqueue(load(4,256),load(5,256),1);
         enqueue(load(6,256),load(7,256),1);
         descriptor[0] = load(8,256); descriptor[1] = store(9,256,5,DBUS_BYTES'(1),MEM_BYTE);
         offer_valid = 3;
         #1; assert (issue_ready == 0 && mem_req_valid == 0) else $fatal(1, "LQ/SQ full backpressure");
         idle(); clear_queue();
-        // ROB 跨尾部回绕后，slot 15 的 Store 比 slot 14 新，又比 slot 0 的 Load 老。
-        head_slot = RETIRE_IDX_W'(14);
-        enqueue(store(14,256,xlen_t'(32'h11223344),DBUS_BYTES'(15),MEM_WORD),
-                store(15,257,xlen_t'(32'h00005500),DBUS_BYTES'(2),MEM_BYTE),1);
+        // MMIO Load 等待队头授权，LQ 满时 SQ 的两个分配口仍保留容量。
+        enqueue(load(0,int'(soc_addr_pkg::MTIME_BASE)),load(1,int'(soc_addr_pkg::MTIME_BASE)),1);
+        enqueue(load(2,int'(soc_addr_pkg::MTIME_BASE)),load(3,int'(soc_addr_pkg::MTIME_BASE)),1);
+        descriptor[0] = load(4,256); descriptor[1] = store(5,256,5,DBUS_BYTES'(1),MEM_BYTE);
+        offer_valid = 3;
+        #1; assert (issue_ready == 2 && mem_req_valid == 0)
+            else $fatal(1, "full LQ blocked independent SQ capacity or MMIO authorization");
+        idle(); clear_queue();
+        // ROB 跨尾部回绕后，末槽 Store 比倒数第二槽新，又比 slot 0 的 Load 老。
+        head_slot = RETIRE_IDX_W'(RETIRE_ENTRIES-2);
+        enqueue(store(RETIRE_ENTRIES-2,256,xlen_t'(32'h11223344),DBUS_BYTES'(15),MEM_WORD),
+                store(RETIRE_ENTRIES-1,257,xlen_t'(32'h00005500),DBUS_BYTES'(2),MEM_BYTE),1);
         enqueue(load(0,256),'0); tick();
         #1; assert (complete_valid[0] && completion[0].result.gpr_data == xlen_t'(32'h11225544))
             else $fatal(1, "wrapped Store age forwarding");

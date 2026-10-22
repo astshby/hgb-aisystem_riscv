@@ -1,6 +1,35 @@
 # 项目介绍
 
-> 写作约束：[skills/regulation.md](../../skills/regulation.md)。本文给项目目录、参数、环境、仿真和 FPGA 的当前状态，不把规划写成已实现。
+> 写作约束：[regulation.md](../../regulation.md)。本文给项目目录、参数、环境、仿真和 FPGA 的当前状态，不把规划写成已实现。
+
+P1.1a 的 LQ/SQ 控制与数据已拆分，实测源码 `core/p1-1a-split-lq-sq@a23b65c`。
+双宽完整仿真及 RV32 四次同镜像比较通过，标准 PDS 为 86.1721 MHz、85 MHz WNS
++0.160 ns、零未布通，详见 [双发射](understand/DUAL_ISSUE.md) 和
+[FPGA 适配](fpga/FPGA_ADAPTATION.md)。`core/p1-1b-rob32-split-iq@f547da3` 为
+ROB32、int8/mem4 IQ，按全局年龄顺序发射。完整回归 RV32 228 PASS/5 SKIP、
+RV64 264 PASS/5 SKIP；四次同镜像比较通过，标准 PDS 尚未完成。
+M0/M1 为 2.635803/2.335916 CoreMark/MHz，较本次 GCC 11.4 重建 P0 提高 0.0814%/0.7759%。
+P1.2 开发分支为 `core/p1-2-limited-integer-ooo`，开关 `LIMITED_INTEGER_OOO=1`。
+整数队列选择最老就绪项，访存保持 FIFO 和串行屏障，精确退休沿用原 ROB。
+双宽各三项定向通过，Core 各观察到 30 次越过阻塞整数项。
+就绪旁路限于 ALU/MDU，访存/分支保持接纳顺序，晚异常不能占住老 IQ 项所需的 ISS。
+十场景精确事件通过，Core ISA 为 RV32 58 PASS/2 SKIP、RV64 78 PASS/2 SKIP。
+`5963d72` 完整回归为 RV32 229 PASS/5 SKIP、RV64 265 PASS/5 SKIP，四次同镜像比较通过。
+M0/M1 为 2.670535/2.378539 CoreMark/MHz，较重建 P0 提高 1.4002%/2.6147%。
+P1.3 开发分支为 `core/p1-3-iq-forward-timing`。已编写并行年龄序位选择，以及全部
+旁路、分支屏蔽、全部 LSU 捕获、仅 Store 提示捕获四种模式；分配捕获在分流前共享。
+四模式双宽定向各 17 PASS/0 SKIP，Core 均为 492/510 拍，新增统计计数器双宽各 1 PASS、
+解析器 8 PASS；新双宽 P0 LSU 差分各 5 PASS/0 SKIP。`ea3fb0a` 五组、二十次固定镜像
+比较通过，选模式 3 + Tournament/RAS，M0/M1 为 2.933400/2.566781/MHz，较同镜像重建
+P0 提高 11.3812%/10.7359%。配置入口为 `scripts/verilator/p1_core_config.sh`。
+`8c072c0` 最终回归为 RV32 237 PASS/4 SKIP、RV64 269 PASS/4 SKIP，含八次 RV32 重放，
+两轮的 CRC、ROI/TB、统计和镜像哈希完全相同。最终综合为 57,437 LUT、41,497 FF、
+零 latch、36 DRM、4 APM，双 TCM 初值匹配，保留 8/10/10 级。两次标准 place 在
+20,193/22,191 MB 内存池峰值时分配失败；重试启动前物理可用/提交余量 19.988/24.021 GiB，
+仍发生虚拟内存不足。用户已要求暂停布局；原工程和日志保留，没有最终 Fmax/WNS、
+物理资源、最差路径或未布通数量，最终 P1 物理验收未完成。
+P1.1b 中间布线第 13 轮仍有 24,179/69,295 条未布通，已主动终止，没有最终时序报告。
+下文 r15 和旧控制组的数据保留原镜像、配置及历史归属；当前 P1 结果见本文开头。
 
 ## 1. 项目是什么
 
@@ -92,7 +121,7 @@ RT-Thread 和 UART loader 需要先恢复依赖或用 `RTTHREAD_ROOT` 指向已�
 
 ## 5. 仿真性能
 
-当前实测源码为 `core/pipe-lsu-forward-format@dffb8a2`，RV32 四次重放与 ISS
+历史 r15 实测源码为 `core/pipe-lsu-forward-format@dffb8a2`，RV32 四次重放与 ISS
 `85ab1ca`、完成预选 `180f6fc` 的 ROI/TB、CRC 和全部计数相同；CMP `2b49c77`
 作为联合阶段父对照。p0/r0、DSP/SRT、双发射、ROB16，固定 64 次迭代：
 
@@ -195,9 +224,9 @@ r15 最差路径转为 LSQ 地址比较/转发资格/请求选择，经提示标
 
 Core：
 
-- RV32/RV64 I/M/Zicsr，scoreboard 后端支持顺序前缀双发射、独立完成和按序双退休。
+- RV32/RV64 I/M/Zicsr，scoreboard 后端支持双发射、有限整数乱序选择、独立完成和按序双退休。
 - DSP/Booth-Wallace/移位乘法，SRT/移位除法。
-- ROB16、RAT 标签重命名、IQ8；精确异常、机器中断、CSR。
+- P0 为 ROB16/IQ8；P1 配置为 ROB32/int8/mem4、有限整数乱序；RAT、精确异常、机器中断、CSR。
 - 分支预测、BTB、GShare/Local/chooser、RAS。
 - 双 ALU/AGU、LQ4/SQ4、两个带标签数据口、Store 到 Load 的逐字节转发。
 - Store/MMIO 只在队头发起，D$ 同 bank 冲突串行，共享 DDR 填充/写回带宽。
@@ -215,14 +244,13 @@ AI：
 
 - 目标接口是文本输入、模型推理、文本输出。
 - 加速器尚未交付；DMA 和 MMIO 接口先准备。
-- 当前先完成顺序双发射 Core 的联合性能验收；C 扩展和乱序发射暂缓，AI 接口单独规划。
+- 当前完成 P1 有限整数乱序 Core 的联合验收；C 扩展暂缓，AI 接口单独规划。
 
 ## 8. 未来
 
-1. 按 CMP、ISS 完成 8–10 级，每级测 M0/M1 和标准 PDS；CMT 仅在合并已有边界后评估；
-   RV32 完整 SoC 达到 85 MHz 且两个指标通过后，再冻结新 P0。
-2. 按工作区 `OPTIMIZATION_PLAN.md` 的 P1 至 P6 分阶段优化，每轮复测
-   CoreMark/MHz 与 Fmax；保持同域，整体提频受阻后再评估多域时钟。
+1. P0 已冻结，完成 P1 的最终双宽回归、八次重放和完整 SoC 85 MHz 标准 PDS。
+2. 按工作区 `OPTIMIZATION_PLAN.md` 的 P1 Core、P2 Memory/SoC、P3 Clock/CDC 推进，
+   每轮复测 CoreMark/MHz 与 Fmax；本轮保持 ALU/Load/DSP 8/10/10 级，不增加 CMT。
 3. 补 DDR 执行、外设背景负载和资源效率成绩，保留 M0/M1 分项。
 4. 恢复 RT-Thread 依赖并完成真实 DDR/UART/ILA、十秒 CoreMark、功耗和 AI 接口。
 

@@ -4,10 +4,12 @@ RV32 优先的 RISC-V Core/SoC 协作仓库。目标是 RT-Thread 上的文本�
 推理、文本输出；RV64 跟随共享架构验证。近期不把 Linux、MMU、F/V、图像链路作为
 交付前提。
 
-`CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16` 选择正在验收的新 P0：
+关闭 P1 开关时，`CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16` 选择冻结 P0：
 RAT 绑定 ROB 标签、IQ8 顺序双发射、两个完整 ALU、共享分支/MDU、LQ4/SQ4 双 AGU，
 两个完成口与按序双退休。原生 IF64 和双数据口已接入 SoC；MMIO/Store 受队头许可。
 默认 `CORE_BACKEND=legacy` 保留旧 IF→D1→D2→EX→MEM→WB 控制组。
+P1 使用 `source scripts/verilator/p1_core_config.sh`，选择 ROB32、int8/mem4、有限整数
+乱序和按序双退休；预测器、转发策略及完整参数由该配置入口固定。
 
 ## 当前能力
 
@@ -21,6 +23,49 @@ RAT 绑定 ROB 标签、IQ8 顺序双发射、两个完整 ALU、共享分支/MD
 - 标准 AXI 与 Pango 原生 DDR 桥；RT-Thread BSP、UART loader、CoreMark。
 
 ## 当前状态
+
+P1.1a 候选位于 `core/p1-1a-split-lq-sq`，起点为已合入的 `main@094443e`。
+`load_queue.sv` 和 `store_queue.sv` 分别持有描述符、状态和完成数据，
+`load_store_queue.sv` 负责外部双端口仲裁与锁定。保持 ROB16/IQ8、按序发射、
+Store/MMIO 队头许可和 8/10/10 级边界；新增与 P0 LSU 原实现的逐周期比较入口
+`bash scripts/verilator/run_lsq_equivalence.sh 32`，RV64 同入口替换位宽。
+完整仿真已完成：RV32 231 PASS/5 SKIP，RV64 267 PASS/5 SKIP，包含双宽各五项
+P0 LSU 差分；RV32 四次 M0/M1 同镜像比较的周期、CRC 和全部统计保持。
+同镜像入口为 `scripts/verilator/compare_coremark.py`，新镜像使用 GCC 11.4，
+M0/M1 为 2.633659/2.317931 CoreMark/MHz，不能与下文 GCC 16.1 历史镜像混算。
+DDR IP 已生成，32/32 DQ 元数据匹配；完整 SoC 的 228 项暂存输入已校验。
+P1.1a 标准 PDS 已完成：86.1721 MHz、85 MHz WNS +0.160 ns、TNS 0，12 类 STA
+零失败，57,149 条网络全部布通；物理为 40,181 LUT、32,188 FF、36 DRM、4 APM。
+最差路径仍经 Store 地址、转发和 IQ 到分支，20 级、11.135 ns；结果绑定源码 `a23b65c`，
+记录为 `logs/p1/p1-1a/pds-result.json`。85 MHz 为内部 STA，未上板。
+`core/p1-1b-rob32-split-iq@f547da3` 使用 ROB32 和 int8/mem4 IQ，保持按序发射；
+显式选择为 `RETIRE_ENTRIES=32 SPLIT_ISSUE_QUEUE=1`。完整回归为 RV32 228 PASS/5 SKIP、
+RV64 264 PASS/5 SKIP，M0/M1 同镜像 performance 为 2.635803/2.335916 CoreMark/MHz。
+标准 PDS 尚未完成，原始命令和逐项哈希在 `logs/p1/p1-1b-drain/regression/summary.json`。
+P1.2 在 `core/p1-2-limited-integer-ooo` 开发。增加 `LIMITED_INTEGER_OOO=1` 时，
+整数 IQ 按完整标签保存操作数、选择最老就绪项；访存保持 FIFO，CSR/系统指令保留屏障。
+忙 MDU 留在 IQ，独立 ALU 可继续推进；ROB 仍按序退休。双宽各三项定向通过，
+Core 各观察到 30 次越过阻塞整数项。
+精确顺序修正后仅 ALU/MDU 可越过等待项，访存/分支保持接纳顺序及合法同拍配对。
+精确事件增至十场景，原未对齐超时已解决，Core ISA 为 RV32 58 PASS/2 SKIP、RV64 78 PASS/2 SKIP。
+`5963d72` 完整回归为 RV32 229 PASS/5 SKIP、RV64 265 PASS/5 SKIP，四次同镜像比较通过。
+M0/M1 为 2.670535/2.378539 CoreMark/MHz，较重建 P0 提高 1.4002%/2.6147%；
+参数、命令、源码及镜像哈希为 `logs/p1/p1-2-precise/regression/summary.json`。
+P1.3 在 `core/p1-3-iq-forward-timing` 完成五组、二十次固定镜像比较，实测源码 `ea3fb0a`。
+选择模式 3 + Tournament/RAS，M0/M1 为 2.933400/2.566781 CoreMark/MHz，
+较同镜像重建 P0 提高 11.3812%/10.7359%。四模式双宽定向各 17 PASS/0 SKIP，
+新增统计计数器各 1 PASS/0 SKIP、解析器 8 PASS；双宽 P0 LSU 差分各 5 PASS/0 SKIP。
+配置入口为 `source scripts/verilator/p1_core_config.sh`，随后调用原有 make/测试入口。
+`8c072c0` 最终回归已完成：RV32 237 PASS/4 SKIP、RV64 269 PASS/4 SKIP，RV32 包含八次
+固定镜像重放。两轮 CRC、ROI/TB、新旧统计和镜像哈希逐项相同，并与选定候选一致。
+最终综合通过，57,437 LUT、41,497 FF、零 latch，双 TCM 初值匹配。两次标准 place
+分别在 20,193/22,191 MB 内存池峰值时分配失败；重试前物理可用/提交余量为
+19.988/24.021 GiB，运行中 Windows 事件记录 PDS 提交量 42,237,083,648 字节及虚拟内存不足。
+用户已要求暂停布局，原工程和失败日志保留，尚无最终 Fmax/WNS 或未布通数量。
+本分支提交代码和仿真结果供评审，最终 P1 物理验收未完成，详见 [FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。
+模式说明见 [双发射](docs/understand/DUAL_ISSUE.md)。
+P1.1b 中间布线严重拥塞，已主动终止，未记作时序通过。
+以下 r15 数值为历史 P0 记录。
 
 新 P0 发布基线为 `publish/p0-r15`，实测 RTL 为 `dffb8a2`；原开发分支
 `core/pipe-lsu-forward-format@5fa11fb` 和本地发布准备分支 `baseline/p0-r15@6d92659`

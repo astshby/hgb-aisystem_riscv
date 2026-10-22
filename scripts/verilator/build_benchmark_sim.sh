@@ -17,7 +17,8 @@ if [[ "$core_backend" == scoreboard ]]; then host_cflags=(-CFLAGS -O1); fi
 extra_sources=()
 extra_options=()
 if [[ "$core_backend" == scoreboard ]]; then
-    extra_sources+=(tb/common/scoreboard_metrics.sv tb/benchmark/bind_scoreboard_metrics.sv)
+    extra_sources+=(tb/common/scoreboard_metrics.sv tb/benchmark/bind_scoreboard_metrics.sv
+                    tb/common/scoreboard_scheduler_metrics.sv tb/benchmark/bind_scheduler_metrics.sv)
 fi
 if [[ "${SOC:-0}" == "1" ]]; then
     extra_sources+=(tb/soc/axi_memory_model.sv tb/soc/axi_block_memory_model.sv)

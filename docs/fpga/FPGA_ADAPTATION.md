@@ -1,6 +1,47 @@
 # FPGA 适配与 PDS
 
-> 写作约束：[skills/regulation.md](../../../skills/regulation.md)。本文记录工具、流程、约束和结果，不把工具 Fmax 写成板上频率。
+> 写作约束：[regulation.md](../../../regulation.md)。本文记录工具、流程、约束和结果，不把工具 Fmax 写成板上频率。
+
+P1.1a 实测源码为 `core/p1-1a-split-lq-sq@a23b65c`，LQ/SQ 拆分后保持 ROB16/IQ8。
+标准综合、dev_map、place、route、route_optimize、report_timing 均完成，得到
+86.1721 MHz、85 MHz WNS +0.160 ns、TNS 0、12 类 STA 零失败，57,149 条网络全部布通。
+物理为 40,181 LUT、32,188 FF、36 DRM、4 APM、77 IO；综合为 37,486 LUT、32,057 FF、
+零 latch。228 项输入哈希和 I/D-TCM 各 64 KiB 初值均匹配。最差路径由 Store 地址
+经转发资格、提示标签、IQ 操作数选择到分支事件，20 级、11.135 ns，逻辑/布线
+4.481/6.654 ns，最高扇出 38。证据为 `logs/p1/p1-1a/pds-result.json`，原生工程在
+`$PDS_WORK_ROOT/work/p1-1a-lsq-split-20261022/soc-rv32`。85 MHz 为内部 STA，
+IP 实际配置仍为 125 MHz，35/73 项 I/O 延迟缺失，未上板。
+
+P1.1b `f547da3` 原生综合为 46,184 LUT、38,941 FF、36 DRM、4 APM、零 latch，
+229 项输入及双 TCM 初值通过。标准布局完成，place 内存池峰值 14,879.289 MB；
+布线第 13 轮仍有 24,179/69,295 条未布通、154,582 项 overused，主动取消中间运行。
+只停止已核对身份和项目路径的自有 route，父 PDS 随后退出；没有最终 Fmax/WNS。
+工程和原始报告保留在 `$PDS_WORK_ROOT/work/p1-1b-rob32-split-iq-20261022/`，
+取消记录为 `logs/p1/p1-1b-drain/pds-cancelled.json`，`Flow-0189/-1` 随取消出现。
+P1.3 选择 ROB32/int8/mem4、有限整数乱序、转发模式 3、Tournament/RAS。
+`8c072c0` 完整回归为 RV32 237 PASS/4 SKIP、RV64 269 PASS/4 SKIP，八次 RV32 固定镜像
+重放全部逐项一致。最终工程为 `$PDS_WORK_ROOT/work/p1-3-store-forward-tournament-20261022/soc-rv32`，
+230 项输入哈希、216 个 HDL 及全部参数通过，全部 FDC 与 P1.1a 逐字节相同，未修改 false path。
+综合入口物理可用/提交余量为 13.707/6.914 GiB，最终综合为 57,437 LUT、41,497 FF、
+零 latch、36 DRM、4 APM、77 IO，230 项输入和双 TCM 各 64 KiB 初值全部匹配。
+首轮标准实现入口为 17.859/20.725 GiB，place 入口为 17.314/20.179 GiB。标准 place
+在 EP_DL 阶段申请 51,145,552 字节失败，耗时 10 分 15 秒、内存池峰值 20,193 MB；
+没有进入 route，没有最终 Fmax/WNS，失败收据为 `logs/p1/p1-3-final/pds-place-failed.json`。
+原工程及全部原始报告保留，未主动取消。已从综合完成快照复制到全新目录
+`$PDS_WORK_ROOT/work/p1-3-memory-retry-20261022/soc-rv32`，283 个文件哈希一致，
+230 项输入及双 TCM 初值复查通过，未重编 RTL 或改约束。
+2026-10-22 22:57:13 +08:00 重试启动前物理可用/提交余量为 19.988/24.021 GiB，
+额外 16/24 GiB 检查通过；place 入口为 19.826/23.847 GiB，标准各阶段仍检查双 6 GiB。
+重试 place 在 EP_DL 申请 92,745,552 字节失败，耗时 6 分 8 秒、内存池峰值 22,191 MB，
+23:03:59 自然退出，没有进入 route。Windows 事件 2004 在 23:03:57 记录
+PDS 提交量 42,237,083,648 字节及虚拟内存不足；工具池峰值与进程提交量分别记录，
+24 GiB 启动余量未能支撑此配置。系统按现有设置自动增长分页文件，仍发生分配失败；
+没有手工修改分页或结束无关进程。
+证据为 `logs/p1/p1-3-final/{retry-place-failed.json,retry-resource-event.json,retry-monitor.jsonl}`，
+重试控制结果 `retry-controller-result.json` 为 FAIL。原工程、网表、两次失败日志和控制结果保留。
+用户已要求暂停布局；最终 P1.3 没有 Fmax/WNS、物理资源、最差路径或未布通数量，
+本次仅提交代码、仿真和综合结果供评审。后续明确恢复后再评估环境并使用新目录，
+不直接重跑已失败的控制入口或覆盖日志。不能将 P1.1a 的物理结果代替最终 P1.3。
 
 ## 1. 目标
 

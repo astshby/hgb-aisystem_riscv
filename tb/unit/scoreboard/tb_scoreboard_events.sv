@@ -8,6 +8,7 @@ module tb_scoreboard_events;
     import pipeline_pkg::*;
     import scoreboard_pkg::*;
     import riscv_priv_pkg::*;
+    import riscv_unpriv_pkg::*;
     import rv_asm_pkg::*;
     logic clk = 0, rst = 1, irq_software = 0;
     logic imem_req_valid, imem_req_ready, imem_rsp_valid, imem_rsp_ready, imem_rsp_error, imem_rsp_error_1;
@@ -110,6 +111,8 @@ module tb_scoreboard_events;
                                dut.trap_tval == 514) else $fatal(1, "misaligned JALR lost precise exception");
                     6, 7: assert (dut.trap_cause == xlen_t'(EXC_INST_ADDR_MISALIGNED) &&
                                dut.trap_tval == xlen_t'(fault_pc + 2)) else $fatal(1, "misaligned taken branch lost precise exception");
+                    8, 9: assert (dut.trap_cause == xlen_t'(EXC_LOAD_ADDR_MISALIGNED) &&
+                                  dut.trap_tval == 513) else $fatal(1, "misaligned load lost precise exception");
                     default: $fatal;
                 endcase
                 assert (request_count == (scenario inside {2,3} ? 1 : 0) &&
@@ -124,7 +127,7 @@ module tb_scoreboard_events;
             else $fatal(1, "flush allowed completion or issue transfer");
     end
     initial begin
-        for (scenario = 0; scenario < 8; scenario++) begin
+        for (scenario = 0; scenario < 10; scenario++) begin
             rst = 1; irq_software = 0; done = 0; irq_requested = 0; mret_seen = 0;
             cycles = 0; traps = 0; request_count = 0; store_count = 0; irq_count = 0;
             expected_resume = 0; saved_resume = 0; length = 0;
@@ -134,6 +137,8 @@ module tb_scoreboard_events;
                 emit(enc_addi(2, 0, 8)); emit(enc_csrrw(0, CSR_MIE, 2)); emit(enc_csrrs(0, CSR_MSTATUS, 2));
             end
             emit(enc_addi(4, 0, 2003)); emit(enc_addi(5, 0, 7)); emit(enc_divu(6, 4, 5));
+            // 保留等待除法的老整数，晚发现异常的年轻访存/分支不能占住其 ISS 入口。
+            emit(enc_addi(12, 6, 1));
             if (scenario == 5) emit(enc_addi(10, 0, 514));
             fault_pc = length * 4;
             unique case (scenario)
@@ -144,6 +149,8 @@ module tb_scoreboard_events;
                 5: emit(enc_jalr(7, 10, 0));
                 6: emit(enc_beq(0, 0, 2));
                 7: emit(enc_jal(7, 2));
+                8: emit(enc_i(513, 0, F3_LOAD_LH, 7, OPCODE_LOAD));
+                9: emit(XLEN == 64 ? enc_ld(7, 0, 513) : enc_lw(7, 0, 513));
                 default: emit(enc_addi(7, 0, 1));
             endcase
             for (int idx = 0; idx < 20; idx++) emit(enc_addi(gpr_addr_t'(8+idx%8), 0, idx));
@@ -166,7 +173,7 @@ module tb_scoreboard_events;
             $display("EVENT scenario=%0d cycles=%0d requests=%0d stores=%0d irq=%0d", scenario, cycles, request_count, store_count, irq_count);
             rst = 1; @(negedge clk);
         end
-        $display("PASS tb_scoreboard_events XLEN=%0d scenarios=8 IRQ illegal load_error store_error fetch_error jalr_align branch_align jal_align", XLEN);
+        $display("PASS tb_scoreboard_events XLEN=%0d scenarios=10 IRQ illegal load_error store_error fetch_error jalr_align branch_align jal_align lh_align wide_load_align", XLEN);
         $finish;
     end
 endmodule

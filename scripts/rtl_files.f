@@ -4,9 +4,9 @@ vsrc/pkg/riscv_priv_pkg.sv
 vsrc/pkg/core_types_pkg.sv
 vsrc/pkg/predictor_types_pkg.sv
 vsrc/pkg/pipeline_pkg.sv
-vsrc/pkg/scoreboard_pkg.sv
 vsrc/pkg/soc_config_pkg.sv
 vsrc/pkg/soc_addr_pkg.sv
+vsrc/pkg/scoreboard_pkg.sv
 vsrc/pkg/bus_types_pkg.sv
 vsrc/pkg/block_types_pkg.sv
 vsrc/core/csr/csr_exec.sv
@@ -62,6 +62,8 @@ vsrc/core/execute/ex_stage.sv
 vsrc/core/lsu/load_unit.sv
 vsrc/core/lsu/store_unit.sv
 vsrc/core/lsu/lsu_transaction.sv
+vsrc/core/lsu/load_queue.sv
+vsrc/core/lsu/store_queue.sv
 vsrc/core/lsu/load_store_queue.sv
 vsrc/core/lsu/mem_stage.sv
 vsrc/core/writeback/wb_response_register.sv
@@ -77,6 +79,8 @@ vsrc/core/control/pipeline_ctrl.sv
 vsrc/core/control/issue_pairing.sv
 vsrc/core/control/rename_table.sv
 vsrc/core/control/scoreboard_queue.sv
+vsrc/core/control/integer_issue_queue.sv
+vsrc/core/control/split_scoreboard_queue.sv
 vsrc/core/control/issue_queue.sv
 vsrc/core/control/serialize_controller.sv
 vsrc/core/control/interrupt_entry.sv

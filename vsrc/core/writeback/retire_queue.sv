@@ -137,8 +137,8 @@ module retire_queue #(
 `ifndef SYNTHESIS
     // 自然回卷依赖二次幂容量；独立实例化也必须拒绝不受支持的构建参数。
     initial begin
-        assert (RETIRE_ENTRIES inside {2, 4, 8, 16})
-            else $fatal(1, "CORE_RETIRE_ENTRIES must be 2, 4, 8, or 16");
+        assert (RETIRE_ENTRIES inside {2, 4, 8, 16, 32})
+            else $fatal(1, "CORE_RETIRE_ENTRIES must be 2, 4, 8, 16, or 32");
         assert ((ISSUE_WIDTH == 1) || (ISSUE_WIDTH == 2))
             else $fatal(1, "CORE_ISSUE_WIDTH must be 1 or 2");
     end

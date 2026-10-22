@@ -1,6 +1,105 @@
 # 双发射学习
 
-> 写作约束：[skills/regulation.md](../../../skills/regulation.md)。本文描述当前 scoreboard 后端及旧控制组边界。
+> 写作约束：[regulation.md](../../../regulation.md)。本文描述当前 scoreboard 后端及旧控制组边界。
+
+当前 P1.1a 候选从 `main@094443e` 建立 `core/p1-1a-split-lq-sq`。
+LQ/SQ 的控制和数据已拆入两个模块：LQ 持有 Load 描述符、逐字节 Store 转发、
+读返回格式化及完成；SQ 持有 Store 描述符、队头写授权、写返回及完成。
+两者通过 `lsu_entry_view_t` 共享存活描述符，分别拥有分配容量和状态写使能。
+包装层只保留双端口请求仲裁、反压 owner、重复响应路由和两项完成选择。
+ROB16/IQ8、按序发射、完整标签、取消排空与 ALU/Load/DSP 的 8/10/10 级边界保持。
+`run_lsq_equivalence.sh` 从 P0 提交提取参考 LSU，逐沿检查有效请求、完成、转发、
+Store owner、拒绝响应与容量；现有 LSU 测试另覆盖单类队列满时另一类可分配。
+完整仿真已通过：RV32 231 PASS/5 SKIP，RV64 267 PASS/5 SKIP，包含各五项
+LSU 差分检查。四次 RV32 M0/M1 同镜像比较的 CRC、ROI/TB 周期和全部统计相同。
+新镜像由 GCC 11.4 编译，M0/M1 performance 为 2.633659/2.317931 CoreMark/MHz。
+DDR IP 已用厂商 HMIC_S 1.10 包自行生成，32/32 DQ 元数据匹配；新完整 SoC 工程
+的 228 项输入已校验。P1.1a 标准 PDS 已完成：86.1721 MHz、85 MHz WNS +0.160 ns、
+TNS 0、12 类 STA 零失败、零未布通。物理 40,181 LUT、32,188 FF、36 DRM、4 APM；
+最差路径仍由 Store 地址经转发、IQ 操作数选择进入分支，20 级、11.135 ns。
+结果为 `logs/p1/p1-1a/pds-result.json`，实测源码 `a23b65c`，未上板。
+P1.1b 位于 `core/p1-1b-rob32-split-iq`，显式选择 `RETIRE_ENTRIES=32 SPLIT_ISSUE_QUEUE=1`。
+`split_scoreboard_queue.sv` 分别保存 int8/mem4 操作数并合并全局最老两项，
+保持按序发射，提交 `f547da3` 完整回归为 RV32 228 PASS/5 SKIP、RV64 264 PASS/5 SKIP。
+四次同镜像比较通过，M0/M1 为 2.635803/2.335916 CoreMark/MHz，标准 PDS 尚未完成。
+P1.2 在 `core/p1-2-limited-integer-ooo` 开发，显式开启 `LIMITED_INTEGER_OOO=1`。
+`integer_issue_queue.sv` 使用独立有效位分配空槽，选择最老就绪整数项，不压缩宽包数组。
+完整 ROB 标签和已捕获数据保留 RAW/WAW/WAR 语义；忙 MDU 留在 IQ，避免占住 ISS。
+内存队列保持 FIFO，未知 Store 地址挡住后续 Load。整数 IQ 中尚未接纳的 CSR/系统
+指令阻止年轻候选越过；串行项到 ROB 队头后才进入 ISS，执行时仍要求 LSU 排空。
+就绪旁路只允许 ALU/MDU 越过等待项，访存和分支保留接纳顺序。队列暴露最老两个
+未发射整数标签，同拍第一条带走老项时仍允许第二条有序访存，容量不借用当拍 pop。
+首轮 ISA 的未对齐半字/双字超时来自年轻晚异常先占 ISS，阻塞尚在 IQ 的老分支；
+修正上述顺序边界后，十场景精确事件及双宽定向通过；Core ISA 为 RV32 58 PASS/2 SKIP、
+RV64 78 PASS/2 SKIP，原三个超时用例均通过。
+定向测试覆盖旁路、数据依赖、MDU 忙、串行屏障、空槽复用及回绕恢复，双宽各三项
+通过。Core 为 RV32 830 条/492 拍、RV64 832 条/510 拍，各观察到 30 次实际整数旁路；
+新增 RAW 消费者与 FENCE 用例，指令流与 P1.1b 的 Core 测试不同，不直接比较拍数。
+精确事件十场景通过；快照/PDS 交接/时序工具分别 27/25/18 PASS。
+`5963d72` 完整回归为 RV32 229 PASS/5 SKIP、RV64 265 PASS/5 SKIP，四次同镜像比较通过。
+M0/M1 为 2.670535/2.378539 CoreMark/MHz，较重建 P0 提高 1.4002%/2.6147%。
+performance 全程 RAW 等待为 1,620,773/3,479,525 拍，P1.1b 为 2,342,183/4,942,543 拍；
+LSU 等待增至 984,283/1,452,702 拍，ISS 的 MDU 反压计数均为零；该计数不包含 IQ
+内部等待，不据此判断全部 MDU 瓶颈。未增加 MDU 或 ALU 流水级。
+结果及命令为 `logs/p1/p1-2-precise/regression/summary.json`。
+P1.3 在 `core/p1-3-iq-forward-timing` 开发。整数选择改为并行
+年龄序位和独热数据选择，新增 6,144 组就绪掩码、年龄排列及资源组合测试。
+旧 LSU 早期总线同时包含 Store 转发和合法读返回，现分源并保留原同口返回优先级。
+Store 提示仍在同口合法返回有效时关闭；请求、取消、响应和完成握手保持。
+
+| `SCHEDULER_FORWARD_MODE` | 捕获与当拍选择 |
+| --- | --- |
+| 0 | 保留原全部旁路，作为周期对照 |
+| 1 | 分支忽略全部 LSU 提示，其他类别保留当拍旁路 |
+| 2 | 分支忽略全部 LSU 提示，其他类别先捕获 LSU 提示再选择 |
+| 3 | 合法读返回保留直通，Store 提示先捕获；分支忽略 Store 提示 |
+
+九口旁路分别为两口 ROB 完成、两口 ALU 入 CMP、一口 MDU 入 CMP、两口合法读返回、
+两口 Store 提示，均保留完整 ID、取消和错误检查。模式 1/2 对分支的寄存捕获和当拍
+视图同时屏蔽；模式 3 分开合法返回与晚 Store 资格。周期结果如下，频率待最终 PDS。
+分配时在类型分流之前共享 ROB/广播捕获，bank 不再重复读 ROB，仍各自保存等待状态。
+四模式双宽定向各 17 PASS/0 SKIP，包含 6,144 组选择检查、跨 bank 捕获、来源优先级
+及十场景精确事件；Core 均为 492/510 拍。新增被动 IQ 统计的计数器双宽各 1 PASS、
+解析器 8 PASS，双宽 P0 LSU 差分各 5 PASS/0 SKIP。
+
+`ea3fb0a` 五组、二十次 RV32 固定镜像比较全部通过，镜像均复用 GCC 11.4 重建 P0。
+
+| 转发模式 / predictor / RAS | M0 performance ROI | M1 performance ROI | M0/M1 CoreMark/MHz |
+| --- | ---: | ---: | --- |
+| 0 / 0 / 0 | 23,965,231 | 26,907,276 | 2.670535 / 2.378539 |
+| 1 / 0 / 0 | 26,094,649 | 29,072,228 | 2.452610 / 2.201414 |
+| 2 / 0 / 0 | 26,934,277 | 30,152,459 | 2.376154 / 2.122547 |
+| 3 / 0 / 0 | 23,970,812 | 26,911,686 | 2.669914 / 2.378149 |
+| 3 / 1 / 1 | 21,817,688 | 24,933,959 | 2.933400 / 2.566781 |
+
+模式 0 的四次 CRC、ROI/TB 及全部旧统计与 P1.2 完全相同。屏蔽分支全部 LSU 旁路
+增加等待；模式 3 相对 P1.2 的 performance 周期仅增加 0.0233%/0.0164%。选择模式 3
+配合 Tournament/RAS，比同镜像 P0 得分提高 11.3812%/10.7359%；validation ROI 为
+21,883,523/25,043,117。配置入口为 `source scripts/verilator/p1_core_config.sh`。
+原始命令、镜像和结果哈希在 `logs/p1/p1-3/candidate-summary.json`，所有仿真器已封存。
+
+新 IQ 统计使用完整生产者标签区分 RAW 来源，计数可重叠；模式 0 的 M0/M1 全程
+MDU 资源等待只有 741/742 拍，Load RAW 为 11,140,475/14,601,178 拍。IQ 无候选
+不等于 Core 无发射，访存 bank 同拍仍可能工作；不将这些计数与旧 `no_issue` 分类相加。
+本轮保留 ALU/MDU 级数。`8c072c0` 最终回归为 RV32 237 PASS/4 SKIP、
+RV64 269 PASS/4 SKIP，RV32 包含八次固定镜像重放。两轮的 CRC、ROI/TB、新旧统计和
+镜像哈希逐项一致，也与选定候选一致；原始日志和实际仿真器已封存。
+结果为 `logs/p1/p1-3-final/regression/summary.json` 和 `replay-audit.json`。
+另外双宽各五项 LSU 差分通过，RTL/TB 与最终提交逐文件相同。
+最终原生工程包含 230 项已校验输入、216 个 HDL，全部 FDC 与已通过 P1.1a 的版本逐字节
+相同，没有修改 false path。综合为 57,437 LUT、41,497 FF、零 latch、36 DRM、4 APM，
+230 项输入及 I/D-TCM 各 64 KiB 初值匹配。首轮标准 place 在 20,193 MB 内存池峰值
+时申请 51,145,552 字节失败，没有布线或最终 STA。从综合完成快照复制到全新目录，
+283 个文件哈希一致，230 项输入和双 TCM 再次通过。重试启动前物理可用/提交余量
+19.988/24.021 GiB，place 仍在申请 92,745,552 字节时失败，内存池峰值 22,191 MB，
+耗时 6 分 8 秒；Windows 事件 2004 记录 PDS 提交量 42,237,083,648 字节及虚拟内存不足。
+两次均未进入 route，不将工具内存池峰值当作进程提交量。失败收据为
+`logs/p1/p1-3-final/retry-place-failed.json`，原工程、网表和日志保留。
+用户已要求暂停布局；最终 P1.3 没有 Fmax/WNS、物理资源、最差路径或未布通数量，
+代码与仿真结果提交分支 PR，最终物理验收未完成。
+P1.1b 中间工程标准布局完成，布线第 13 轮仍有 24,179/69,295 条未布通，已主动终止并
+保留全部日志，没有最终 Fmax/WNS。记录为 `logs/p1/p1-1b-drain/pds-cancelled.json`。
+以下 r15 数据保持其历史归属。
 
 新 P0 按工作区 [Codex B11](../../../OPTIMIZATION_PLAN.md#b11-core-完善后建立新-p0scoreboard-双发射)
 实施。r15 已通过 RV32 完整 SoC 的 85 MHz 内部 STA，用户已决定冻结为新 P0，
@@ -10,9 +109,9 @@
 
 ## 1. 流水与状态所有权
 
-主配置为 `CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16 MUL_IMPL=0 DIV_IMPL=1`，
+P0 冻结配置为 `CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16 MUL_IMPL=0 DIV_IMPL=1`，
 IQ8、LQ4/SQ4、checkpoint4、p0/r0。`CORE_BACKEND=legacy` 保留原控制组。
-当前开发分支 `core/pipe-lsu-forward-format` 基于完成预选测量文档检查点 `57ca4d2`。
+r15 开发分支 `core/pipe-lsu-forward-format` 基于完成预选测量文档检查点 `57ca4d2`。
 已将转发值按 Load 槽提前格式化，再按原选择向量送两个输出；提示有效与载荷分离，
 保留全部资格/取消规则和请求/完成时点。双宽 LSQ/Core/events 共 10 PASS，新增
 双口不同偏移/类型及旧错误响应同拍的用例。`dffb8a2` 完整测量已完成，RV32
@@ -67,7 +166,9 @@ Cache miss 或外部 DDR 访问都在十拍内完成。MDU 适配器只保存标
 | 已就绪待执行指令 | `issue_queue.sv`，两项完整寄存包与分支结果，双出双入、部分消费、取消压紧 |
 | 推测结果、异常、退休顺序 | `retire_queue.sv`，16 项 ROB，标签包含槽号与代次 |
 | 待中央接纳的完成结果 | `completion_queue.sv`，五源各两项，寄存结果、完整 ID 和异常 |
-| 外部访存事务 | `load_store_queue.sv`，LQ4/SQ4、请求 owner、返回与取消排空 |
+| Load 事务 | `load_queue.sv`，LQ4、逐字节转发、读返回与取消排空 |
+| Store 事务 | `store_queue.sv`，SQ4、队头授权、写返回与取消排空 |
+| 访存端口仲裁 | `load_store_queue.sv`，两个请求 owner、响应路由、两项完成选择 |
 | 分支恢复 | 四份 RAT checkpoint、ROB 年龄边界和执行/LSQ 取消接口 |
 
 采用 data-in-ROB 重命名，没有额外 PRF/free-list。多个同名写者可以同时在途，

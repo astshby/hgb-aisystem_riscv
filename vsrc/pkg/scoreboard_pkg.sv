@@ -38,6 +38,19 @@ package scoreboard_pkg;
         logic error;
     } memory_response_t;
 
+    // LQ/SQ 只共享存活项和寄存描述符视图；状态、结果与写使能由各队列独立持有。
+    typedef struct packed {
+        logic valid;
+        logic killed;
+        lsu_descriptor_t descriptor;
+    } lsu_entry_view_t;
+
+    // 仅无副作用的物理内存允许提前读，MMIO 和高位地址须取得 ROB 队头授权。
+    function automatic logic speculative_ram(input xlen_t address);
+        return address < xlen_t'(soc_addr_pkg::MTIME_BASE) ||
+               ((address >> 31) == xlen_t'(1));
+    endfunction
+
     typedef enum logic [2:0] {
         SCHED_ALU, SCHED_BRANCH, SCHED_MDU, SCHED_MEMORY, SCHED_SERIAL
     } schedule_class_e;
@@ -53,6 +66,24 @@ package scoreboard_pkg;
             return SCHED_MEMORY;
         else
             return SCHED_ALU;
+    endfunction
+
+    // 前五口来自已完成结果和 ALU/MDU 入 CMP，随后分开合法读返回和 Store 转发提示。
+    // 分支屏蔽提示时，捕获与当拍视图同时屏蔽；寄存模式仍允许 ALU/MDU 保存提示数据。
+    localparam int unsigned LSU_RETURN_FIRST = 5;
+    localparam int unsigned LSU_HINT_FIRST = 7;
+    function automatic logic operand_forward_enabled(
+        input d2_ex_t packet, input int unsigned portno, input logic issue_view
+    );
+        if (portno < LSU_RETURN_FIRST) return 1;
+        unique case (SCHEDULER_FORWARD_MODE)
+            IQ_FORWARD_ALL: return 1;
+            IQ_FORWARD_BRANCH_COMPLETION: return schedule_class(packet) != SCHED_BRANCH;
+            IQ_FORWARD_LSU_CAPTURE: return !issue_view && schedule_class(packet) != SCHED_BRANCH;
+            IQ_FORWARD_STORE_CAPTURE: return portno < LSU_HINT_FIRST ||
+                (!issue_view && schedule_class(packet) != SCHED_BRANCH);
+            default: return 0;
+        endcase
     endfunction
 
     // 资源契约不做寄存器名比较；真实 RAW 由绑定标签的 scoreboard 决定。

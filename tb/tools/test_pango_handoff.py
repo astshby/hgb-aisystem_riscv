@@ -16,7 +16,7 @@ import xml.etree.ElementTree as ET
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
-from scripts.pango.prepare_project import GENERATED_SCRIPTS, MEMORY_SCRIPTS, compile_command, verify_staged_manifest
+from scripts.pango.prepare_project import GENERATED_SCRIPTS, MEMORY_SCRIPTS, SCOREBOARD_CONFIGURATION, compile_command, verify_staged_manifest
 from scripts.pango.summarize_timing import summarize
 
 
@@ -74,12 +74,12 @@ class HandoffTests(unittest.TestCase):
         self.env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ["PATH"],
                         PYTHONDONTWRITEBYTECODE="1")
 
-    def stage(self, width=32, profile="full", local=0, output=None, success=True, backend="legacy"):
+    def stage(self, width=32, profile="full", local=0, output=None, success=True, backend="legacy", extra=()):
         output = output or self.root / f"rv{width}-{profile}-ltcm{local}"
         result = subprocess.run([sys.executable, "-B", str(self.repo / "scripts/pango/prepare_project.py"),
                                  "--xlen", str(width), "--soc-profile", profile, "--local-tcm", str(local),
                                  "--core-backend", backend,
-                                 "--output", str(output), "--ip-dir", str(self.ip)],
+                                 "--output", str(output), "--ip-dir", str(self.ip), *extra],
                                 text=True, capture_output=True, env=self.env)
         self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
         return output, result
@@ -95,12 +95,16 @@ class HandoffTests(unittest.TestCase):
                     output, _ = self.stage(width=width, local=local, backend="scoreboard")
                     manifest = json.loads((output / "manifest.json").read_text())
                     configuration = verify_staged_manifest(output, manifest)
-                    self.assertEqual(manifest["schema_version"], 4)
+                    self.assertEqual(manifest["schema_version"], 7)
                     self.assertEqual(manifest["memory_guard_version"], 1)
                     for name in MEMORY_SCRIPTS:
                         self.assertIn(name, manifest["files"])
                     self.assertEqual(configuration["core_backend"], "scoreboard")
-                    self.assertEqual(configuration["core_retire_entries"], 16)
+                    self.assertEqual(configuration["core_retire_entries"], 32)
+                    self.assertEqual(configuration["core_split_issue_queue"], 1)
+                    self.assertEqual(configuration["core_memory_queue_entries"], 4)
+                    self.assertEqual(configuration["core_limited_integer_ooo"], 0)
+                    self.assertEqual(configuration["core_scheduler_forward_mode"], 0)
                     self.assertEqual(configuration["data_ports"], 2)
                     self.assertEqual(configuration["slow_presence"], "0x7ff3")
                     self.assertIn("CORE_SCOREBOARD=1", (output / "compile.tcl").read_text())
@@ -129,7 +133,8 @@ class HandoffTests(unittest.TestCase):
         manifest = json.loads((output / "manifest.json").read_text())
         path = output / "compile.tcl"
         original = path.read_text()
-        for before, after in (("CORE_SCOREBOARD=1", ""), ("CORE_RETIRE_ENTRIES=16", "CORE_RETIRE_ENTRIES=4"),
+        for before, after in (("CORE_SCOREBOARD=1", ""), ("CORE_RETIRE_ENTRIES=32", "CORE_RETIRE_ENTRIES=4"),
+                              ("CORE_SPLIT_ISSUE_QUEUE=1", "CORE_SPLIT_ISSUE_QUEUE=0"),
                               ("CORE_LOAD_QUEUE_ENTRIES=4", "CORE_LOAD_QUEUE_ENTRIES=1")):
             altered = copy.deepcopy(manifest)
             path.write_text(original.replace(before, after))
@@ -143,6 +148,80 @@ class HandoffTests(unittest.TestCase):
         manifest["files"][bank_name] = hashlib.sha256(bank.read_bytes()).hexdigest()
         with self.assertRaisesRegex(ValueError, "incorrect TCM interleaving"):
             verify_staged_manifest(output, manifest)
+
+    def test_scheduler_parameters_and_schema4_compatibility(self):
+        output, _ = self.stage(backend="scoreboard", extra=("--retire-entries", "16",
+            "--integer-queue-entries", "4", "--memory-queue-entries", "2",
+            "--predictor-mode", "1", "--ras-enable", "1"))
+        manifest = json.loads((output / "manifest.json").read_text())
+        configuration = verify_staged_manifest(output, manifest)
+        self.assertEqual(configuration["core_issue_queue_entries"], 4)
+        self.assertEqual(configuration["core_memory_queue_entries"], 2)
+        self.assertEqual(configuration["core_predictor_mode"], 1)
+        for key in ("core_retire_entries", "core_split_issue_queue", "core_memory_queue_entries"):
+            invalid = copy.deepcopy(manifest)
+            invalid[key] = 3
+            with self.assertRaisesRegex(ValueError, "scheduler configuration"):
+                verify_staged_manifest(output, invalid)
+        # 旧 P0 工程仍按原 schema/原编译命令校验，不能推定后来新增参数。
+        old = copy.deepcopy(manifest)
+        old["schema_version"] = 4
+        old.update(SCOREBOARD_CONFIGURATION)
+        del old["core_split_issue_queue"], old["core_memory_queue_entries"]
+        path = output / "compile.tcl"
+        lines = path.read_text().splitlines()
+        lines[-1] = compile_command(32, 0, 0, dma_wide=1, cache_block=1, dma_block=1,
+                                   core_issue_width=2, scoreboard=True)
+        path.write_text("\n".join(lines) + "\n")
+        old["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        checked = verify_staged_manifest(output, old)
+        self.assertEqual(checked["core_retire_entries"], 16)
+        self.assertNotIn("core_split_issue_queue", checked)
+
+    def test_limited_integer_issue_and_schema5_compatibility(self):
+        output, _ = self.stage(backend="scoreboard", extra=("--limited-integer-ooo", "1"))
+        manifest = json.loads((output / "manifest.json").read_text())
+        self.assertEqual(verify_staged_manifest(output, manifest)["core_limited_integer_ooo"], 1)
+        for value in (None, True, 2):
+            changed = copy.deepcopy(manifest)
+            if value is None:
+                del changed["core_limited_integer_ooo"]
+            else:
+                changed["core_limited_integer_ooo"] = value
+            with self.assertRaisesRegex(ValueError, "scheduler configuration"):
+                verify_staged_manifest(output, changed)
+        changed = dict(manifest, core_split_issue_queue=0)
+        with self.assertRaisesRegex(ValueError, "requires split"):
+            verify_staged_manifest(output, changed)
+        old = copy.deepcopy(manifest)
+        old["schema_version"] = 5
+        del old["core_limited_integer_ooo"], old["core_scheduler_forward_mode"]
+        path = output / "compile.tcl"
+        path.write_text(path.read_text().replace(" CORE_LIMITED_INTEGER_OOO=1", "").replace(" CORE_SCHEDULER_FORWARD_MODE=0", ""))
+        old["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        self.assertNotIn("core_limited_integer_ooo", verify_staged_manifest(output, old))
+
+    def test_forward_modes_and_schema6_compatibility(self):
+        for mode in (0, 1, 2, 3):
+            output, _ = self.stage(backend="scoreboard", output=self.root / f"forward-{mode}",
+                                   extra=("--scheduler-forward-mode", str(mode)))
+            manifest = json.loads((output / "manifest.json").read_text())
+            self.assertEqual(verify_staged_manifest(output, manifest)["core_scheduler_forward_mode"], mode)
+        for value in (None, True, 4):
+            changed = copy.deepcopy(manifest)
+            if value is None:
+                del changed["core_scheduler_forward_mode"]
+            else:
+                changed["core_scheduler_forward_mode"] = value
+            with self.assertRaisesRegex(ValueError, "scheduler configuration"):
+                verify_staged_manifest(output, changed)
+        old = copy.deepcopy(manifest)
+        old["schema_version"] = 6
+        del old["core_scheduler_forward_mode"]
+        path = output / "compile.tcl"
+        path.write_text(re.sub(r" CORE_SCHEDULER_FORWARD_MODE=\d+", "", path.read_text()))
+        old["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        self.assertNotIn("core_scheduler_forward_mode", verify_staged_manifest(output, old))
 
     def verify_cli(self, output, staging=True, success=True):
         command = [sys.executable, "-B", str(REPO / "scripts/pango/verify_synthesis.py"), str(output)]
@@ -251,7 +330,7 @@ class HandoffTests(unittest.TestCase):
             del changed["files"][name]
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "not covered by manifest"):
                 verify_staged_manifest(output, changed)
-        for version in (True, 0, 5):
+        for version in (True, 0, 8):
             changed = dict(manifest, schema_version=version)
             with self.subTest(version=version), self.assertRaisesRegex(ValueError, "unsupported staging"):
                 verify_staged_manifest(output, changed)

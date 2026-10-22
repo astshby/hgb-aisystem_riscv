@@ -1,5 +1,5 @@
 // Module: scoreboard_core
-// Description: In-order dual-issue backend with ROB-tag renaming, independent completion and precise retirement.
+// Description: Dual-issue backend with tagged scheduling, independent completion and precise retirement.
 module scoreboard_core (
     input logic clk, rst,
     input logic irq_software, irq_timer, irq_external,
@@ -36,6 +36,7 @@ module scoreboard_core (
     d2_ex_t renamed [2], queued [2], scheduled [2];
     logic [1:0] issue_enqueue_count, issue_capacity, issue_occupancy;
     logic issue_busy;
+    logic iq_mdu_available;
     branch_result_t queued_branch [2], scheduled_branch [2];
     logic input_branch_lane, input_branch_taken;
     xlen_t input_branch_target;
@@ -47,6 +48,7 @@ module scoreboard_core (
     xlen_t ras_top_addr;
     logic fetch_fire, fetch_second, fetch_busy;
     logic [1:0] fetch_pop_count, dispatch_count, issue_count, iq_capacity, iq_ready;
+    logic [1:0] iq_push_memory;
     logic [1:0] alloc_fire, alloc_ready, retire_fire, head_valid, head_complete;
     logic [1:0] completion_valid, completion_reject, complete_ready, training_capacity;
     logic [1:0] retire_ready, lane_ready, integer_ready;
@@ -58,6 +60,7 @@ module scoreboard_core (
     // LSQ 本地选择仍按年龄选最老两项，取消/错误/逐槽结果语义不变。
     localparam int LSU_COMPLETIONS = 2;
     localparam int COMPLETION_SOURCES = 3 + LSU_COMPLETIONS;
+    localparam int BROADCAST_SOURCES = COMPLETION_SOURCES + 4;
     logic [COMPLETION_SOURCES-1:0] source_valid, source_preview_valid, source_ready, completion_busy;
     logic [1:0] selected_completion_valid;
     logic [COMPLETION_SOURCES-1:0] completion_input_valid, completion_input_ready;
@@ -69,12 +72,12 @@ module scoreboard_core (
     retire_gpr_entry_t producers [RETIRE_ENTRIES];
     retire_ras_entry_t ras_entries [RETIRE_ENTRIES];
     gpr_dependency_t rename_source [2][2];
-    retire_gpr_forward_t broadcast [COMPLETION_SOURCES+2];
+    retire_gpr_forward_t broadcast [BROADCAST_SOURCES];
     gpr_forward_t gpr_write [2];
     csr_forward_t csr_write [2];
     xlen_t rf_rs1 [2], rf_rs2 [2];
     logic [RETIRE_COUNT_W-1:0] rob_occupancy;
-    logic [$clog2(ISSUE_QUEUE_ENTRIES+1)-1:0] iq_occupancy;
+    logic [$clog2(SCHEDULER_ENTRIES+1)-1:0] iq_occupancy;
     logic [RETIRE_IDX_W-1:0] head_slot;
     // 两个局部视图与 ROB 使用同一退休增量；不是延迟一拍的 head。
     // ADS UG990102 8.2.17：保留等价寄存器，避免综合重新合并跨模块年龄网络。
@@ -95,6 +98,7 @@ module scoreboard_core (
     muldiv_req_t mdu_request;
     retire_id_t mdu_id_q;
     retire_gpr_forward_t lsu_early_forward [2];
+    retire_gpr_forward_t lsu_load_return [2], lsu_store_forward_hint [2];
     logic [1:0] lsu_issue_ready, lsu_offer_valid, lsu_issue_fire, lsu_response_reject;
     logic [LSU_COMPLETIONS-1:0] lsu_complete_valid, lsu_complete_ready;
     retire_completion_t lsu_completion [LSU_COMPLETIONS];
@@ -182,6 +186,10 @@ module scoreboard_core (
         .imem_rsp_data, .imem_rsp_error, .imem_rsp_error_1, .imem_rsp_ready, .busy(fetch_busy)
     );
     for (genvar lane = 0; lane < 2; lane++) begin : g_decode
+        // 类型容量只读静态译码字段，不能经 RAT 的当拍分配旁路返回 alloc_ready。
+        assign iq_push_memory[lane] = !decode_q[lane].exc.valid && !decode_q[lane].uop.csr_valid &&
+            decode_q[lane].uop.sys_op == SYS_NONE && decode_q[lane].uop.branch_op == BR_NONE &&
+            decode_q[lane].uop.fu != FU_MULDIV && (decode_q[lane].uop.mem_read || decode_q[lane].uop.mem_write);
         d1_stage u_decode (.in_packet(fetched[lane]), .out_packet(decoded[lane]),
                            .redirect(d1_redirect[lane]), .serialize_req());
         d2_stage u_rename_packet (
@@ -251,14 +259,28 @@ module scoreboard_core (
         .decode(decode_q), .retire(commit_trace), .source(rename_source),
         .checkpoint_ready, .branch_resolved, .resolved_id, .recovery, .head_slot
     );
-    scoreboard_queue #(.BROADCAST_PORTS(COMPLETION_SOURCES+2), .ISSUE_BYPASS(1)) u_scoreboard (
-        .clk, .rst, .flush(wb_redirect.valid), .recovery, .head_slot,
-        .push_count(dispatch_count), .push_packet(renamed), .push_capacity(iq_capacity),
-        .producers, .broadcast, .issue_packet(queued), .operands_ready(iq_ready),
-        .pop_count(issue_enqueue_count), .occupancy(iq_occupancy)
-    );
+    if (SPLIT_ISSUE_QUEUE) begin : g_split_iq
+        split_scoreboard_queue #(.BROADCAST_PORTS(BROADCAST_SOURCES)) u_scoreboard (
+            .clk, .rst, .flush(wb_redirect.valid), .recovery, .head_slot, .mdu_available(iq_mdu_available),
+            .push_memory(iq_push_memory),
+            .push_count(dispatch_count), .push_packet(renamed), .push_capacity(iq_capacity),
+            .producers, .broadcast, .issue_packet(queued), .operands_ready(iq_ready),
+            .pop_count(issue_enqueue_count), .occupancy(iq_occupancy)
+        );
+    end else begin : g_unified_iq
+        scoreboard_queue #(.BROADCAST_PORTS(BROADCAST_SOURCES), .ISSUE_BYPASS(1)) u_scoreboard (
+            .clk, .rst, .flush(wb_redirect.valid), .recovery, .head_slot,
+            .push_count(dispatch_count), .push_packet(renamed), .push_capacity(iq_capacity),
+            .producers, .broadcast, .issue_packet(queued), .operands_ready(iq_ready),
+            .pop_count(issue_enqueue_count), .occupancy(iq_occupancy)
+        );
+    end
 
-    // IQ→ISS 只接纳已就绪年龄前缀；执行反压由两项寄存包保持完整数据和 ID。
+    // 忙 MDU 留在整数 IQ；ISS 中已有 MDU 时不再接纳另一条，独立 ALU 仍可越过。
+    assign iq_mdu_available = mdu_req_ready &&
+        !(scheduled[0].valid && schedule_class(scheduled[0]) == SCHED_MDU) &&
+        !(scheduled[1].valid && schedule_class(scheduled[1]) == SCHED_MDU);
+    // IQ→ISS 接纳所选就绪前缀；执行反压由两项寄存包保持完整数据和 ID。
     always_comb begin
         issue_enqueue_count = 0;
         if (iq_ready[0] && issue_capacity != 0) begin
@@ -374,7 +396,8 @@ module scoreboard_core (
         .mem_req_valid, .mem_req_ready, .mem_request, .mem_rsp_valid, .mem_rsp_ready, .mem_response,
         .response_reject(lsu_response_reject), .complete_valid(lsu_complete_valid),
         .complete_ready(lsu_complete_ready), .completion(lsu_completion),
-        .early_forward(lsu_early_forward), .busy(lsu_busy), .draining(lsu_draining), .store_owner_valid(lsu_owner_valid), .store_owner_id(lsu_owner_id)
+        .early_forward(lsu_early_forward), .load_return(lsu_load_return), .store_forward_hint(lsu_store_forward_hint),
+        .busy(lsu_busy), .draining(lsu_draining), .store_owner_valid(lsu_owner_valid), .store_owner_id(lsu_owner_id)
     );
     assign store_request_id = mem_request[0].id;
     always_comb begin
@@ -434,14 +457,19 @@ module scoreboard_core (
             producer.valid && producer.gpr_write && producer.id == completion_input[src].id,
             id:completion_input[src].id, data:completion_input[src].result.gpr_data};
     end
-    // LSU 提前广播替代原入 CMP 广播，端口总数仍为七路；故障/旧 ID/取消不能唤醒。
+    // 合法返回与 Store 提示各用两口，仍保留原同口返回优先；故障/旧 ID/取消不能唤醒。
     for (genvar portno = 0; portno < 2; portno++) begin : g_load_broadcast
-        retire_gpr_entry_t producer;
-        assign producer = producers[lsu_early_forward[portno].id.slot];
-        assign broadcast[5+portno] = '{valid:lsu_early_forward[portno].valid &&
-            !selected_redirect.valid && producer.valid && producer.gpr_write &&
-            producer.id == lsu_early_forward[portno].id,
-            id:lsu_early_forward[portno].id, data:lsu_early_forward[portno].data};
+        retire_gpr_entry_t return_producer, hint_producer;
+        assign return_producer = producers[lsu_load_return[portno].id.slot];
+        assign hint_producer = producers[lsu_store_forward_hint[portno].id.slot];
+        assign broadcast[LSU_RETURN_FIRST+portno] = '{valid:lsu_load_return[portno].valid &&
+            !selected_redirect.valid && return_producer.valid && return_producer.gpr_write &&
+            return_producer.id == lsu_load_return[portno].id,
+            id:lsu_load_return[portno].id, data:lsu_load_return[portno].data};
+        assign broadcast[LSU_HINT_FIRST+portno] = '{valid:lsu_store_forward_hint[portno].valid &&
+            !selected_redirect.valid && hint_producer.valid && hint_producer.gpr_write &&
+            hint_producer.id == lsu_store_forward_hint[portno].id,
+            id:lsu_store_forward_hint[portno].id, data:lsu_store_forward_hint[portno].data};
     end
     // 分支取消后仍等待外部事务排空，保证有限代次不能在迟到响应之前被回卷重用。
     assign drain_complete = !decode_jump_q.valid && !issue_busy && !lsu_busy && mdu_req_ready && !(|completion_busy) && !(|branch_event_valid_q);
@@ -522,6 +550,12 @@ module scoreboard_core (
 `ifndef SYNTHESIS
     initial begin
         assert (ISSUE_WIDTH == 2) else $fatal(1, "scoreboard backend requires ISSUE_WIDTH=2");
+        assert (!LIMITED_INTEGER_OOO || SPLIT_ISSUE_QUEUE) else $fatal(1, "limited issue requires split IQ");
+        assert (COMPLETION_SOURCES == LSU_RETURN_FIRST && LSU_HINT_FIRST == LSU_RETURN_FIRST+2 &&
+                BROADCAST_SOURCES == LSU_HINT_FIRST+2) else $fatal(1, "LSU broadcast mapping");
+        assert (SCHEDULER_FORWARD_MODE inside {IQ_FORWARD_ALL, IQ_FORWARD_BRANCH_COMPLETION,
+                IQ_FORWARD_LSU_CAPTURE, IQ_FORWARD_STORE_CAPTURE})
+            else $fatal(1, "scheduler forward mode");
     end
     always_ff @(posedge clk) if (!rst) begin
         assert (!issue_fire[1] || issue_fire[0]) else $fatal(1, "non-prefix issue");

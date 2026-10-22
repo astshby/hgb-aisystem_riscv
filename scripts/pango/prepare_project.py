@@ -25,7 +25,8 @@ SCOREBOARD_CONFIGURATION = {
 
 
 def compile_command(xlen, profile_id, local_tcm, dma_wide=1,
-                    cache_block=None, dma_block=None, core_issue_width=None, scoreboard=False):
+                    cache_block=None, dma_block=None, core_issue_width=None, scoreboard=False,
+                    scoreboard_config=None):
     dma_parameter = "" if dma_wide is None else f" DMA_WIDE_ENABLE {dma_wide}"
     block_parameters = ""
     if cache_block is not None:
@@ -39,6 +40,16 @@ def compile_command(xlen, profile_id, local_tcm, dma_wide=1,
         issue_directive += (" CORE_SCOREBOARD=1 CORE_RETIRE_ENTRIES=16 CORE_ISSUE_QUEUE_ENTRIES=8"
                             " CORE_LOAD_QUEUE_ENTRIES=4 CORE_STORE_QUEUE_ENTRIES=4 CORE_BRANCH_CHECKPOINTS=4"
                             " CORE_PREDICTOR_MODE=0 CORE_RAS_ENABLE=0")
+        if scoreboard_config is not None:
+            for key in ("core_retire_entries", "core_issue_queue_entries", "core_predictor_mode", "core_ras_enable"):
+                macro = key.upper()
+                issue_directive = re.sub(rf"{macro}=\d+", f"{macro}={scoreboard_config[key]}", issue_directive)
+            issue_directive += (f" CORE_SPLIT_ISSUE_QUEUE={scoreboard_config['core_split_issue_queue']}"
+                                f" CORE_MEMORY_QUEUE_ENTRIES={scoreboard_config['core_memory_queue_entries']}")
+            if "core_limited_integer_ooo" in scoreboard_config:
+                issue_directive += f" CORE_LIMITED_INTEGER_OOO={scoreboard_config['core_limited_integer_ooo']}"
+            if "core_scheduler_forward_mode" in scoreboard_config:
+                issue_directive += f" CORE_SCHEDULER_FORWARD_MODE={scoreboard_config['core_scheduler_forward_mode']}"
     return ("compile -top_module pango_200hp_top -verilog_standard SystemVerilog "
             f"-compiler_directives {{CORE_XLEN={xlen} CORE_MUL_IMPL=0 CORE_DIV_IMPL=1{issue_directive}}} "
             '-defined_parameters {ITCM_INIT_FILE "firmware/imem.hex" '
@@ -62,7 +73,7 @@ def verify_staged_manifest(root, manifest):
                     slow_presence="unknown", dma_wide_enable="unknown", ddr_data_bits="unknown",
                     cache_block_enable="unknown", dma_block_enable="unknown", core_issue_width="unknown",
                     evidence="legacy: generated Tcl/configuration unverified")
-    if type(manifest["schema_version"]) is not int or manifest["schema_version"] not in (1, 2, 3, 4):
+    if type(manifest["schema_version"]) is not int or manifest["schema_version"] not in (1, 2, 3, 4, 5, 6, 7):
         raise ValueError("unsupported staging manifest schema")
     schema = manifest["schema_version"]
     if schema >= 2 and (type(manifest.get("dma_wide_enable")) is not int or
@@ -73,8 +84,23 @@ def verify_staged_manifest(root, manifest):
         for key in ("cache_block_enable", "dma_block_enable", "core_issue_width"):
             if type(manifest.get(key)) is not int or manifest.get(key) != 1:
                 raise ValueError(f"invalid staged block/issue configuration: {key}")
-    if schema == 4:
-        for key, expected in dict(SCOREBOARD_CONFIGURATION, cache_block_enable=1, dma_block_enable=1).items():
+    scoreboard_config = dict(SCOREBOARD_CONFIGURATION)
+    if schema >= 5:
+        choices = {"core_retire_entries": (16, 32), "core_issue_queue_entries": (2, 4, 8, 16),
+                   "core_split_issue_queue": (0, 1), "core_memory_queue_entries": (2, 4, 8),
+                   "core_predictor_mode": (0, 1), "core_ras_enable": (0, 1)}
+        if schema >= 6:
+            choices["core_limited_integer_ooo"] = (0, 1)
+        if schema >= 7:
+            choices["core_scheduler_forward_mode"] = (0, 1, 2, 3)
+        for key, allowed in choices.items():
+            if type(manifest.get(key)) is not int or manifest[key] not in allowed:
+                raise ValueError(f"invalid staged scheduler configuration: {key}")
+            scoreboard_config[key] = manifest[key]
+        if schema >= 6 and manifest["core_limited_integer_ooo"] and not manifest["core_split_issue_queue"]:
+            raise ValueError("limited integer issue requires split queues")
+    if schema >= 4:
+        for key, expected in dict(scoreboard_config, cache_block_enable=1, dma_block_enable=1).items():
             if type(manifest.get(key)) is not type(expected) or manifest[key] != expected:
                 raise ValueError(f"invalid staged scoreboard configuration: {key}")
         for name in ("imem.hex", "dmem.hex"):
@@ -91,7 +117,7 @@ def verify_staged_manifest(root, manifest):
         raise ValueError("invalid staged SoC profile/local-TCM configuration")
     profile_id = int(profile == "lite")
     present = 0x727f if profile_id else 0x7fff
-    slow_present = present & (0x7ff3 if local_tcm or schema == 4 else 0x7fff)
+    slow_present = present & (0x7ff3 if local_tcm or schema >= 4 else 0x7fff)
     if (manifest.get("soc_profile_id") != profile_id or
             manifest.get("soc_presence") != f"0x{present:04x}" or
             manifest.get("slow_presence") != f"0x{slow_present:04x}"):
@@ -112,8 +138,9 @@ def verify_staged_manifest(root, manifest):
     if commands != [compile_command(manifest["xlen"], profile_id, local_tcm,
                                     1 if schema >= 2 else None,
                                     1 if schema >= 3 else None, 1 if schema >= 3 else None,
-                                    2 if schema == 4 else (1 if schema == 3 else None),
-                                    scoreboard=schema == 4)]:
+                                    2 if schema >= 4 else (1 if schema == 3 else None),
+                                    scoreboard=schema >= 4,
+                                    scoreboard_config=scoreboard_config if schema >= 5 else None)]:
         raise ValueError("compile Tcl parameters differ from staging manifest")
     if (root / "synthesize.tcl").read_text(encoding="utf-8") != SYNTHESIZE_COMMANDS:
         raise ValueError("unexpected generated synthesis commands")
@@ -124,8 +151,8 @@ def verify_staged_manifest(root, manifest):
     configuration["ddr_data_bits"] = 256 if schema >= 2 else "unknown"
     for key in ("cache_block_enable", "dma_block_enable", "core_issue_width"):
         configuration[key] = manifest[key] if schema >= 3 else "unknown"
-    if schema == 4:
-        configuration.update({key: manifest[key] for key in SCOREBOARD_CONFIGURATION})
+    if schema >= 4:
+        configuration.update({key: manifest[key] for key in scoreboard_config})
     configuration["evidence"] = (f"schema {schema}: staged hashes and compile parameters verified "
                                  "(input evidence only)" +
                                  ("; legacy DMA configuration unknown" if schema == 1 else "") +
@@ -158,8 +185,20 @@ def main():
     parser.add_argument("--soc-profile", choices=("full", "lite"), default="full")
     parser.add_argument("--local-tcm", type=int, choices=(0, 1), default=0)
     parser.add_argument("--core-backend", choices=("legacy", "scoreboard"), default="legacy",
-                        help="scoreboard selects the explicit P0 i2/ROB16/IQ8/LQ4/SQ4 configuration")
+                        help="scoreboard selects explicit dual-issue scheduler parameters")
+    parser.add_argument("--retire-entries", type=int, choices=(16, 32), default=32)
+    parser.add_argument("--split-issue-queue", type=int, choices=(0, 1), default=1)
+    parser.add_argument("--limited-integer-ooo", type=int, choices=(0, 1), default=0)
+    parser.add_argument("--scheduler-forward-mode", type=int, choices=(0, 1, 2, 3), default=0)
+    parser.add_argument("--integer-queue-entries", type=int, choices=(2, 4, 8, 16), default=8)
+    parser.add_argument("--memory-queue-entries", type=int, choices=(2, 4, 8), default=4)
+    parser.add_argument("--predictor-mode", type=int, choices=(0, 1), default=0)
+    parser.add_argument("--ras-enable", type=int, choices=(0, 1), default=0)
     args = parser.parse_args()
+    if args.limited_integer_ooo and (args.core_backend != "scoreboard" or not args.split_issue_queue):
+        parser.error("limited integer issue requires scoreboard and split queues")
+    if args.scheduler_forward_mode and args.core_backend != "scoreboard":
+        parser.error("scheduler forward mode requires scoreboard")
     repo = Path(__file__).resolve().parents[2]
     root = args.output.resolve()
     # WSL 负责固件与 Python，PDS 仍在 Windows 本地盘运行；只接受可映射的原生盘目录。
@@ -228,7 +267,7 @@ def main():
     profile_id = 0 if args.soc_profile == "full" else 1
     present = 0x7fff if profile_id == 0 else 0x727f
     scoreboard = args.core_backend == "scoreboard"
-    manifest = {"schema_version": 4 if scoreboard else 3, "xlen": args.xlen, "mul": 0, "div": 1,
+    manifest = {"schema_version": 7 if scoreboard else 3, "xlen": args.xlen, "mul": 0, "div": 1,
                 "dma_wide_enable": 1, "ddr_data_bits": 256,
                 "cache_block_enable": 1, "dma_block_enable": 1, "core_issue_width": 1,
                 "soc_profile": args.soc_profile, "soc_profile_id": profile_id,
@@ -240,6 +279,13 @@ def main():
                 "status": "candidate; no timing closure or board compatibility claim", "files": {}}
     if scoreboard:
         manifest.update(SCOREBOARD_CONFIGURATION)
+        manifest.update(core_retire_entries=args.retire_entries,
+                        core_split_issue_queue=args.split_issue_queue,
+                        core_limited_integer_ooo=args.limited_integer_ooo,
+                        core_scheduler_forward_mode=args.scheduler_forward_mode,
+                        core_issue_queue_entries=args.integer_queue_entries,
+                        core_memory_queue_entries=args.memory_queue_entries,
+                        core_predictor_mode=args.predictor_mode, core_ras_enable=args.ras_enable)
     try:
         manifest["source_commit"] = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True,
                                                             stderr=subprocess.DEVNULL).strip()
@@ -273,7 +319,8 @@ def main():
     commands += ["add_constraint {board_ddr.fdc}",
                  compile_command(args.xlen, profile_id, args.local_tcm,
                                  dma_wide=1, cache_block=1, dma_block=1,
-                                 core_issue_width=2 if scoreboard else 1, scoreboard=scoreboard)]
+                                 core_issue_width=2 if scoreboard else 1, scoreboard=scoreboard,
+                                 scoreboard_config=manifest if scoreboard else None)]
     (root / "compile.tcl").write_text("\n".join(commands) + "\n", encoding="utf-8")
     (root / "synthesize.tcl").write_text(SYNTHESIZE_COMMANDS, encoding="utf-8")
     shutil.copyfile(repo / "scripts/pango/implement.tcl", root / "implement.tcl")

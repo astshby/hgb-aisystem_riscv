@@ -247,8 +247,8 @@ module tb_retire_queue;
     endtask
 
     initial begin
-        assert (RETIRE_ENTRIES inside {2, 4, 8, 16})
-            else $fatal(1, "retire queue supports only 2/4/8/16 slots");
+        assert (RETIRE_ENTRIES inside {2, 4, 8, 16, 32})
+            else $fatal(1, "retire queue supports only 2/4/8/16/32 slots");
         if (!$value$plusargs("seed=%d", seed)) seed = 1;
         random_state = seed == 0 ? 32'd1 : 32'(seed);
         for (int slot = 0; slot < RETIRE_ENTRIES; slot++) model_generation[slot] = '0;

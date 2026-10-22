@@ -104,18 +104,21 @@ def runtime_configuration(cfg):
     if helper.is_file():
         # 名称由待测工作区的构建助手决定；旧基线没有 local-TCM 参数，仍可重放。
         command = ('config="$1"; source scripts/verilator/benchmark_platform.sh; '
-                   'printf "%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n" "$config" '
+                   'printf "%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n" "$config" '
                    '"${bench_local_tcm_enable-unsupported}" "${bench_soc_profile-unsupported}" '
                    '"${core_predictor_mode-unsupported}" "${core_ras_enable-unsupported}" '
                    '"${core_retire_entries-unsupported}" "${bench_dma_wide_enable-unsupported}" '
                    '"${core_issue_width-unsupported}" "${bench_cache_block_enable-unsupported}" '
                    '"${bench_dma_block_enable-unsupported}" "${core_backend-unsupported}" '
                    '"${bench_ddr_model_bytes-unsupported}" "${bench_clock_hz-unsupported}" '
-                   '"${bench_uart_divisor-unsupported}"')
+                   '"${bench_uart_divisor-unsupported}" '
+                   '"${core_split_issue_queue-unsupported}" "${core_integer_queue_entries-unsupported}" '
+                   '"${core_memory_queue_entries-unsupported}" "${core_limited_integer_ooo-unsupported}" '
+                   '"${core_scheduler_forward_mode-unsupported}"')
         output = subprocess.check_output(["bash", "-euc", command, "snapshot",
                                           f"m{cfg['mul_impl']}d{cfg['div_impl']}"], text=True)
         fields = output.splitlines()
-        require(len(fields) == 14 and re.fullmatch(r"[a-zA-Z0-9_-]+", fields[0]),
+        require(len(fields) == 19 and re.fullmatch(r"[a-zA-Z0-9_-]+", fields[0]),
                 "invalid benchmark platform configuration output")
         name, reported_local_tcm, reported_profile = fields[:3]
         reported_backend, reported_model_bytes = fields[10:12]
@@ -168,7 +171,7 @@ def runtime_configuration(cfg):
     for field, variable, reported, allowed in (
         ("predictor_mode", "PREDICTOR_MODE", core_fields[0], ("0", "1")),
         ("ras_enable", "RAS_ENABLE", core_fields[1], ("0", "1")),
-        ("retire_entries", "RETIRE_ENTRIES", core_fields[2], ("2", "4", "8", "16")),
+        ("retire_entries", "RETIRE_ENTRIES", core_fields[2], ("2", "4", "8", "16", "32")),
         ("issue_width", "ISSUE_WIDTH", core_fields[3], ("1", "2")),
     ):
         requested = os.environ.get(variable)
@@ -178,6 +181,19 @@ def runtime_configuration(cfg):
         if requested is not None:
             require(reported != "unsupported", f"current checkout does not report {variable}")
             require(reported == requested, f"benchmark helper disagrees with requested {variable}")
+        core_parameters[field] = int(reported) if reported != "unsupported" else None
+        core_parameters[f"{field}_parameter_supported"] = reported != "unsupported"
+    for field, variable, reported, allowed in (
+        ("split_issue_queue", "SPLIT_ISSUE_QUEUE", fields[14] if helper.is_file() else "unsupported", ("0", "1")),
+        ("integer_queue_entries", "INTEGER_QUEUE_ENTRIES", fields[15] if helper.is_file() else "unsupported", ("2", "4", "8", "16")),
+        ("memory_queue_entries", "MEMORY_QUEUE_ENTRIES", fields[16] if helper.is_file() else "unsupported", ("2", "4", "8")),
+        ("limited_integer_ooo", "LIMITED_INTEGER_OOO", fields[17] if helper.is_file() else "unsupported", ("0", "1")),
+        ("scheduler_forward_mode", "SCHEDULER_FORWARD_MODE", fields[18] if helper.is_file() else "unsupported", ("0", "1", "2", "3")),
+    ):
+        requested = os.environ.get(variable)
+        require(requested is None or requested in allowed, f"invalid {variable}")
+        require(reported == "unsupported" or reported in allowed, f"invalid benchmark helper {field}")
+        require(requested is None or reported == requested, f"benchmark helper disagrees with {variable}")
         core_parameters[field] = int(reported) if reported != "unsupported" else None
         core_parameters[f"{field}_parameter_supported"] = reported != "unsupported"
     return name, {"local_tcm_enable": int(local_tcm) if cfg["soc"] else None,
