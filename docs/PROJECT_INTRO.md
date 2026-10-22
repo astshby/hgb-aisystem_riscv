@@ -12,6 +12,8 @@ M0/M1 为 2.635803/2.335916 CoreMark/MHz，较本次 GCC 11.4 重建 P0 提高 0
 P1.2 开发分支为 `core/p1-2-limited-integer-ooo`，开关 `LIMITED_INTEGER_OOO=1`。
 整数队列选择最老就绪项，访存保持 FIFO 和串行屏障，精确退休沿用原 ROB。
 双宽各三项定向通过，Core 各观察到 30 次越过阻塞整数项；完整回归待完成。
+就绪旁路限于 ALU/MDU，访存/分支保持接纳顺序，晚异常不能占住老 IQ 项所需的 ISS。
+十场景精确事件通过，Core ISA 为 RV32 58 PASS/2 SKIP、RV64 78 PASS/2 SKIP。
 
 ## 1. 项目是什么
 

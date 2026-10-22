@@ -44,6 +44,8 @@ P1.2 在 `core/p1-2-limited-integer-ooo` 开发。增加 `LIMITED_INTEGER_OOO=1`
 整数 IQ 按完整标签保存操作数、选择最老就绪项；访存保持 FIFO，CSR/系统指令保留屏障。
 忙 MDU 留在 IQ，独立 ALU 可继续推进；ROB 仍按序退休。双宽各三项定向通过，
 Core 各观察到 30 次越过阻塞整数项，精确事件八场景通过；完整回归尚未完成。
+精确顺序修正后仅 ALU/MDU 可越过等待项，访存/分支保持接纳顺序及合法同拍配对。
+精确事件增至十场景，原未对齐超时已解决，Core ISA 为 RV32 58 PASS/2 SKIP、RV64 78 PASS/2 SKIP。
 以下 r15 数值为历史 P0 记录。
 
 新 P0 发布基线为 `publish/p0-r15`，实测 RTL 为 `dffb8a2`；原开发分支

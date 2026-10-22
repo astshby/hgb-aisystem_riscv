@@ -23,7 +23,7 @@ module split_scoreboard_queue #(
     import core_config_pkg::*;
     import pipeline_pkg::*;
     import scoreboard_pkg::*;
-    d2_ex_t bank_push [2][2], bank_issue [2][2];
+    d2_ex_t bank_push [2][2], bank_issue [2][2], memory_issue [2];
     logic [1:0] bank_push_count [2], bank_capacity [2], bank_pop_count [2], bank_ready [2];
     logic [$clog2(INTEGER_DEPTH+1)-1:0] integer_occupancy;
     logic [$clog2(MEMORY_DEPTH+1)-1:0] memory_occupancy;
@@ -31,18 +31,27 @@ module split_scoreboard_queue #(
     integer demand [2], next_index [2];
     integer bank, index;
     logic serial_pending;
-    retire_id_t serial_id;
+    logic [1:0] oldest_integer_pending;
+    retire_id_t serial_id, oldest_integer_id [2];
+    logic memory_eligible, first_consumes_oldest_integer;
+    integer integer_boundary;
+    assign bank_issue[1] = memory_issue;
 
     if (LIMITED_OOO) begin : g_ready_integer
         integer_issue_queue #(.DEPTH(INTEGER_DEPTH), .BROADCAST_PORTS(BROADCAST_PORTS)) u_integer (
             .clk, .rst, .flush, .recovery, .head_slot, .mdu_available,
+            .memory_pending(memory_issue[0].valid), .memory_id(memory_issue[0].retire_id),
             .push_count(bank_push_count[0]), .push_packet(bank_push[0]), .push_capacity(bank_capacity[0]),
             .producers, .broadcast, .issue_packet(bank_issue[0]), .operands_ready(bank_ready[0]),
-            .pop_count(bank_pop_count[0]), .occupancy(integer_occupancy), .serial_pending, .serial_id
+            .pop_count(bank_pop_count[0]), .occupancy(integer_occupancy), .serial_pending, .serial_id,
+            .oldest_pending(oldest_integer_pending), .oldest_id(oldest_integer_id)
         );
     end else begin : g_ordered_integer
         assign serial_pending = 0;
         assign serial_id = '0;
+        assign oldest_integer_pending = 0;
+        assign oldest_integer_id[0] = '0;
+        assign oldest_integer_id[1] = '0;
         scoreboard_queue #(.DEPTH(INTEGER_DEPTH), .BROADCAST_PORTS(BROADCAST_PORTS), .ISSUE_BYPASS(1)) u_integer (
             .clk, .rst, .flush, .recovery, .head_slot,
             .push_count(bank_push_count[0]), .push_packet(bank_push[0]), .push_capacity(bank_capacity[0]),
@@ -53,7 +62,7 @@ module split_scoreboard_queue #(
     scoreboard_queue #(.DEPTH(MEMORY_DEPTH), .BROADCAST_PORTS(BROADCAST_PORTS), .ISSUE_BYPASS(1)) u_memory (
         .clk, .rst, .flush, .recovery, .head_slot,
         .push_count(bank_push_count[1]), .push_packet(bank_push[1]), .push_capacity(bank_capacity[1]),
-        .producers, .broadcast, .issue_packet(bank_issue[1]), .operands_ready(bank_ready[1]),
+        .producers, .broadcast, .issue_packet(memory_issue), .operands_ready(bank_ready[1]),
         .pop_count(bank_pop_count[1]), .occupancy(memory_occupancy)
     );
 
@@ -86,24 +95,29 @@ module split_scoreboard_queue #(
         end
     end
 
-    // 按年龄合并两类候选。按序模式保留阻塞头项；局部乱序模式只跳过整数等待项，
-    // 内存仍只消费 FIFO 的连续就绪前缀，并检查尚未接纳的串行屏障。
+    // ALU/MDU 可越过等待项；访存与分支保留全局接纳顺序，避免晚异常堵住老项。
+    // 内存仍只消费 FIFO 的连续就绪前缀，不越过尚在整数 IQ 中的老项。
     always_comb begin
         next_index[0] = 0;
         next_index[1] = 0;
         operands_ready = 0;
         bank = 0;
         index = 0;
+        first_consumes_oldest_integer = 0;
+        integer_boundary = 0;
+        memory_eligible = 0;
         for (int lane = 0; lane < 2; lane++) begin
             selected_memory[lane] = 0;
             issue_packet[lane] = '0;
-            if (bank_issue[0][next_index[0]].valid || (bank_issue[1][next_index[1]].valid &&
+            integer_boundary = first_consumes_oldest_integer ? 1 : 0;
+            memory_eligible = memory_issue[next_index[1]].valid &&
                 (!LIMITED_OOO || (bank_ready[1][next_index[1]] &&
-                 (!serial_pending || !younger_than(bank_issue[1][next_index[1]].retire_id, serial_id, head_slot)))))) begin
+                 (!oldest_integer_pending[integer_boundary] ||
+                  !younger_than(memory_issue[next_index[1]].retire_id, oldest_integer_id[integer_boundary], head_slot)) &&
+                 (!serial_pending || !younger_than(memory_issue[next_index[1]].retire_id, serial_id, head_slot))));
+            if (bank_issue[0][next_index[0]].valid || memory_eligible) begin
                 bank = !bank_issue[0][next_index[0]].valid ||
-                    (bank_issue[1][next_index[1]].valid &&
-                     (!LIMITED_OOO || (bank_ready[1][next_index[1]] &&
-                      (!serial_pending || !younger_than(bank_issue[1][next_index[1]].retire_id, serial_id, head_slot)))) && younger_than(
+                    (memory_eligible && younger_than(
                         bank_issue[0][next_index[0]].retire_id,
                         bank_issue[1][next_index[1]].retire_id, head_slot)) ? 1 : 0;
                 index = next_index[bank];
@@ -111,6 +125,9 @@ module split_scoreboard_queue #(
                 issue_packet[lane] = bank_issue[bank][index];
                 operands_ready[lane] = bank_ready[bank][index];
                 next_index[bank]++;
+                if (lane == 0 && bank == 0 && oldest_integer_pending[0] &&
+                    issue_packet[lane].retire_id == oldest_integer_id[0])
+                    first_consumes_oldest_integer = 1;
             end
         end
     end

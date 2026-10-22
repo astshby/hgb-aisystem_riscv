@@ -7,6 +7,8 @@ module integer_issue_queue #(
     input logic clk, rst, flush, mdu_available,
     input scoreboard_pkg::branch_recovery_t recovery,
     input logic [core_config_pkg::RETIRE_IDX_W-1:0] head_slot,
+    input logic memory_pending,
+    input pipeline_pkg::retire_id_t memory_id,
     input logic [1:0] push_count,
     input pipeline_pkg::d2_ex_t push_packet [2],
     output logic [1:0] push_capacity,
@@ -17,7 +19,9 @@ module integer_issue_queue #(
     input logic [1:0] pop_count,
     output logic [$clog2(DEPTH+1)-1:0] occupancy,
     output logic serial_pending,
-    output pipeline_pkg::retire_id_t serial_id
+    output pipeline_pkg::retire_id_t serial_id,
+    output logic [1:0] oldest_pending,
+    output pipeline_pkg::retire_id_t oldest_id [2]
 );
     import core_config_pkg::*;
     import pipeline_pkg::*;
@@ -89,6 +93,17 @@ module integer_issue_queue #(
                 serial_id = packet_q[slot].retire_id;
             end
         end
+        oldest_pending = 0;
+        for (int lane = 0; lane < 2; lane++) begin
+            oldest_id[lane] = '0;
+            for (int slot = 0; slot < DEPTH; slot++) begin
+                if (valid_q[slot] && (lane == 0 || packet_q[slot].retire_id != oldest_id[0]) &&
+                    (!oldest_pending[lane] || younger_than(oldest_id[lane], packet_q[slot].retire_id, head_slot))) begin
+                    oldest_pending[lane] = 1;
+                    oldest_id[lane] = packet_q[slot].retire_id;
+                end
+            end
+        end
     end
 
     always_comb begin
@@ -113,7 +128,14 @@ module integer_issue_queue #(
             selected[lane] = 0;
             issue_packet[lane] = '0;
             for (int slot = 0; slot < DEPTH; slot++) begin
-                if (eligible[slot] && (lane == 0 || (SLOT_W'(slot) != selected[0] &&
+                if (eligible[slot] &&
+                    // 分支可能在 EX 才形成异常，不能先占 ISS 再等待仍在 IQ 的老项。
+                    (!(schedule_class(packet_q[slot]) inside {SCHED_BRANCH, SCHED_SERIAL}) ||
+                     ((packet_q[slot].retire_id == oldest_id[0] ||
+                       (lane == 1 && issue_packet[0].valid && issue_packet[0].retire_id == oldest_id[0] &&
+                        oldest_pending[1] && packet_q[slot].retire_id == oldest_id[1])) &&
+                      (!memory_pending || !younger_than(packet_q[slot].retire_id, memory_id, head_slot)))) &&
+                    (lane == 0 || (SLOT_W'(slot) != selected[0] &&
                     !(schedule_class(issue_packet[0]) == SCHED_MDU && schedule_class(packet_q[slot]) == SCHED_MDU))) &&
                     (!issue_packet[lane].valid || younger_than(issue_packet[lane].retire_id,
                                                              packet_q[slot].retire_id, head_slot))) begin

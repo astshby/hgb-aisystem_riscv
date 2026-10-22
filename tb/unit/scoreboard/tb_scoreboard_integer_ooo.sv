@@ -72,6 +72,24 @@ module tb_scoreboard_integer_ooo;
         #1; assert (operands_ready == 0) else $fatal;
         wake(); expect_first(0); assert (issue_packet[1].retire_id == tag(2)) else $fatal;
         pop_count = 2; tick();
+        // 未对齐异常到 EX 才形成，年轻访存不得先于仍在 IQ 的老整数进入 ISS。
+        offer(0, 0, 0, 1); offer(1, 1, 1); push_count = 2; tick();
+        offer(0, 2); push_count = 1; tick(); expect_first(2);
+        assert (!issue_packet[1].valid) else $fatal(1, "memory crossed waiting integer");
+        pop_count = 1; tick(); wake(); expect_first(0);
+        assert (issue_packet[1].retire_id == tag(1)) else $fatal(1, "ordered ALU/memory pair missing");
+        pop_count = 2; tick();
+        // 分支也可能形成晚异常；只允许纯整数运算越过等待分支或访存。
+        offer(0, 0, 0, 1); push_packet[0].uop.branch_op = BR_EQ;
+        offer(1, 1, 1); push_count = 2; tick();
+        offer(0, 2); push_count = 1; tick(); expect_first(2); pop_count = 1; tick();
+        wake(); expect_first(0); assert (issue_packet[1].retire_id == tag(1)) else $fatal(1, "ordered branch/memory pair missing");
+        pop_count = 2; tick();
+        offer(0, 0, 1, 1); offer(1, 1); push_packet[1].uop.branch_op = BR_EQ;
+        push_count = 2; tick();
+        offer(0, 2); push_count = 1; tick(); expect_first(2); pop_count = 1; tick();
+        wake(); expect_first(0); assert (!issue_packet[1].valid) else $fatal(1, "branch crossed memory");
+        pop_count = 1; tick(); expect_first(1); pop_count = 1; tick();
         // Store 地址未知时后续 Load 保持顺序。
         offer(0, 0, 1, 1); push_packet[0].uop.mem_read = 0; push_packet[0].uop.mem_write = 1;
         offer(1, 1, 1); push_count = 2; tick();
