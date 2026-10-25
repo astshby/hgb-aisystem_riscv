@@ -7,11 +7,18 @@ RAS_ENABLE ?= 0
 RETIRE_ENTRIES ?= 4
 ISSUE_WIDTH ?= 1
 CORE_BACKEND ?= legacy
+SPLIT_ISSUE_QUEUE ?= 0
+INTEGER_QUEUE_ENTRIES ?= 8
+MEMORY_QUEUE_ENTRIES ?= 4
+LIMITED_INTEGER_OOO ?= 0
+SCHEDULER_FORWARD_MODE ?= 0
 export MUL_IMPL DIV_IMPL PREDICTOR_MODE RAS_ENABLE RETIRE_ENTRIES ISSUE_WIDTH CORE_BACKEND
+export SPLIT_ISSUE_QUEUE INTEGER_QUEUE_ENTRIES MEMORY_QUEUE_ENTRIES LIMITED_INTEGER_OOO SCHEDULER_FORWARD_MODE
 
 VFLAGS := -Wall -Wno-fatal --assert --timing -DCORE_XLEN=$(XLEN) -DCORE_MUL_IMPL=$(MUL_IMPL) -DCORE_DIV_IMPL=$(DIV_IMPL) -DCORE_PREDICTOR_MODE=$(PREDICTOR_MODE) -DCORE_RAS_ENABLE=$(RAS_ENABLE) -DCORE_RETIRE_ENTRIES=$(RETIRE_ENTRIES) -DCORE_ISSUE_WIDTH=$(ISSUE_WIDTH)
 ifeq ($(CORE_BACKEND),scoreboard)
 VFLAGS += -DCORE_SCOREBOARD
+VFLAGS += -DCORE_SPLIT_ISSUE_QUEUE=$(SPLIT_ISSUE_QUEUE) -DCORE_ISSUE_QUEUE_ENTRIES=$(INTEGER_QUEUE_ENTRIES) -DCORE_MEMORY_QUEUE_ENTRIES=$(MEMORY_QUEUE_ENTRIES) -DCORE_LIMITED_INTEGER_OOO=$(LIMITED_INTEGER_OOO) -DCORE_SCHEDULER_FORWARD_MODE=$(SCHEDULER_FORWARD_MODE)
 endif
 
 .PHONY: lint unit directed riscv-tests benchmark-smoke coremark mdu-backends test clean vivado-project soc-test soc-decode-test soc-smoke soc-coremark soc-lint soc-software soc-dma-software soc-riscv-tests
@@ -144,6 +151,16 @@ soc-smoke:
 soc-coremark:
 	SOC=1 bash scripts/verilator/run_coremark.sh $(XLEN)
 
+# 与综合共用 scripts/benchmark_platforms.json；旧 M0/M1 入口继续保留原定义。
+.PHONY: coremark-platforms coremark-platforms-test
+COREMARK_PLATFORM_OUT ?= build/unified-coremark/current
+COREMARK_PLATFORM_ARGS ?=
+coremark-platforms:
+	python3 scripts/verilator/run_unified_coremark.py --xlen $(XLEN) --output $(COREMARK_PLATFORM_OUT) $(COREMARK_PLATFORM_ARGS)
+
+coremark-platforms-test:
+	python3 -m unittest tb.scripts.test_unified_coremark tb.scripts.test_p2_coremark tb.scripts.test_p2_build_config tb.tools.test_soc_clock_plan tb.tools.test_measurement_constraints
+
 soc-lint:
 	$(VERILATOR) $(VFLAGS) --lint-only -f scripts/soc_files.f --top-module soc_top
 
@@ -196,3 +213,26 @@ loader-soc-test:
 	bash scripts/loader/test_soc.sh $(XLEN)
 uart-rt-thread-test:
 	bash scripts/loader/test_rt_thread.sh $(XLEN)
+
+.PHONY: soc-system-test soc-axi-test soc-irq-cdc-test
+# P2 入口只替换本 Makefile 的通用默认值；环境和命令行选择仍优先。
+ifeq ($(origin CORE_BACKEND),file)
+soc-system-test soc-axi-test soc-irq-cdc-test: CORE_BACKEND = scoreboard
+endif
+ifeq ($(origin ISSUE_WIDTH),file)
+soc-system-test soc-axi-test soc-irq-cdc-test: ISSUE_WIDTH = 2
+endif
+ifeq ($(origin RETIRE_ENTRIES),file)
+soc-system-test soc-axi-test soc-irq-cdc-test: RETIRE_ENTRIES = 16
+endif
+ifeq ($(origin DIV_IMPL),file)
+soc-system-test soc-axi-test soc-irq-cdc-test: DIV_IMPL = 1
+endif
+soc-system-test:
+	bash scripts/verilator/run_soc_system.sh $(XLEN)
+
+soc-axi-test:
+	bash scripts/verilator/run_axi_system.sh $(XLEN)
+
+soc-irq-cdc-test:
+	bash scripts/verilator/run_soc_irq_cdc.sh $(XLEN)

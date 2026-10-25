@@ -14,7 +14,9 @@
 #else
 #define COMPILER_FLAGS "-O2 -march=rv64im_zicsr -mabi=lp64"
 #endif
+#ifndef MEM_LOCATION
 #define MEM_LOCATION "Static data in one-cycle simulated DMem"
+#endif
 
 typedef signed short ee_s16;
 typedef unsigned short ee_u16;

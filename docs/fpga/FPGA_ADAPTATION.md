@@ -1,8 +1,118 @@
 # FPGA 适配与 PDS
 
-> 写作约束：[regulation.md](../../../regulation.md)。本文记录工具、流程、约束和结果，不把工具 Fmax 写成板上频率。
+> 写作约束：[skills/regulation.md](../../../skills/regulation.md)。本文记录工具、流程、约束和结果，不把工具 Fmax 写成板上频率。
 
-P1.1a 实测源码为 `core/p1-1a-split-lq-sq@a23b65c`，LQ/SQ 拆分后保持 ROB16/IQ8。
+## 当前基线
+
+`baseline-rv32-soc-20261025` 固定当前 Core/SoC，统一测量入口为
+`prepare_benchmark.py`，配置来自 `scripts/benchmark_platforms.json`。三组标准综合
+已完成：Core+TCM、片上 SoC、完整 DDR3 SoC 的 Core Fmax 估计分别为
+96.8523/91.7600/84.4523 MHz，对应 100 MHz 下 WNS −0.325/−0.898/−1.841 ns。
+完整组 SYS/DDR 用户口/periph 为 84.8104/144.7178/90.9835 MHz；资源为
+67,266 LUT、60,633 FF、36 DRM36K、4 APM、0 latch。完整表见
+[项目介绍](../PROJECT_INTRO.md)。真实 TCM、Cache RAM 和 DDR 控制器/PHY 均保留。
+
+本基线尚未布局布线，布线 Fmax 和未布通数未测。完整组最差 Core 路径经 ISS、
+分支恢复、取指响应和 TCM 仲裁到 BRAM WEA，22 层、最大扇出 86。逐端点 CDC
+绑定尚未完成；原始报告有 DDR→SYS setup −6.063 ns、periph→SYS setup −2.998 ns，
+另有 DDR 同域 hold −0.006 ns/3 端点及 DDR→PHY1 hold −1.138 ns/52 端点。
+真实同步失败须通过逻辑或物理实现处理。I/O delay、PLL 站点、bitstream/JTAG、
+UART/DDR 板测与正式 CoreMark 留待后续。标准 PDS 每阶段入口检查 Windows 物理
+可用和提交余量各至少 6 GiB；本次三组综合峰值分别为 2123/3148/4031 MB。
+
+## S4 历史诊断
+
+S4在 `fpga/s4-layered-characterization` 完成七组分层综合，入口 `e088a9d`。新增
+`pango_measure_top` 三层诊断：H0 Core、H1 Core+TCM/Cache、H2完整软SoC至DDR AXI。
+各域扫描输入保持/输出快照保留接口可控制性和可观察性；测量代码为 `eacef6a`。
+生产RTL仅在 `3f7402a` 化简Flash位索引的等价除余表达式，解决原生 `bmsSREM`
+不支持；其余174个生产RTL不变，P1 Core与默认fill4保持。独立Flash分支保留。
+`prepare_measurement.py` 使用独立 `pango-layered-measurement-v1` 清单，显式记录
+P1参数、fill4/8、C1/C4和源码哈希；`summarize_measurement.py` 分离扫描壳资源、
+DUT资源和综合估算路径，布线Fmax字段在未实现时为空。
+
+诊断工程入口（RV32；每次使用新的原生Windows盘目录）：
+
+```bash
+python3 scripts/pango/prepare_measurement.py \
+  --output "$PDS_WORK_ROOT/work/<new-run>" \
+  --layer H0 --clock-profile C1 --icache-fill-bytes 4
+```
+
+H1/H2只替换layer；fill8与C4必须显式选择。暂存后用现有 `run_phase.ps1` 的
+synthesis阶段运行，再调用 `summarize_measurement.py <工程> --synthesis-log <原生日志>`。
+输入清单含全部源文件、P1宏、实际时钟元数据和生成脚本哈希；TCM无固定固件，
+由运行时可写接口保活，所以本诊断工程没有ELF/HEX。软件得分另绑定B20冻结镜像。
+
+当前保守FDC只加载时钟、uncertainty与扫描IO预算，内部路径全部正常计时。
+`proposed_cdc.fdc`保存待验证的定向例外，未加入工程。首次原生运行已发现编译库
+复位pin与预想映射名不同；`pds_shell`未注册`open_dw`，后续 `open_design` 对象查询
+因action参数类型错误退出。七组 `binding_audit_complete=false`，离线Tcl测试
+不代表PDS实际绑定通过；不能把跨域slack转正当作CDC通过。
+
+这些诊断顶层使用外部时钟端口及明确1ns扫描IO预算，不包含板级PLL和DDR PHY。
+真实板级H3仍须generated-clock、PLL站点、DDR/复位和管脚约束验证。
+本机旧place日志显示PG2L200H的GPLL/PPLL各10个，DDR占2 GPLL+2 PPLL；
+新SoC PLL数量上可容纳，参考钟到合法站点的共存布局尚未验证。
+七组输入、报告和网表哈希复核通过，器件为PG2L200H-6IFBB676，PDS单线程：
+
+| 层次/配置 | 总LUT / FF | DRM / APM | Core综合估计MHz / WNS ns |
+| --- | --- | --- | --- |
+| H0 / C1 / fill4 | 42501 / 25996 | 0 / 4 | 36.8963 / −17.103 |
+| H1 / C1 / fill4 | 48654 / 36189 | 36 / 4 | 36.6139 / −17.312 |
+| H1 / C1 / fill8 | 48474 / 36188 | 36 / 4 | 36.8664 / −17.125 |
+| H2 / C1 / fill4 | 82858 / 62615 | 40 / 4 | 37.0700 / −16.976 |
+| H2 / C1 / fill8 | 82979 / 62614 | 40 / 4 | 36.9344 / −17.075 |
+| H2 / C4 / fill4 | 83076 / 62614 | 40 / 4 | 36.5350 / −17.371 |
+| H2 / C4 / fill8 | 83080 / 62613 | 40 / 4 | 36.5497 / −17.360 |
+
+上述资源含测量壳，均0 latch，Core目标100MHz；不能用综合估计宣称实际频率。
+H0原manifest记录提交前 `e088a9d` 与dirty清单，测量RTL哈希与 `eacef6a` 相同；
+H1/fill4为干净 `eacef6a`，后五组为干净 `3f7402a`。7组共1274次输入哈希检查及
+77份报告/网表检查均匹配；原始源码、命令、报告保存在各自原生目录。
+
+Core前100条路径均集中在RAS恢复；旧r15/P2的ROB16/RAS关闭结果未覆盖当前
+ROB32/RAS开启的34路恢复。H2/C1 SYS前100条均为同步复位释放到FIFO有效位/返回仲裁，
+不能设false path；C4最差转为B响应选择/仲裁，fill4/fill8的SYS估计分别97.9336/95.4107MHz，
+WNS−0.211/−0.481ns。四组DDR估计101.1429MHz均受扫描壳端点影响，尚未单列纯内部路径。
+全部活动域的同域hold估计WHS均−2.523ns，没有setup/hold物理闭合。默认fill4保持。
+
+双宽测量壳8 PASS/0 SKIP；修正后Flash定向/时钟4 PASS/0 SKIP，448成功读/7拒绝；
+整机Flash/DMA C1双宽2 PASS/0 SKIP，RV32/RV64为64997/60241拍，覆盖跨域配置、
+搬运/校验和Flash代码搬到DDR后执行。工具113 PASS/0 SKIP。本轮没有重跑通用
+Core/ISA回归或CoreMark；B20固定镜像成绩保留原归属，不与综合估计相乘作为实际性能。
+
+证据根 `logs/p2/s4-layered-20261023/`：`synthesis-batch-summary.json` 与
+`final-batch-review.json` 为七组索引/复核，`flash-index-fix/summary.json` 与
+`flash-integration/summary.json` 为修正后测试。测量壳原记录另在
+`logs/p2/s4-physical-20261023/measurement/validation-summary.json`。精确stage、原生
+命令及summary命令保存在每组 `<runid>-command.json`；原生目录为
+`$PDS_WORK_ROOT/work/s4-layered-20261023/<runid>/`，H2旧失败尝试亦保留。
+
+19:29批次结束后Windows物理可用16.610GiB、提交余量13.616GiB、提交上限35.781GiB，
+PDS/DW为0；分页仍初始4/最大16GiB。完整标准布局尚未启动。H0已复制242个文件并
+验签到 `h0-c1-if4-route-prepared`；建议入口46GiB提交/6GiB物理余量，随后每阶段
+恢复双6GiB检查。46GiB由历史约39.34GiB进程提交样本加余量得出，不保证未来峰值。
+标准入口使用 `run_phase.ps1 -Phase implementation`，继续dev_map/place/route/
+route_optimize，不执行重放旧综合入口的 `impl.tcl`。没有改分页或结束无关进程。
+当前没有新布线Fmax/85MHz验收；完整域表、容量方案与后续安排见工作区ITERATIONS B21和HANDOVER。
+
+前一轮B20工作分支为 `soc/p2-p3-clock-study`，以 P1/P2 集成点 `0501f10` 为起点；
+时钟复位提交另保留于 `fpga/p3-domain-clocks@1a4f8fa`。
+P1 来自 `origin/main@91e33f7`，P2 完整保存点为
+`baseline/p2-before-p1-20261023@f2b33b4`；集成时核对的 84 个 Core/包文件及
+76 个 P2 SoC 文件分别与来源一致。B20 保留 P1 Core，新增 C1/C4 板级时钟、
+协调复位和软件时基发现接口，完成相应仿真，没有重新运行综合、布局或布线。
+当前组合的 RV32 ≥85 MHz 仍待标准 PDS 验收。
+
+当前 scoreboard 工程采用下文的 schema 8，Core 默认为最终 P1 配置；
+`logs/p2/p1-adapt-20261023/pango/summary.json` 保存 32 项暂存工具测试、
+12 项时钟规划测试、双宽 full/lite 共 4 组 scoreboard wrapper 和 8 组 legacy wrapper
+的结果，均 PASS、0 SKIP。厂商桩仅检查端口与展开参数，不模拟 DDR 校准。
+以下 P1、P0 及早期 P2 测量分别保留其源码和工程归属。
+
+P1.1a历史文档记录的源码为 `core/p1-1a-split-lq-sq@a23b65c`，LQ/SQ 拆分后保持 ROB16/IQ8。
+本次S4没有找到下述P1.1a原生目录及JSON，没有重新复核这项历史数值。
 标准综合、dev_map、place、route、route_optimize、report_timing 均完成，得到
 86.1721 MHz、85 MHz WNS +0.160 ns、TNS 0、12 类 STA 零失败，57,149 条网络全部布通。
 物理为 40,181 LUT、32,188 FF、36 DRM、4 APM、77 IO；综合为 37,486 LUT、32,057 FF、
@@ -34,14 +144,27 @@ P1.3 选择 ROB32/int8/mem4、有限整数乱序、转发模式 3、Tournament/R
 额外 16/24 GiB 检查通过；place 入口为 19.826/23.847 GiB，标准各阶段仍检查双 6 GiB。
 重试 place 在 EP_DL 申请 92,745,552 字节失败，耗时 6 分 8 秒、内存池峰值 22,191 MB，
 23:03:59 自然退出，没有进入 route。Windows 事件 2004 在 23:03:57 记录
-PDS 提交量 42,237,083,648 字节及虚拟内存不足；工具池峰值与进程提交量分别记录，
+PDS 提交量 42,237,083,648 字节（约 39.34 GiB）及虚拟内存不足；
+工具池峰值与进程提交量分别记录，该事件采样不覆盖完整运行峰值，
 24 GiB 启动余量未能支撑此配置。系统按现有设置自动增长分页文件，仍发生分配失败；
 没有手工修改分页或结束无关进程。
 证据为 `logs/p1/p1-3-final/{retry-place-failed.json,retry-resource-event.json,retry-monitor.jsonl}`，
 重试控制结果 `retry-controller-result.json` 为 FAIL。原工程、网表、两次失败日志和控制结果保留。
 用户已要求暂停布局；最终 P1.3 没有 Fmax/WNS、物理资源、最差路径或未布通数量，
-本次仅提交代码、仿真和综合结果供评审。后续明确恢复后再评估环境并使用新目录，
+P1 的代码、仿真与综合结果已随 main 保留。后续明确恢复后再评估环境并使用新目录，
 不直接重跑已失败的控制入口或覆盖日志。不能将 P1.1a 的物理结果代替最终 P1.3。
+
+当前 P2 scoreboard wrapper 已接 `soc_system`、`ddr_axi_target` 和原生块桥。
+双宽 full/lite 四种配置的离线展开通过；检查命令为
+`python3 tb/tools/check_pango_wrapper.py --backend scoreboard --output <新目录>`。
+默认不指定 backend 时仍验证 legacy 八种配置。桩只描述厂商端口元数据，
+没有模拟 DDR 校准或倍频。本轮没有 PDS、资源或新 Fmax。
+
+板级默认 profile 0 保留四路同接 125 MHz DDR 用户时钟及等待 DDR 校准的启动方式。
+`BOARD_CLOCK_PROFILE=1/4` 已实现独立 SoC PLL 和 DDR 未就绪时的本地启动，
+对应 C1/C4；频率、复位与仿真证据见第 7 节。Flash 容量仍设 0 且引脚未接。
+C1/C4 尚未完成 generated-clock、PLL 站点、CDC 引脚及 DDR/reset/I/O 的物理约束验证。
+以下 P0/历史 PDS 数据不能用于验收新总线。
 
 ## 1. 目标
 
@@ -49,14 +172,15 @@ PDS 提交量 42,237,083,648 字节及虚拟内存不足；工具池峰值与进
 - 同域 Fmax、WNS、资源、最差路径和未布通网络一起记录。
 - DDR PHY、外部 IO、UART、ILA 和十秒 CoreMark 单独验收。
 
-当前 wrapper 仍使用 DDR IP 的 125 MHz 用户时钟。125 MHz 下 setup 未收敛，
-没有 bitstream、没有烧板。
+默认 profile 0 使用 DDR IP 的 125 MHz 用户时钟；C1/C4 为新增候选。
+历史报告未给出当前组合在这些时钟配置下的 setup 收敛结果，没有可交付 bitstream，
+没有烧板。
 
 CMP `2b49c77` 的 r12 已完成标准 PDS：87.8837 MHz、85 MHz WNS +0.386 ns、
 TNS 0、零未布通；slow/fast setup、hold、recovery、removal、MPW、skew 均零失败。
 物理 LUT/FF 为 46,457/32,096，36 DRM、4 APM。最差路径为 IQ 读指针到 DSP，
 7 级、10.015 ns，高扇出 897。35 输入、73 输出仍缺 I/O 延迟约束。
-当前 ISS `85ab1ca` 为 ALU/Load/DSP 8/10/10 级，完整双宽回归与八次重放通过；
+历史 ISS `85ab1ca` 为 ALU/Load/DSP 8/10/10 级，完整双宽回归与八次重放通过；
 r13 完整标准 PDS 为 82.8726 MHz、WNS −0.302 ns、86 个 slow setup 失败端点、零未布通，频率验收失败。每次原始报告与输入哈希均独立保存，详见
 工作区 `ITERATIONS.md` 9.6。
 
@@ -69,7 +193,7 @@ route 用时 11 分 32 秒，各阶段入口双 6 GiB 均通过，运行最小�
 8.272/0.682 GiB，无内存分配失败。源与报告绑定在
 `logs/pipeline/preview-180f6fc-20261021/pds-result.json`。
 
-本轮 `dffb8a2` 的 r15 标准 PDS 已完成：**85.2464 MHz、85 MHz WNS +0.034 ns、
+历史 P0 `dffb8a2` 的 r15 标准 PDS 已完成：**85.2464 MHz、85 MHz WNS +0.034 ns、
 TNS 0、零未布通**，12 类 STA 均无失败，57,382 条网络全部布通。物理为
 40,154 LUT、32,318 FF、36 DRM、4 APM、77 IO；比 r14b 少 800 LUT，FF 不变。
 相对 r14b，Fmax 提高 3.03%；比 CMP 的 87.8837 MHz 低 3.00%。
@@ -89,12 +213,36 @@ route_optimize 1 分 4 秒。各阶段入口双 6 GiB 全部通过，实现期�
 用户随后决定采用上述 P0 冻结依据，原报告保留。
 35/73 项 I/O 延迟仍缺失，85 MHz 裕量为 0.034 ns，未验证板上运行。
 
+2026-10-22 新 SoC `soc/p2-unified-bus@e3caafe` 完成一次标准 PDS：
+97,358 条网络全部布通，0 未布通/0 过使用；Fmax **84.9856 MHz**，
+WNS **−0.002 ns**、TNS **−0.002 ns**，1/184,374 个 slow setup 端点失败；
+slow/fast hold、recovery/removal/MPW/skew 零失败。CLMA 47%、LUT 41%/39%、
+FF 17%、DRM 9%、IO 20%。最差路径为 LSQ descriptor 到 branch_event_valid，
+21 级，logic 3.926 ns、route 7.266 ns、扇出 35。未达到 85 MHz；四域仍同接
+`core_clk`，35/73 项 I/O 延迟仍缺，不能当作独立 CDC 或板级结果。
+结构化结果和哈希在 `hgb-aisystem_riscv/logs/pipeline/p2-unified-bus-20261022/`。
+
+2026-10-23 的 `fpga/p3-c1-board-physical` 增加 C1/C4 物理暂存：`prepare_project.py`
+的 `--board-clock-profile` 生成 schema 9 和 `board_clocks.fdc`，从
+`g_domain_clocks.u_soc_pll.u_pll/CLKOUT0..2` 建立 `clk_core`/`clk_sys`/`clk_periph`
+generated clock。profile 0 保持 schema 8 和原 `compile.tcl`。第三版 C1 暂存
+`soc-rv32-c1c` 通过 258 个字节哈希和 557 条约束检查（0 error、18 warning）。
+C1 综合 PASS，20 分 55 秒、峰值 4,025 MB；76,298 LUT/159,800、61,092 寄存器/319,600、
+36 DRM/415、4 APM、0 latch。综合估计 `clk_core` 36.5150 MHz（WNS −17.386）、
+`clk_sys` 84.1326 MHz、`clk_periph` 73.0514 MHz、`ddrphy_sysclk` 144.7178 MHz。
+未加载 CDC 例外时，ddr→sys setup −6.063 ns/556 端点、periph→sys −2.998/36；
+hold sys→ddr −4.680/772、ddr→phy_dq_sysclk_1 −1.138/52。这些不是闭合结果。
+约束不含 clock group、false path、max_delay 或 I/O delay；PLL 站点、DDR IP 共存、
+CDC 绑定和板级链仍未完成。当前机器没有 FPGA/JTAG 设备，没有 bitstream 或烧板。
+Core 的 36.5 MHz 综合估计来自 `ras.sv` 的 34 级串行恢复链，旧 r15/P2 的 85 MHz
+不覆盖当前 P1 Core。
+
 ## 2. 工具与目录
 
 - PDS：`$PDS_HOME\bin\pds_shell.exe`。
 - 工程根：`$PDS_WORK_ROOT\work\timing-YYYYMMDD-<topic>`，每次新目录。
 - `reference/` 只读。
-- 生成 IP、网表、工程、原始日志和报告都放 F:，仓库只保留源码、脚本和摘要。
+- 生成 IP、网表、工程、原始日志和报告都放 `$PDS_WORK_ROOT`，仓库只保留源码、脚本和摘要。
 
 运行前查 Windows 可用提交。常规 place 曾在 EP_DL 大块分配失败，历史快速布局
 数据仅作对照。当前使用单线程标准 `place`，布线与优化保持 Normal 模式；
@@ -106,7 +254,10 @@ WSL 文件缓存也会占用 Windows 物理内存和提交余量；先对本项�
 文件释放可丢弃缓存，保留源码、镜像、日志及数据库，再读取 Windows 字节计数。
 WSL 的 `MemAvailable` 不能替代 Windows 指标；禁止将其他 agent 的任务当作遗留进程。
 `memory_gate.ps1` 同时要求 Windows 物理可用量和提交余量至少 6 GiB，按原始
-字节判断，查询失败即拒绝；更高的流程门槛通过 `HGB_PDS_MIN_PHYSICAL_GIB`、
+字节判断，查询失败即拒绝。双 6 GiB 仅为脚本最低门槛，不能视为当前 P1+P2
+工程的容量保证；P1 两次 OOM 中，第二次已有 24.021 GiB 启动提交余量仍不足。
+未来恢复 PDS 前需结合约 39.34 GiB 的进程提交采样及额外余量重新评估环境。
+更高的流程门槛通过 `HGB_PDS_MIN_PHYSICAL_GIB`、
 `HGB_PDS_MIN_COMMIT_GIB` 保留，不能设为低于 6。每次查询保存独立 JSON。
 暂存工程包含两个内存检查脚本及哈希；`implement.tcl` 在 dev_map、place、route、
 route_optimize 前逐次检查。新工程用 `scripts/pango/run_phase.ps1` 的
@@ -138,10 +289,28 @@ WSL loader 构建
   → timing-summary.json
 ```
 
-新后端暂存使用 `prepare_project.py --core-backend scoreboard`。schema 4 明确记录
-i2、ROB16、IQ8、LQ4/SQ4、checkpoint4、p0/r0、IF64、双数据口与每 TCM 两 bank；
-`--core-backend legacy` 保持 schema 3 的旧 i1 控制组。manifest 保存源码提交/分支、
-工作树状态及每个暂存文件的 SHA，不能把暂存校验写成综合或时序通过。
+当前暂存入口为 `prepare_project.py --core-backend scoreboard`，生成 schema 8，
+明确记录 `soc_system` 拓扑和最终 P1：i2、ROB32、int8/mem4、split=1、有限整数
+乱序=1、转发模式 3、Tournament/RAS、LQ4/SQ4、checkpoint4、IF64、双数据口。
+Python 入口直接采用这组默认值；仿真入口须先
+`source scripts/verilator/p1_core_config.sh`。单项 CLI 参数可显式覆盖，覆盖后的
+配置标为 `custom`；校验器核对配置与 Tcl，不能仅凭 `p1` 名称认定参数生效。
+
+新 SoC 固定本地 TCM，省略 `--local-tcm` 时记录有效值 1，显式 0 会拒绝。
+Tcl 不再给 scoreboard wrapper 传递 `LOCAL_TCM_ENABLE`、`DMA_WIDE_ENABLE`、
+`CACHE_BLOCK_ENABLE`、`DMA_BLOCK_ENABLE` 四个 legacy 开关。schema 8 暂存仍只接受
+默认 `BOARD_CLOCK_PROFILE=0`：四个端口同接 DDR 用户时钟 125 MHz，`mtime` 归属
+periph 域。校验器检查默认值、同钟分支接线和频率声明，拒绝改写元数据或接线后沿用
+原声明。C1/C4 的 PLL/复位 RTL 已实现，但没有通过此暂存入口交付其物理工程；
+`plan_soc_clocks.py` 生成的规划也不能代替实际 generated-clock、PLL 站点、
+Gray max-delay/skew 与板级引脚约束。后续须为候选补齐并校验约束后再启动标准 PDS。
+
+历史 schema 1–7 仍按原命令校验；P1 schema 7 的 ROB32/调度参数保留。
+合入 P1 前的 P2 schema 4 省略 legacy 参数时，还须存在已覆盖哈希的 `soc_system`
+wrapper。`--core-backend legacy` 继续生成 schema 3；`scripts/pango/build.ps1`
+也仍是 legacy/schema3 入口，不能用它代表新的 P1+P2 profile。
+manifest 保存源码提交/分支、工作树状态及每个暂存文件的 SHA。
+本节暂存检查只生成和校验离线配置；B20 另有第 7 节的功能仿真，未启动后续 PDS 阶段。
 
 原始 64 KiB `firmware/{i,d}mem.hex` 同时生成 `.bank0`/`.bank1`，按 XLEN 字
 交错切分；校验器检查每份 bank 的哈希以及与原图像的逐字对应。
@@ -151,7 +320,7 @@ i2、ROB16、IQ8、LQ4/SQ4、checkpoint4、p0/r0、IF64、双数据口与每 TCM
 完成两块 64 KiB TCM 的全字节校验，每块使用 16 个 DRM。
 未知连线、缺失 INIT、重叠输出位均拒绝。`timing-20261021-p0-scoreboard-r2`
 的 RV32 两个 TCM 各 64 KiB 已全部匹配；新旧映射及证据输出的八项工具测试通过。
-新 RV32 配置综合映射为 36 DRM、4 APM、0 latch；RV64 为 38 DRM、12 APM、
+历史 scoreboard RV32 配置综合映射为 36 DRM、4 APM、0 latch；RV64 为 38 DRM、12 APM、
 0 latch。旧 RV32 控制组仍要求 34 DRM、4 APM，RV64 旧核映射尚未纳入校验入口。
 `verify_synthesis.py` 按位宽和后端分别检查，41 项 PDS 交接工具测试通过。
 r2/r3 的默认标准 place 均在 EP_DL 阶段内存分配失败，尚无有效布线时序结果。
@@ -183,7 +352,7 @@ Normal 模式和线程数。原布局和新布线成功标记分别检查，缺�
 `check_tcm_init.py --summary <new-json>`
 可在两块 TCM 全部匹配后创建证据，绑定 manifest、网表和 HEX 哈希，拒绝覆盖已有报告。
 
-新 P0 候选参数：`CORE_XLEN=32`、`MUL_IMPL=0`、`DIV_IMPL=1`、
+历史 P0 候选参数：`CORE_XLEN=32`、`MUL_IMPL=0`、`DIV_IMPL=1`、
 `CORE_BACKEND=scoreboard`、`ISSUE_WIDTH=2`、`RETIRE_ENTRIES=16`、
 `SOC_PROFILE=full`、`LOCAL_TCM_ENABLE=0`、
 `DMA_WIDE_ENABLE=1`、`CACHE_BLOCK_ENABLE=1`、`DMA_BLOCK_ENABLE=1`。
@@ -225,7 +394,7 @@ reset_sync_q[1]
 PDS 2025.2 拒绝 SystemVerilog input 端口默认值，I2 有 89 处、23 个文件。
 该旧检查点按原样不能综合；其结果来自 F: 暂存副本删除默认值后的版本，补丁在
 `$PDS_WORK_ROOT\work\timing-20261020-i2-rv32\portability-patch.diff`。
-`c04c588` 已将修正纳入仓库，当前 P0 从干净提交暂存并核对全部源哈希。
+`c04c588` 已将修正纳入仓库，历史 P0 从干净提交暂存并核对全部源哈希。
 
 ## 6. 十三轮 Fmax
 
@@ -248,32 +417,74 @@ PDS 2025.2 拒绝 SystemVerilog input 端口默认值，I2 有 89 处、23 个�
 十三轮说明：布线和布局对结果影响大；插寄存器不一定切断所有控制依赖；删掉一条
 路径也不一定缩短全局最差路径。
 
-## 7. 复位与资源
+## 7. 时钟、复位与软件时基
 
-当前没有复位树或复位例外约束。`pango_200hp_top.sv` 的 `reset_sync_q[1]`
-驱动全 SoC 同步复位；正常运行时是常数 0，STA 仍按数据路径分析。
+`pango_200hp_top.sv` 的 `BOARD_CLOCK_PROFILE` 独立于 full/lite 外设配置。
+以下为 RTL 声明及仿真采用的频率，单位 MHz，不是布线 Fmax：
 
-可选：
+| 板级配置 | Core+TCM+I$/D$ | SYS：AXI/DMA/Flash 数据面 | DDR 用户口 | PERIPH：MMIO/Timer/UART/IRQ | 启动条件 |
+| --- | --- | --- | --- | --- | --- |
+| 0，默认及 schema 8 暂存 | 125 | 125 | 125 | 125 | 等 DDR PLL、PHY 和校准就绪 |
+| 1，C1 候选 | 100 | 80 | 125 | 25 | SoC PLL 锁定后可执行 ROM/TCM/MMIO |
+| 4，C4 候选 | 100 | 100 | 125 | 25 | 同 C1 |
 
-1. 平衡复位树或分区复位同步器。
-2. 异步复位、同步释放。
-3. 有依据的复位例外，需要维护者审阅。
+板级 profile 0 不等同于便携测试的 C0；测试 C0 为四域 100 MHz。
+Core 与 TCM/Cache 当前保持同域，M0/M1/M2 测量层次也不与时钟域一一对应。
 
-I2 物理 FF 20140，DMA 双 128B 缓冲、块桥读写缓冲、full 外设占比大。
-建议拆 perf/full 两套 profile，i1 时完全裁掉第二 ALU/额外 RF 口。
+`pango_soc_pll.sv` 使用 `GTP_GPLL` 和三个 `GTP_CLKBUFG`。125 MHz 参考经 `/5`
+形成 25 MHz PFD，反馈配置形成 800 MHz VCO；Core `/8`、SYS `/10` 或 `/8`、
+PERIPH `/32`。DDR 继续使用 DDR IP 自身的 125 MHz 用户口。SoC 三路同源相关，
+与 DDR PLL 输出的相位关系须在物理工程中确认，不能仅因频率不同而全域设 false path。
+
+C1/C4 的 `pango_soc_reset.sv` 在持续运行的参考钟域管理复位。首次启动只等
+板级复位和 SoC PLL；DDR 未校准或停钟时，Core 可从 Boot ROM 进入 TCM 并访问 MMIO。
+DDR 曾就绪后，锁定/ready 撤销经同步器触发整机复位；DDR 停钟由 heartbeat 看门狗检测。
+复位保持 64 个参考周期，各功能域经 `soc_reset_controller` 三拍同步释放；
+heartbeat 计数器也有 DDR 域三拍释放。DDR 控制器、AXI target、块桥和 CDC 两端
+共同进入新一轮复位，丢弃在途事务。默认 profile 0 保留原 `reset_sync_q` 路径。
+DDR IP 的 `resetn` 接口释放要求、复位 recovery/removal 及实际网络延迟仍需物理核对，
+本轮没有新增复位时序例外。
+
+`soc_info` 的旧 `+0x004` 字段保持原 ABI。新增窗口先由 `+0x03c` 的 bit 8 宣告，
+启用后 `+0x050` 为版本/有效位，`+0x054/058/05c/060/064` 分别返回
+Core/SYS/DDR/PERIPH/Timer 的 Hz；Timer 等于 PERIPH。C1/C4 wrapper 启用此窗口，
+profile 0 默认关闭。寄存器返回配置值，不能代替时钟测量或 STA。
+
+`software/common/soc_clocks.h` 在发现位缺失时仅读取旧字段；发现位存在时校验新窗口。
+RT-Thread 的 tick 和超时采用 Timer 频率，UART 分频采用 PERIPH，SPI 分频采用 SYS，
+CoreMark 的 `mcycle` 换算采用 Core 频率。旧 `CLOCK_HZ` 不再承担所有独立域的时基。
+软件时基测试检查寄存器、UART/SPI 分频配置和约 1 ms 内的 `mtime/mcycle` 比例，
+不发起 Flash 读，也未验证板上串口波形。
+
+B20 的以下仿真均已完成，日志根为 `logs/p2/joint-step3-20261023/`：
+
+| 检查 | 结果 | 证据与边界 |
+| --- | --- | --- |
+| C1/C4 PLL 与复位/FIFO 专测 | 3 次运行 PASS，0 SKIP | `board-clocks/suite-v4/receipt.json`；PLL 使用未修改的厂商 GPLL/CLKBUFG 模型，检查输出周期；复位覆盖 DDR 停钟、PHY/ready/SoC PLL 失效及旧事务清除 |
+| 双 XLEN 独立启动，C1/C4 | 4 次运行 PASS，0 SKIP | `system-rv32/boot/`、`system-rv64/boot/`；真实 CPU 执行 ROM→TCM→MMIO，外部 AXI 主口在 DDR 停钟时获得错误响应；复位后无旧响应，新请求返回正确 ID |
+| 双 XLEN SoC 功能，C0–C4 | 10 次运行 PASS，0 SKIP | `system-rv32/soc-system-*.log`、`system-rv64/soc-system-*.log` |
+| 双 XLEN 软件时基，C0–C4 | 10 次运行 PASS，0 SKIP | 同目录 `clock-contract-*.log`；C2/C3 为 CDC 仿真组合，未提供相应板级 PLL profile |
+
+实际命令、输入和日志哈希见各自 receipt/manifest；软件镜像由整机测试 manifest 记录。
+PLL 模型测试与独立启动测试分开运行；
+独立启动使用测试时钟与受控 AXI 端口，没有模拟 DDR PHY 校准，也没有运行完整板级
+PLL+DDR PHY 联合模型。`check_pango_wrapper.py` 的厂商端口桩展开仍只验证接线和参数。
+
+新增 PLL、复位监督器和 Cache 安装候选尚无综合/物理资源数据。历史 I2 的物理
+FF 20,140 及 perf/full 资源建议保留为旧配置参考，不能作为当前 P1+P2 的资源统计。
 
 ## 8. 板级边界
 
-- 125 MHz setup 未收敛，没有可交付 bitstream。
-- DDR PHY 跨域只差 −0.061 ns，但外部 IO 约束仍缺 35/73。
-- 没有真实 DDR 颗粒、校准、UART、ILA、功耗。
+- 当前组合的 profile 0/C1/C4 均无新增 PDS 结果，没有可交付 bitstream；RV32 ≥85 MHz 待验。
+- 旧控制组 DDR PHY 跨域曾为 −0.061 ns；当前集成版没有新增物理结果，外部 IO 约束仍缺 35/73。
+- 未验证板上 DDR 颗粒、校准、UART、ILA、功耗。
 - 没有十秒 CoreMark。
-- 100 MHz 方案需要重新生成 IP 或补 CDC，不能只改 FDC 数字。
+- C1/C4 已有 PLL、复位和 CDC 功能 RTL；generated-clock、PLL 站点、CDC 引脚约束以及 DDR/reset/I/O 时序尚未 PDS 验证，不能只改 FDC 数字宣称闭合。
 
 ## 9. 原始证据
 
 历史工程在 `$PDS_WORK_ROOT\work\timing-20261016-*` 和 `timing-20261020-i2-rv32`。
-当前流水拆分使用 `timing-20261021-pipe-head-r11b`、`pipe-completion-r12`、
+历史流水拆分使用 `timing-20261021-pipe-head-r11b`、`pipe-completion-r12`、
 `pipe-issue-r13`、`pipe-preview-r14b`、`lsu-forward-format-r15` 对应的新目录，
 完整目录名见工作区记录；包含 manifest、网表、
 原生工程、日志和时序报告。仓库不提交二进制、网表或原始工具报告。

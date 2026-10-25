@@ -4,25 +4,62 @@ RV32 优先的 RISC-V Core/SoC 协作仓库。目标是 RT-Thread 上的文本�
 推理、文本输出；RV64 跟随共享架构验证。近期不把 Linux、MMU、F/V、图像链路作为
 交付前提。
 
+最新开发基线为 **`baseline-rv32-soc-20261025`**，采用 `7449fe7` 的 Core/SoC 和
+三组统一测量配置，并补齐 C1/C4 原生 PDS 暂存依赖。Core 为 RV32 优先、scoreboard
+双发射、ROB32、int8/mem4、LQ4/SQ4、forward3、Tournament1、RAS0、OOO0，
+ALU/Load/DSP 流水为 8/10/10。后续优化和上板从此标签的新分支开始。
+
+基线功能测试加载已固定的 Core 参数：
+
+```bash
+source scripts/verilator/p1_core_config.sh
+make test XLEN=32
+make test XLEN=64
+```
+
 关闭 P1 开关时，`CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16` 选择冻结 P0：
 RAT 绑定 ROB 标签、IQ8 顺序双发射、两个完整 ALU、共享分支/MDU、LQ4/SQ4 双 AGU，
 两个完成口与按序双退休。原生 IF64 和双数据口已接入 SoC；MMIO/Store 受队头许可。
 默认 `CORE_BACKEND=legacy` 保留旧 IF→D1→D2→EX→MEM→WB 控制组。
 P1 使用 `source scripts/verilator/p1_core_config.sh`，选择 ROB32、int8/mem4、有限整数
-乱序和按序双退休；预测器、转发策略及完整参数由该配置入口固定。
+乱序可选结构和按序双退休；当前入口选择 OOO0、RAS0、Tournament1、forward3。
+
+CoreMark 与综合的新入口共用 [三组配置](scripts/benchmark_platforms.json)：
+`core_tcm` 为 Core 和真实 TCM；`soc_tcm` 增加片上总线/DMA/MMIO；`soc_ddr`
+再增加 Cache 和 DDR3。三组时钟域分别为 1/3/4 个，完整组目标为
+Core/SYS/DDR 用户口/periph = 100/80/125/25 MHz。
+`make coremark-platforms COREMARK_PLATFORM_OUT=build/unified-coremark/new-run` 同时输出
+CoreMark/Core-MHz、按本次频率计算的仿真每秒成绩和镜像/源哈希；默认 2 次迭代仅做
+短仿真适配。综合用 `scripts/pango/prepare_benchmark.py`，必须提供相同软件 bundle
+和仿真 build receipt。详见[项目介绍](docs/PROJECT_INTRO.md)。旧 M0 的一周期 Harvard
+内存和 H0/H1/H2 路径诊断继续保留原定义。
 
 ## 当前能力
 
 - RV32/RV64 I/M/Zicsr，精确同步异常、机器中断、CSR、MRET。
 - DSP/Booth-Wallace/移位乘法，SRT/移位除法。
-- BTB、GShare/Local/chooser、4 深 RAS，正常退休训练。
+- BTB、GShare/Local/chooser，正常退休训练；保留可选 4 深 RAS，基线关闭。
 - 唯一退休队列、tagged 完成、逐源捕获；新后端支持 ROB 标签重命名、双 LSU 与字节转发。
 - 64 KiB I/D-TCM、Boot ROM、MMIO、UART0/1、Timer0/1、GPIO0/1/2、IRQ。
 - 2 路 I$/D$，WB/WA D$，FENCE.I、维护命令、DMA 所有权交接。
-- DMA legacy 和两块 128B 双槽引擎，256 位 DDR 口，读写可重叠。
+- DMA 两块 128B 双槽引擎与统一 AXI 主口，读写可重叠；legacy 控制组保留。
 - 标准 AXI 与 Pango 原生 DDR 桥；RT-Thread BSP、UART loader、CoreMark。
 
 ## 当前状态
+
+2026-10-25：三组可运行平台完成 RV32 短 CoreMark 和标准综合。相同 TCM 镜像均为
+733,915 周期、2.725111 CoreMark/MHz；DDR cold/warm/背景负载分别为
+2.184639/2.197375/1.909776。旧 M0 一周期内存固定重放为 3.151584，保持原定义。
+三组 Core 综合估计为 96.8523/91.7600/84.4523 MHz，尚无此版本布局布线或板级结果。
+完整组 SYS/DDR 用户口/periph 目标为 80/125/25 MHz，Core 目标为 100 MHz。
+RV32 功能回归 220 PASS/5 SKIP、RV64 260 PASS/5 SKIP，另有短 CoreMark 30 PASS；
+RV64 只做功能/ISA/SoC 仿真。性能、资源和原始证据位置见[项目介绍](docs/PROJECT_INTRO.md)。
+TCM/Cache 命中仍在 Core 域，慢路径保留 AXI/CDC 和寄存边界，默认板级 profile0
+保留；完整测量使用显式 C1。后续继续 CDC 物理绑定、标准布局布线、启动和上板。
+RT-Thread 四个镜像编译通过，完整运行受旧测试台层级失配阻塞。
+结构与启动见[SoC系统](docs/understand/SOC_SYSTEM.md)，物理边界见[FPGA适配](docs/fpga/FPGA_ADAPTATION.md)。
+
+以下 P1 开发过程和 P0 数值属于各自原测试树，保留镜像与提交归属。
 
 P1.1a 候选位于 `core/p1-1a-split-lq-sq`，起点为已合入的 `main@094443e`。
 `load_queue.sv` 和 `store_queue.sv` 分别持有描述符、状态和完成数据，

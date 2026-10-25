@@ -11,15 +11,15 @@ module tb_scoreboard_issue;
     always #5 clk = !clk;
     branch_recovery_t recovery = '0;
     logic [RETIRE_IDX_W-1:0] head_slot = 0;
-    logic [1:0] push_count = 0, pop_count = 0, push_capacity, occupancy;
+    logic [1:0] push_count = 0, pop_count = 0, push_capacity, occupancy, present, mark_reported = 0;
     logic busy;
-    d2_ex_t push_packet [2], issue_packet [2], expected[$], discarded;
+    d2_ex_t push_packet [2], issue_packet [2], raw_packet [2], expected[$], discarded;
     branch_result_t push_branch [2], issue_branch [2], expected_branch[$], discarded_branch;
-    int checked = 0, consumed = 0, cancelled = 0, next_id = 0;
+    int checked = 0, consumed = 0, cancelled = 0, next_id = 0, reported_checks = 0;
     issue_queue dut (
         .clk, .rst, .flush, .recovery, .head_slot,
-        .push_count, .push_packet, .push_branch, .push_capacity,
-        .pop_count, .issue_packet, .issue_branch, .occupancy, .busy
+        .push_count, .push_packet, .push_branch, .mark_reported, .push_capacity,
+        .pop_count, .issue_packet, .raw_packet, .issue_branch, .present, .occupancy, .busy
     );
     function automatic d2_ex_t packet(input int number);
         d2_ex_t value;
@@ -49,6 +49,13 @@ module tb_scoreboard_issue;
             assert (push_capacity == ((flush || recovery.valid) ? 0 : 2 - expected.size() + int'(pop_count)))
                 else $fatal(1, "ISS capacity");
             for (int lane = 0; lane < 2; lane++) begin
+                assert (present[lane] == (lane < expected.size()))
+                    else $fatal(1, "ISS raw presence follows cancellation");
+                if (present[lane]) begin
+                    assert (raw_packet[lane] == expected[lane])
+                        else $fatal(1, "ISS raw packet lost report mark or payload");
+                    if (raw_packet[lane].branch_reported) reported_checks++;
+                end
                 assert (issue_packet[lane].valid == (lane < expected.size() && !flush && !recovery.valid))
                     else $fatal(1, "ISS fell through or exposed cancelled instruction");
                 if (issue_packet[lane].valid)
@@ -57,6 +64,13 @@ module tb_scoreboard_issue;
         end
         if (rst || flush) begin expected.delete(); expected_branch.delete(); end
         else begin
+            for (int lane = 0; lane < expected.size(); lane++) begin
+                if (mark_reported[lane]) begin
+                    discarded = expected[lane];
+                    discarded.branch_reported = 1;
+                    expected[lane] = discarded;
+                end
+            end
             repeat (int'(pop_count)) begin discarded = expected.pop_front(); discarded_branch = expected_branch.pop_front(); consumed++; end
             for (int index = expected.size()-1; index >= 0; index--) begin
                 if (recovery.valid && younger_than(expected[index].retire_id, recovery.id, head_slot)) begin
@@ -66,11 +80,36 @@ module tb_scoreboard_issue;
             for (int lane = 0; lane < int'(push_count); lane++) begin expected.push_back(push_packet[lane]); expected_branch.push_back(push_branch[lane]); end
         end
         @(posedge clk); @(negedge clk); checked++;
-        push_count = 0; pop_count = 0; recovery = '0; flush = 0;
+        push_count = 0; pop_count = 0; recovery = '0; flush = 0; mark_reported = 0;
     endtask
     initial begin
         for (int lane = 0; lane < 2; lane++) begin push_packet[lane] = '0; push_branch[lane] = '0; end
         @(negedge clk); cycle(); rst = 0;
+        // 标记必须跟随完整 ID：停顿保持、第二槽移到第一槽、新包不能继承旧标记。
+        offer(2);
+        push_packet[0].uop.branch_op = BR_EQ;
+        push_packet[1].uop.branch_op = BR_JALR;
+        cycle();
+        mark_reported = 2'b10; cycle(); repeat (4) cycle();
+        pop_count = 1; offer(1); cycle();
+        assert (expected[0].branch_reported && !expected[1].branch_reported)
+            else $fatal(1, "report mark crossed instruction identity");
+        mark_reported = 2'b10; pop_count = 1; cycle();
+        cycle();
+        assert (expected[0].branch_reported) else $fatal(1, "marked second slot lost on compaction");
+        flush = 1; cycle();
+        // 恢复与上报同拍：保留边界项的标记，清除年轻项；raw 视图仍显示沿前包。
+        offer(2); cycle(); head_slot = expected[0].retire_id.slot;
+        mark_reported = 2'b11;
+        recovery = '{valid:1, id:expected[0].retire_id, pc:'0}; cycle();
+        cycle();
+        assert (expected.size() == 1 && expected[0].branch_reported)
+            else $fatal(1, "recovery lost surviving report mark");
+        flush = 1; mark_reported = 2'b01; cycle();
+        offer(2); cycle(); cycle();
+        assert (!expected[0].branch_reported && !expected[1].branch_reported)
+            else $fatal(1, "flush leaked report mark into new packet");
+        flush = 1; cycle();
         offer(2); cycle(); repeat (8) cycle();
         // 只消费最老一项，再补一项；原第二项及其操作数必须保持。
         pop_count = 1; offer(1); cycle();
@@ -89,11 +128,13 @@ module tb_scoreboard_issue;
                 pop_count = 2'(step % (expected.size() + 1));
                 offer((step * 7 + 1) % (3 - expected.size() + int'(pop_count)));
             end
+            mark_reported = 2'(step);
             cycle();
         end
         pop_count = 2'(expected.size()); cycle();
-        assert (!busy && consumed > 200 && cancelled > 0) else $fatal;
-        $display("PASS tb_scoreboard_issue RV%0d cycles=%0d consumed=%0d cancelled=%0d dual_streak=100", XLEN, checked, consumed, cancelled);
+        assert (!busy && consumed > 200 && cancelled > 0 && reported_checks > 20) else $fatal;
+        $display("PASS tb_scoreboard_issue RV%0d cycles=%0d consumed=%0d cancelled=%0d reported=%0d dual_streak=100",
+                 XLEN, checked, consumed, cancelled, reported_checks);
         $finish;
     end
 endmodule

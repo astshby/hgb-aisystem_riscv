@@ -42,4 +42,9 @@ if [[ "${SOC:-0}" == "1" ]]; then
     bench_top=tb_soc_benchmark
     bench_tb=tb/soc/tb_soc_benchmark.sv
     bench_files=scripts/soc_files.f
+    if [[ "$core_backend" == scoreboard ]]; then
+        config="${config}-axi4"
+        bench_top=tb_soc_system
+        bench_tb=tb/soc/tb_soc_system.sv
+    fi
 fi

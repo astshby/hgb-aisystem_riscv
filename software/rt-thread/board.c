@@ -8,6 +8,7 @@ volatile unsigned char sim_console __attribute__((section(".sim_console")));
 volatile rt_uint32_t hgb_irq_count[8], hgb_tick_irqs, hgb_dma_bytes;
 volatile rt_ubase_t hgb_fault_cause, hgb_fault_pc, hgb_fault_value;
 rt_uint32_t hgb_soc_presence, hgb_soc_profile;
+struct hgb_soc_clocks hgb_clocks;
 static rt_uint64_t next_tick;
 static rt_uint32_t tick_cycles;
 
@@ -44,6 +45,12 @@ static void set_compare(rt_uint64_t value)
     REG32(0x02004004) = 0xffffffffu;
     REG32(0x02004000) = (rt_uint32_t)value;
     REG32(0x02004004) = (rt_uint32_t)(value >> 32);
+}
+
+/* 调用方在 Flash 配置空闲时写入该除数；本接口不发出读写/擦除命令。 */
+rt_uint32_t hgb_spi_divider(rt_uint32_t maximum_sck_hz)
+{
+    return hgb_soc_spi_divider(hgb_clocks.sys_hz, maximum_sck_hz);
 }
 
 rt_err_t hgb_irq_enable(unsigned id)
@@ -101,7 +108,7 @@ static void load_hot_code(void)
     REG32(DMA_BASE + 4) = (rt_uint32_t)(rt_ubase_t)__hot_start;
     REG32(DMA_BASE + 8) = length;
     REG32(DMA_BASE + 12) = 1;
-    rt_uint64_t deadline = hgb_mtime() + REG32(INFO_BASE + 4);
+    rt_uint64_t deadline = hgb_mtime() + hgb_clocks.timer_hz;
     while (REG32(DMA_BASE + 0x10) & 1) {
         if (hgb_mtime() > deadline) hgb_finish(120);
     }
@@ -142,6 +149,7 @@ void hgb_boot(void)
     rt_uint32_t discovery = REG32(INFO_BASE + HGB_SOC_DISCOVERY_OFFSET);
     if (!hgb_soc_discovery_valid(hgb_soc_presence, discovery)) hgb_finish(149);
     hgb_soc_profile = discovery & 0xffu;
+    if (hgb_soc_read_clocks(INFO_BASE, discovery, &hgb_clocks)) hgb_finish(161);
     const unsigned required[] = {HGB_TARGET_ITCM, HGB_TARGET_DTCM, HGB_TARGET_MTIME,
                                 HGB_TARGET_IRQ, HGB_TARGET_UART0, HGB_TARGET_GPIO0, HGB_TARGET_DMA,
                                 HGB_TARGET_SOC};
@@ -155,7 +163,7 @@ void hgb_boot(void)
     hgb_drivers_init();
     hgb_app_init();
     rt_thread_idle_init();
-    tick_cycles = REG32(INFO_BASE + 4) / RT_TICK_PER_SECOND;
+    tick_cycles = hgb_clocks.timer_hz / RT_TICK_PER_SECOND;
     if (tick_cycles == 0) hgb_finish(145);
     next_tick = hgb_mtime() + tick_cycles;
     set_compare(next_tick);

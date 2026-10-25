@@ -1,3 +1,111 @@
+`ifdef CORE_SCOREBOARD
+// Module: soc_top
+// Description: Portable core, DDR instruction/data caches, ROM, TCM, MMIO, DMA and external-memory port.
+module soc_top #(
+    parameter ITCM_INIT_FILE = "",
+    parameter DTCM_INIT_FILE = "",
+    parameter bit LOCAL_TCM_ENABLE = 1'b0,
+    parameter int unsigned SOC_PROFILE = soc_config_pkg::SOC_PROFILE_FULL,
+    parameter int unsigned DDR_BYTES = 0,
+    parameter bit DMA_WIDE_ENABLE = 1'b0,
+    parameter bit DMA_BLOCK_ENABLE = 1'b0,
+    parameter bit CACHE_BLOCK_ENABLE = 1'b0,
+    parameter bit ICACHE_ENABLE = 1'b1,
+    parameter int unsigned ICACHE_BYTES = 4096,
+    parameter int unsigned ICACHE_LINE_BYTES = 32,
+    parameter bit DCACHE_ENABLE = 1'b1,
+    parameter int unsigned DCACHE_BYTES = 4096,
+    parameter int unsigned DCACHE_LINE_BYTES = 32,
+    parameter logic [31:0] CLOCK_HZ = 50000000,
+    parameter logic [31:0] UART_DIVISOR = 434
+) (
+    input logic clk, rst,
+    input logic [1:0] uart_rx,
+    output logic [1:0] uart_tx,
+    input logic [31:0] gpio_in [3],
+    output logic [31:0] gpio_out [3], gpio_oe [3],
+    output logic ddr_req_valid,
+    input logic ddr_req_ready,
+    output bus_types_pkg::bus_req_t ddr_request,
+    input logic ddr_rsp_valid,
+    output logic ddr_rsp_ready,
+    input bus_types_pkg::bus_rsp_t ddr_response,
+    output logic dma_wide_req_valid,
+    input logic dma_wide_req_ready,
+    output bus_types_pkg::ddr_req_t dma_wide_request,
+    input logic dma_wide_rsp_valid,
+    output logic dma_wide_rsp_ready,
+    input bus_types_pkg::ddr_rsp_t dma_wide_response,
+    output logic commit_valid,
+    output logic [core_config_pkg::XLEN-1:0] commit_pc,
+    output logic [31:0] commit_inst,
+    output logic [4:0] commit_rd,
+    output logic commit_rd_we,
+    output logic [core_config_pkg::XLEN-1:0] commit_rd_data,
+    output logic commit_exception,
+    output pipeline_pkg::retire_trace_t commit_trace [2],
+    output logic dmem_store_fire,
+    output logic [core_config_pkg::XLEN-1:0] dmem_store_addr, dmem_store_data,
+    output logic [core_config_pkg::DBUS_BYTES-1:0] dmem_store_strb,
+    output logic [1:0] cache_rd_cmd_valid,
+    input logic [1:0] cache_rd_cmd_ready,
+    output block_types_pkg::block_cmd_t cache_rd_cmd [2],
+    input logic [1:0] cache_rd_valid,
+    output logic [1:0] cache_rd_ready,
+    input block_types_pkg::block_r_t cache_rd_data [2],
+    output logic [1:0] cache_wr_cmd_valid,
+    input logic [1:0] cache_wr_cmd_ready,
+    output block_types_pkg::block_cmd_t cache_wr_cmd [2],
+    output logic [1:0] cache_wr_valid,
+    input logic [1:0] cache_wr_ready,
+    output block_types_pkg::block_w_t cache_wr_data [2],
+    input logic [1:0] cache_wr_rsp_valid,
+    output logic [1:0] cache_wr_rsp_ready,
+    input block_types_pkg::block_b_t cache_wr_rsp [2],
+    output logic dma_block_rd_cmd_valid,
+    input logic dma_block_rd_cmd_ready,
+    output block_types_pkg::block_cmd_t dma_block_rd_cmd,
+    input logic dma_block_rd_valid,
+    output logic dma_block_rd_ready,
+    input block_types_pkg::block_r_t dma_block_rd_data,
+    output logic dma_block_wr_cmd_valid,
+    input logic dma_block_wr_cmd_ready,
+    output block_types_pkg::block_cmd_t dma_block_wr_cmd,
+    output logic dma_block_wr_valid,
+    input logic dma_block_wr_ready,
+    output block_types_pkg::block_w_t dma_block_wr_data,
+    input logic dma_block_wr_rsp_valid,
+    output logic dma_block_wr_rsp_ready,
+    input block_types_pkg::block_b_t dma_block_wr_rsp
+);
+    // 兼容单时钟、标量 DDR harness；实际四域顶层为 soc_system。
+    // 所有 CPU/Cache/DMA 流量已在内部统一，本端口只作旧设备模型的宽度转换。
+    axi_types_pkg::axi_req_t unified_ddr_request;
+    axi_types_pkg::axi_rsp_t unified_ddr_response;
+    soc_system #(.ITCM_INIT_FILE(ITCM_INIT_FILE),.DTCM_INIT_FILE(DTCM_INIT_FILE),
+        .SOC_PROFILE(SOC_PROFILE),.DDR_BYTES(DDR_BYTES),.ICACHE_ENABLE(ICACHE_ENABLE),
+        .ICACHE_BYTES(ICACHE_BYTES),.ICACHE_LINE_BYTES(ICACHE_LINE_BYTES),
+        .DCACHE_ENABLE(DCACHE_ENABLE),.DCACHE_BYTES(DCACHE_BYTES),.DCACHE_LINE_BYTES(DCACHE_LINE_BYTES),
+        .CLOCK_HZ(CLOCK_HZ),.UART_DIVISOR(UART_DIVISOR)) u_system (
+        .clk_core(clk),.clk_sys(clk),.clk_ddr(clk),.clk_periph(clk),.reset_async(rst),.ddr_ready(1'b1),
+        .uart_rx,.uart_tx,.gpio_in,.gpio_out,.gpio_oe,
+        .flash_cs_n(),.flash_sck(),.flash_mosi(),.flash_miso(1'b0),
+        .ddr_req(unified_ddr_request),.ddr_rsp(unified_ddr_response),
+        .external_req('0),.external_rsp(),.npu_req(),.npu_rsp('0),
+        .commit_valid,.commit_pc,.commit_inst,.commit_rd,.commit_rd_we,.commit_rd_data,.commit_exception,.commit_trace,
+        .dmem_store_fire,.dmem_store_addr,.dmem_store_data,.dmem_store_strb);
+    axi_bus_target u_compatibility_ddr (.clk,.rst,.axi_req(unified_ddr_request),.axi_rsp(unified_ddr_response),
+        .req_valid(ddr_req_valid),.req_ready(ddr_req_ready),.request(ddr_request),
+        .rsp_valid(ddr_rsp_valid),.rsp_ready(ddr_rsp_ready),.response(ddr_response));
+    assign dma_wide_req_valid=0; assign dma_wide_request='0; assign dma_wide_rsp_ready=0;
+    assign cache_rd_cmd_valid=0; assign cache_rd_cmd='{default:'0}; assign cache_rd_ready=0;
+    assign cache_wr_cmd_valid=0; assign cache_wr_cmd='{default:'0}; assign cache_wr_valid=0;
+    assign cache_wr_data='{default:'0}; assign cache_wr_rsp_ready=0;
+    assign dma_block_rd_cmd_valid=0; assign dma_block_rd_cmd='0; assign dma_block_rd_ready=0;
+    assign dma_block_wr_cmd_valid=0; assign dma_block_wr_cmd='0; assign dma_block_wr_valid=0;
+    assign dma_block_wr_data='0; assign dma_block_wr_rsp_ready=0;
+endmodule
+`else
 // Module: soc_top
 // Description: Portable core, DDR instruction/data caches, ROM, TCM, MMIO, DMA and external-memory port.
 module soc_top #(
@@ -86,11 +194,7 @@ module soc_top #(
         (SOC_PROFILE == soc_config_pkg::SOC_PROFILE_LITE ?
          soc_config_pkg::SOC_LITE_PRESENT : soc_config_pkg::SOC_FULL_PRESENT) |
         (DDR_BYTES != 0 ? 15'h4000 : 15'h0000);
-`ifdef CORE_SCOREBOARD
-    localparam bit NATIVE_MEMORY = 1;
-`else
     localparam bit NATIVE_MEMORY = 0;
-`endif
     // 新后端由原生 bank 路由拥有 TCM；物理能力发现仍保留两个窗口。
     // 物理能力发现保留两个 TCM；仅局部路由开启时从慢 fabric 的译码中移除。
     localparam logic [14:0] SLOW_PRESENT =
@@ -155,41 +259,6 @@ module soc_top #(
         .cache_fault_addr(backend_fault_addr)
     );
 
-`ifdef CORE_SCOREBOARD
-    logic [1:0] data_req_valid, data_req_ready, data_rsp_valid, data_rsp_ready;
-    scoreboard_pkg::memory_request_t tagged_request [2];
-    scoreboard_pkg::memory_response_t tagged_response [2];
-    scoreboard_core u_core (
-        .clk, .rst, .irq_software, .irq_timer, .irq_external,
-        .imem_req_valid, .imem_req_ready, .imem_req_addr,
-        .imem_rsp_valid, .imem_rsp_ready, .imem_rsp_data, .imem_rsp_error, .imem_rsp_error_1,
-        .mem_req_valid(data_req_valid), .mem_req_ready(data_req_ready), .mem_request(tagged_request),
-        .mem_rsp_valid(data_rsp_valid), .mem_rsp_ready(data_rsp_ready), .mem_response(tagged_response),
-        .commit_valid, .commit_pc, .commit_inst, .commit_rd, .commit_rd_we, .commit_rd_data,
-        .commit_exception, .commit_trace, .fence_i_commit, .issue_fire()
-    );
-    scoreboard_soc_memory #(.ITCM_INIT_FILE(ITCM_INIT_FILE), .DTCM_INIT_FILE(DTCM_INIT_FILE),
-        .DDR_BYTES(DDR_BYTES), .ICACHE_ENABLE(ICACHE_ENABLE), .ICACHE_BYTES(ICACHE_BYTES),
-        .ICACHE_LINE_BYTES(ICACHE_LINE_BYTES), .DCACHE_ENABLE(DCACHE_ENABLE), .DCACHE_BYTES(DCACHE_BYTES),
-        .DCACHE_LINE_BYTES(DCACHE_LINE_BYTES), .CACHE_BLOCK_ENABLE(CACHE_BLOCK_ENABLE)) u_memory (
-        .clk, .rst, .fence_i_commit, .fetch_block, .imem_req_valid, .imem_req_ready, .imem_req_addr,
-        .imem_rsp_valid, .imem_rsp_ready, .imem_rsp_data, .imem_rsp_error, .imem_rsp_error_1,
-        .data_req_valid, .data_req_ready, .data_request(tagged_request),
-        .data_rsp_valid, .data_rsp_ready, .data_response(tagged_response),
-        .dma_req_valid(dma_cpu_req_valid), .dma_req_ready(dma_cpu_req_ready), .dma_request(dma_cpu_request),
-        .dma_rsp_valid(dma_cpu_rsp_valid), .dma_rsp_ready(dma_cpu_rsp_ready), .dma_response(dma_cpu_response),
-        .m_req_valid, .m_req_ready, .m_request, .m_rsp_valid, .m_rsp_ready, .m_response,
-        .maint_req_valid, .maint_req_ready, .maint_op, .maint_rsp_valid, .maint_rsp_ready, .maint_error, .maint_fault_addr,
-        .cache_fault_valid, .cache_fault_code, .cache_fault_addr(backend_fault_addr),
-        .cache_rd_cmd_valid, .cache_rd_cmd_ready, .cache_rd_cmd, .cache_rd_valid, .cache_rd_ready, .cache_rd_data,
-        .cache_wr_cmd_valid, .cache_wr_cmd_ready, .cache_wr_cmd, .cache_wr_valid, .cache_wr_ready, .cache_wr_data,
-        .cache_wr_rsp_valid, .cache_wr_rsp_ready, .cache_wr_rsp
-    );
-    assign dmem_store_fire = data_req_valid[0] && data_req_ready[0] && tagged_request[0].write;
-    assign dmem_store_addr = tagged_request[0].address;
-    assign dmem_store_data = tagged_request[0].wdata;
-    assign dmem_store_strb = tagged_request[0].wstrb;
-`else
     assign m_req_valid[2] = dma_cpu_req_valid;
     assign m_request[2] = dma_cpu_request;
     assign dma_cpu_req_ready = m_req_ready[2];
@@ -290,7 +359,6 @@ module soc_top #(
     assign dmem_store_data = dmem_req_wdata;
     assign dmem_store_strb = dmem_req_wstrb;
 
-`endif
 
     // 每主端一次只保留一笔事务；I 请求一旦被接受，重定向只能排空旧响应。
     // 默认接线仍为 S2a。启用热路时，合法 TCM 不经慢端请求槽，但保留热响应 FF。
@@ -334,15 +402,6 @@ module soc_top #(
         .request(s_request[1]), .rsp_valid(s_rsp_valid[1]),
         .rsp_ready(s_rsp_ready[1]), .response(s_response[1])
     );
-`ifdef CORE_SCOREBOARD
-    assign hot_req_ready = 0; assign hot_rsp_valid = 0;
-    for (genvar m = 0; m < 3; m++) begin : g_native_no_hot
-        assign hot_response[m] = '0;
-    end
-    for (genvar b = 0; b < 2; b++) begin : g_native_no_slow_tcm
-        assign s_req_ready[b+2] = 0; assign s_rsp_valid[b+2] = 0; assign s_response[b+2] = '0;
-    end
-`else
     if (LOCAL_TCM_ENABLE) begin
         tcm_local_fabric u_local_tcm (
             .clk, .rst, .m_req_valid(hot_req_valid), .m_req_ready(hot_req_ready),
@@ -382,7 +441,6 @@ module soc_top #(
         .request(tcm_request[1]), .rsp_valid(tcm_rsp_valid[1]),
         .rsp_ready(tcm_rsp_ready[1]), .response(tcm_response[1])
     );
-`endif
     soc_peripherals #(.DDR_BYTES(DDR_BYTES), .DMA_WIDE_ENABLE(DMA_WIDE_ENABLE),
                       .DMA_BLOCK_ENABLE(DMA_BLOCK_ENABLE), .CLOCK_HZ(CLOCK_HZ),
                       .SOC_PROFILE(SOC_PROFILE), .PRESENT(DEVICE_PRESENT),
@@ -428,3 +486,4 @@ module soc_top #(
     assign s_response[14] = DDR_BYTES != 0 ? ddr_response : '0;
     assign ddr_rsp_ready = s_rsp_ready[14];
 endmodule
+`endif

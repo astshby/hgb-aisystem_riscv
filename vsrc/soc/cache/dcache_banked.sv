@@ -52,7 +52,7 @@ module dcache_banked #(
     import block_types_pkg::*;
     // 每半容量 bank 的索引之上的一位选择 bank：同一行唯一归属，两个 bank 合计原总容量。
     localparam int BANK_BIT = $clog2(CACHE_BYTES/4);
-    logic [1:0] bank_busy_q, bank_locked_q, bank_owner_q, bank_next_q, selected, found;
+    logic [1:0] bank_busy_q, bank_locked_q, bank_owner_q, bank_next_q, selected, found, priority_owner;
     logic [1:0] b_req_valid, b_req_ready, b_rsp_valid, b_rsp_ready, request_fire, response_fire;
     bus_req_t b_request [2], c_request [2];
     bus_rsp_t b_response [2], c_response [2];
@@ -70,28 +70,36 @@ module dcache_banked #(
     cache_maint_error_e b_maint_error [2], saved_error_q [2], b_fault_code [2];
     xlen_t b_maint_addr [2], saved_addr_q [2], b_fault_addr [2];
 
-    // 每个 bank 独立轮询；反压锁定展示项，响应归属保存到真正消费。
+    // 响应仅按旧 owner 路由，与下一请求选择分开，避免 ready 穿过仲裁选择链。
     always_comb begin
-        selected = bank_owner_q; found = bank_locked_q;
-        rsp_valid = 0; b_req_valid = 0; b_rsp_ready = 0;
+        rsp_valid = 0; b_rsp_ready = 0;
         response[0] = '0; response[1] = '0;
         for (int b = 0; b < 2; b++) begin
-            for (int offset = 0; offset < 2; offset++) begin
-                if (!found[b] && req_valid[bank_next_q[b] ^ 1'(offset)] &&
-                    request[bank_next_q[b] ^ 1'(offset)].addr[BANK_BIT] == 1'(b)) begin
-                    found[b] = 1;
-                    selected[b] = bank_next_q[b] ^ 1'(offset);
-                end
-            end
-            b_request[b] = request[selected[b]];
-            if (!rst && !bank_busy_q[b] && found[b] &&
-                (bank_locked_q[b] || (!maintenance_q && !maint_req_valid))) begin
-                b_req_valid[b] = req_valid[selected[b]];
-            end
             if (!rst && bank_busy_q[b]) begin
                 rsp_valid[bank_owner_q[b]] = b_rsp_valid[b];
                 response[bank_owner_q[b]] = b_response[b];
                 b_rsp_ready[b] = rsp_ready[bank_owner_q[b]];
+            end
+        end
+    end
+
+    // 在途响应完成后的轮询优先级可提前由 owner 求出；反压锁定项仍优先。
+    // 同沿交接只改变窄控制，载荷继续在 cache 内保存并经同步 RAM 读取。
+    always_comb begin
+        selected = bank_owner_q; found = bank_locked_q; b_req_valid = 0;
+        for (int b = 0; b < 2; b++) begin
+            priority_owner[b] = bank_busy_q[b] ? !bank_owner_q[b] : bank_next_q[b];
+            for (int offset = 0; offset < 2; offset++) begin
+                if (!found[b] && req_valid[priority_owner[b] ^ 1'(offset)] &&
+                    request[priority_owner[b] ^ 1'(offset)].addr[BANK_BIT] == 1'(b)) begin
+                    found[b] = 1;
+                    selected[b] = priority_owner[b] ^ 1'(offset);
+                end
+            end
+            b_request[b] = request[selected[b]];
+            if (!rst && (!bank_busy_q[b] || response_fire[b]) && found[b] &&
+                (bank_locked_q[b] || (!maintenance_q && !maint_req_valid))) begin
+                b_req_valid[b] = req_valid[selected[b]];
             end
         end
     end
@@ -104,11 +112,11 @@ module dcache_banked #(
     always_ff @(posedge clk) begin
         if (rst) begin bank_busy_q <= 0; bank_locked_q <= 0; bank_owner_q <= 0; bank_next_q <= 0; end
         else for (int b = 0; b < 2; b++) begin
+            // 旧响应推进轮询；同沿新受理覆盖 busy/owner，未受理的展示项保存锁定。
+            if (response_fire[b]) begin bank_busy_q[b] <= 0; bank_next_q[b] <= !bank_owner_q[b]; end
             if (b_req_valid[b] && !b_req_ready[b]) begin bank_locked_q[b] <= 1; bank_owner_q[b] <= selected[b]; end
             if (request_fire[b]) begin
                 bank_busy_q[b] <= 1; bank_locked_q[b] <= 0; bank_owner_q[b] <= selected[b];
-            end else if (response_fire[b]) begin
-                bank_busy_q[b] <= 0; bank_next_q[b] <= !bank_owner_q[b];
             end
         end
     end

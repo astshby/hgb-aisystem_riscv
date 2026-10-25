@@ -1,5 +1,8 @@
 // Module: icache_native
 // Description: Native aligned IF64 cache with one-cycle synchronous hits and per-word uncached error fallback.
+`ifndef SOC_ICACHE_FILL_BYTES
+`define SOC_ICACHE_FILL_BYTES 4
+`endif
 module icache_native #(
     parameter bit ENABLE = 1,
     parameter int unsigned DDR_BYTES = 0,
@@ -34,7 +37,8 @@ module icache_native #(
     localparam int SETS = CACHE_BYTES/(2*LINE_BYTES);
     localparam int SET_W = $clog2(SETS), OFFSET_W = $clog2(LINE_BYTES);
     localparam int TAG_W = 32-SET_W-OFFSET_W, DATA_W = $clog2(CACHE_BYTES/16);
-    localparam int WORD_W = $clog2(LINE_BYTES/4);
+    localparam int unsigned FILL_BYTES = `SOC_ICACHE_FILL_BYTES;
+    localparam int WORD_W = LINE_BYTES > FILL_BYTES ? $clog2(LINE_BYTES/FILL_BYTES) : 1;
     typedef enum logic [2:0] {IDLE, FILL_START, FILL_WAIT, BYPASS_SEND, BYPASS_WAIT} state_e;
     state_e state_q;
     bus_req_t incoming, request_q, refill_request;
@@ -50,7 +54,7 @@ module icache_native #(
     logic [TAG_W-1:0] update_tag;
     logic fill_ready, fill_done, fill_installable, fill_write;
     logic [WORD_W-1:0] fill_word;
-    logic [31:0] fill_data;
+    logic [FILL_BYTES*8-1:0] fill_data;
     logic refill_req_valid, refill_req_ready;
     logic [63:0] fill_ram_data;
     logic [7:0] fill_ram_mask;
@@ -81,15 +85,22 @@ module icache_native #(
         .lookup_tag(req_addr[OFFSET_W+SET_W +: TAG_W]), .hit, .hit_way, .victim_way,
         .evict, .install, .touch, .update_way, .update_set, .update_tag
     );
-    assign fill_ram_addr = DATA_W'({request_q.addr[OFFSET_W +: SET_W], fill_word} >> 1);
-    assign fill_ram_data = {fill_data, fill_data};
-    assign fill_ram_mask = fill_word[0] ? 8'hf0 : 8'h0f;
+    if (FILL_BYTES == 8) begin : g_fill_pair
+        assign fill_ram_addr = (DATA_W'(request_q.addr[OFFSET_W +: SET_W]) << $clog2(LINE_BYTES/8)) |
+            DATA_W'(fill_word);
+        assign fill_ram_data = fill_data;
+        assign fill_ram_mask = 8'hff;
+    end else begin : g_fill_word
+        assign fill_ram_addr = DATA_W'({request_q.addr[OFFSET_W +: SET_W], fill_word} >> 1);
+        assign fill_ram_data = {fill_data, fill_data};
+        assign fill_ram_mask = fill_word[0] ? 8'hf0 : 8'h0f;
+    end
     cache_data_array #(.CACHE_BYTES(CACHE_BYTES), .WORD_BYTES(8)) u_data (
         .clk, .read_enable(request_fire && cacheable && hit), .read_addr(req_addr[3 +: DATA_W]),
         .read_data(ram_data), .write_enable(fill_write), .write_way(way_q),
         .write_addr(fill_ram_addr), .write_data(fill_ram_data), .write_mask(fill_ram_mask)
     );
-    cache_refill #(.LINE_BYTES(LINE_BYTES), .BLOCK_ENABLE(BLOCK_ENABLE)) u_refill (
+    cache_refill #(.LINE_BYTES(LINE_BYTES), .INSTALL_BYTES(FILL_BYTES), .BLOCK_ENABLE(BLOCK_ENABLE)) u_refill (
         .clk, .rst, .fallback_enable(1'b0), .start_valid(state_q == FILL_START), .start_ready(fill_ready),
         .request(request_q), .done_valid(fill_done), .done_ready(state_q == FILL_WAIT),
         .installable(fill_installable), .response(fill_response), .write_valid(fill_write),
@@ -119,8 +130,13 @@ module icache_native #(
         end else begin
             if (valid_q && rsp_ready) valid_q <= 0;
             if (invalidate && state_q != IDLE) discard_q <= 1;
-            if (fill_write && (fill_word >> 1) == (request_q.addr[2 +: WORD_W] >> 1))
-                fill_pair_q[32*int'(fill_word[0]) +: 32] <= fill_data;
+            if (FILL_BYTES == 8) begin
+                if (fill_write && fill_word == WORD_W'((request_q.addr & xlen_t'(int'(LINE_BYTES)-1)) >> 3))
+                    fill_pair_q <= 64'(fill_data);
+            end else begin
+                if (fill_write && (fill_word >> 1) == (request_q.addr[2 +: WORD_W] >> 1))
+                    fill_pair_q[32*int'(fill_word[0]) +: 32] <= 32'(fill_data);
+            end
             unique case (state_q)
                 IDLE: if (request_fire) begin
                     request_q <= incoming; discard_q <= 0; error_q <= 0;
@@ -151,6 +167,7 @@ module icache_native #(
         end
     end
 `ifndef SYNTHESIS
+    initial assert (FILL_BYTES inside {4, 8}) else $fatal(1, "SOC_ICACHE_FILL_BYTES must be 4 or 8");
     initial assert (LINE_BYTES >= 8 && SETS >= 2 &&
                     (LINE_BYTES & (LINE_BYTES-1)) == 0 && (SETS & (SETS-1)) == 0)
         else $fatal(1, "native I-cache geometry");

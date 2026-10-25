@@ -7,7 +7,7 @@ export CCACHE_TEMPDIR="$PWD/build/ccache-tmp" CCACHE_DIR="$PWD/build/ccache"
 mkdir -p "$CCACHE_TEMPDIR" "$CCACHE_DIR" logs/p0
 tests=("$@")
 tests=("${tests[@]:1}")
-[[ ${#tests[@]} -gt 0 ]] || tests=(contracts rename operands operands_wide operands_issue split_iq split_iq_small integer_ooo integer_select forward_modes issue recovery retirement completion completion_wide completion_queue lsu lsu_slots lsu_forward metrics scheduler_metrics core events)
+[[ ${#tests[@]} -gt 0 ]] || tests=(contracts rename operands operands_wide operands_issue broadcast_priority broadcast_priority_split broadcast_slots broadcast_slots_split split_iq split_iq_small integer_ooo integer_select issue_merge issue_merge_ordered forward_modes issue recovery retirement completion completion_wide completion_queue completion_cancel lsu lsu_slots lsu_forward metrics scheduler_metrics core events)
 export CORE_BACKEND=scoreboard ISSUE_WIDTH=2
 export RETIRE_ENTRIES="${RETIRE_ENTRIES:-32}" SPLIT_ISSUE_QUEUE="${SPLIT_ISSUE_QUEUE:-1}"
 source scripts/verilator/core_build_config.sh
@@ -20,9 +20,18 @@ for test in "${tests[@]}"; do
     [[ "$test" =~ ^[a-z_]+$ ]] || exit 2
     top="tb_scoreboard_$test"
     extra_options=()
+    if [[ "$test" == broadcast_priority_split || "$test" == broadcast_slots || "$test" == broadcast_slots_split ]]; then
+        top=tb_scoreboard_broadcast_priority
+        if [[ "$test" != broadcast_slots ]]; then extra_options+=(-GSPLIT=1); fi
+        if [[ "$test" != broadcast_priority_split ]]; then extra_options+=(-GBROADCAST_PORTS=11); fi
+    fi
     if [[ "$test" == split_iq_small ]]; then
         top=tb_scoreboard_split_iq
         extra_options+=(-GINTEGER_DEPTH=4 -GMEMORY_DEPTH=2)
+    fi
+    if [[ "$test" == issue_merge_ordered ]]; then
+        top=tb_scoreboard_issue_merge
+        extra_options+=(-GLIMITED_OOO=0)
     fi
     if [[ "$test" == completion_wide ]]; then
         top=tb_scoreboard_completion

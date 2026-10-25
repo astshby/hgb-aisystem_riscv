@@ -78,7 +78,7 @@ void stop_time(void) { stop_cycle = benchmark_read_cycle(); }
 CORE_TICKS get_time(void) { return stop_cycle - start_cycle; }
 secs_ret time_in_secs(CORE_TICKS ticks)
 {
-    return (secs_ret)(ticks / REG32(INFO_BASE + 4));
+    return (secs_ret)(ticks / hgb_clocks.core_hz);
 }
 void portable_init(core_portable *portable, int *argc, char *argv[])
 {
@@ -104,7 +104,7 @@ void hgb_coremark_report(void)
         cycles /= 10;
     } while (cycles);
     ee_printf("INFO xlen=%u cpu_hz=%u mul=%u div=%u\n", __riscv_xlen,
-              REG32(INFO_BASE + 4), HGB_MUL_IMPL, HGB_DIV_IMPL);
+              hgb_clocks.core_hz, HGB_MUL_IMPL, HGB_DIV_IMPL);
 #if VALIDATION_RUN
     ee_printf("COREMARK mode=validation cycles=");
 #else

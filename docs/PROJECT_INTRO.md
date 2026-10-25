@@ -1,6 +1,162 @@
 # 项目介绍
 
-> 写作约束：[regulation.md](../../regulation.md)。本文给项目目录、参数、环境、仿真和 FPGA 的当前状态，不把规划写成已实现。
+> 写作约束：[skills/regulation.md](../../skills/regulation.md)。本文给项目目录、参数、环境、仿真和 FPGA 的当前状态，不把规划写成已实现。
+
+2026-10-25 最新开发基线为 `baseline-rv32-soc-20261025`，测量实现来自
+`bench/unified-coremark-three-platforms@7449fe7`、Core 来自 E0u `9a7edd1`。
+基线补齐已用于原生综合的 C1/C4 暂存脚本、参数核验和配套测试，三套可运行平台
+使用同一配置清单。Core 保持 RAS0/OOO0、ROB32、int8/mem4、forward3、Tournament1，
+正常流水 ALU/Load/DSP 仍为 8/10/10。当前四域目标是 100/80/125/25 MHz，
+DDR 125 MHz 为控制器用户接口时钟；现有 DDR IP 配置为 1000 Mb/s，不能把用户接口
+时钟当作 DDR3 器件 CK 或 CPU 频率。
+
+| 配置 | TCM/Cache/DDR | 活跃时钟域 | 软件场景 |
+|---|---|---|---|
+| `core_tcm` | 生产 64+64 KiB TCM，本地 Boot ROM，无 Cache/DDR | Core | TCM |
+| `soc_tcm` | TCM、AXI、ROM、DMA、MMIO/IRQ，DDR FIFO 裁剪 | Core/SYS/periph | TCM、片上 DMA/IRQ |
+| `soc_ddr` | TCM、4 KiB I$ + 4 KiB D$、完整总线、DDR | Core/SYS/DDR/periph | TCM、DDR cold/warm、DMA/IRQ |
+
+三组相同 TCM 镜像的 2 次迭代 performance 均为 733,915 周期、2.725111 CoreMark/MHz；
+DDR cold/warm 为 2.184639/2.197375，背景 DMA/IRQ 为 1.909776。双模式 14 项通过，
+另有单域改频 16 项通过；均为短仿真测量。DDR 仿真使用 256 KiB AXI 验证 RAM，
+硬件译码 512 MiB；第三组 PDS 包含真实 DDR 控制器/PHY，本轮只做综合、不做 P&R。
+旧 M0 约 3.15 采用一周期内存，不能直接与真实 TCM 的 2.725111 计算回退。
+
+RV32 使用 GCC 16.1.0、`-O2 -march=rv32im_zicsr -mabi=ilp32`、2000 字节工作数据。
+目标频率下的完整双模式记录如下，performance 每秒成绩按仿真 Core 100 MHz 计算：
+
+| 软件场景 | performance 周期 / 每 MHz | validation 周期 / 每 MHz | performance 仿真每秒成绩 |
+|---|---|---|---:|
+| 三组各自 TCM 驻留 | 733,915 / 2.725111 | 741,695 / 2.696526 | 272.511122 |
+| 片上 DMA/IRQ | 838,844 / 2.384234 | 847,028 / 2.361197 | 238.423354 |
+| 完整组 DDR cold | 915,483 / 2.184639 | 923,125 / 2.166554 | 218.463915 |
+| 完整组 DDR warm | 910,177 / 2.197375 | 917,508 / 2.179818 | 219.737480 |
+| 完整组 DDR + DMA/IRQ | 1,047,243 / 1.909776 | 1,057,023 / 1.892106 | 190.977643 |
+
+标准综合估计如下，Fmax 单位 MHz、WNS 单位 ns；三组均为 0 latch：
+
+| 配置 | Core Fmax / WNS | SYS Fmax / WNS | DDR 用户口 Fmax / WNS | periph Fmax / WNS | LUT / FF / DRM36K / APM |
+|---|---|---|---|---|---|
+| Core+TCM | 96.8523 / −0.325 | 不适用 | 不适用 | 不适用 | 31,883 / 25,755 / 32 / 4 |
+| 片上 SoC | 91.7600 / −0.898 | 86.1104 / +0.887 | 不适用 | 97.6467 / +29.759 | 52,918 / 45,759 / 32 / 4 |
+| 完整 DDR3 SoC | 84.4523 / −1.841 | 84.8104 / +0.709 | 144.7178 / +1.090 | 90.9835 / +29.009 | 67,266 / 60,633 / 36 / 4 |
+
+三组使用同一 Core RTL，顶层的端口裁剪、负载、时钟源和最差路径不同，不能把核级
+96.8523 MHz 当作完整 SoC 频率。完整组最差为 ISS→分支恢复→取指响应→TCM 仲裁/
+BRAM WEA，22 层、扇出 86；原始 CDC 约束绑定、部分 DDR/PHY hold 和 I/O delay
+仍需完成。尚无此基线的布线 Fmax、未布通数或板级结果，历史 P0 r15 的
+85.2464 MHz 保留为独立物理验收点。
+
+双宽功能回归含新三组平台：RV32 220 PASS/5 SKIP、RV64 260 PASS/5 SKIP。
+基线发布时，统一测量、Pango 暂存/内存/时序摘要和分层参数工具检查共 201 PASS/0 SKIP。
+旧 M0 64 次固定镜像两模式再次通过，周期为 20,307,247/20,452,186，performance
+3.151584；RV64 不测 CoreMark，不做 P&R。短 CoreMark、综合和板级验收分别记录。
+原始仿真命令、RTL/ELF/HEX/仿真器哈希在本地
+`build/unified-coremark/20261025-b/{models,results}`，固件在 `20261025-a/firmware`；
+固件 manifest SHA256 为 `b4c4ac5a3d436e04812bb6100636aeaebee80901937e8c5e47bea58bad09637d`，
+TCM performance ELF SHA256 为 `5399ae505be47bc16ee75578e214b5625e735a9506a8f35637210b7968421573`。
+原生工程在 `$PDS_WORK_ROOT/work/unified-coremark-20261025/`，综合摘要及回归日志在
+`logs/unified-coremark-20261025/`。这些镜像、工具生成物和日志不随 Git 交付；新环境
+按下列入口及相同工具链重新构建，测得的分数必须附自己的镜像哈希。
+
+`scripts/benchmark_platforms.json` 是共用配置。运行示例：
+
+```bash
+make coremark-platforms COREMARK_PLATFORM_OUT=build/unified-coremark/new-run
+make coremark-platforms XLEN=64 COREMARK_PLATFORM_OUT=build/unified-coremark/rv64-functional \
+    COREMARK_PLATFORM_ARGS="--functional"
+python3 scripts/verilator/run_unified_coremark.py --output build/unified-coremark/clock-sweep \
+    --bundle build/unified-coremark/new-run/firmware --platforms soc_ddr \
+    --clocks core80 sys100 ddr100 periph50 --modes performance
+python3 scripts/pango/prepare_benchmark.py --platform core_tcm \
+    --output "$PDS_WORK_ROOT/work/paired-core-tcm" \
+    --bundle build/unified-coremark/new-run/firmware \
+    --sim-receipt build/unified-coremark/new-run/models/core_tcm-target-rv32/build.json
+```
+
+`soc_tcm` 同样提供对应 receipt；`soc_ddr` 还需要 `--ip-dir` 指向生成的 `ddr3_test`。
+PDS 暂存将相同 TCM ELF/HEX 拆成两 bank 初始化，并核对仿真/综合源码哈希。
+`benchmark_synthesize.tcl` 在每组综合前检查 Windows 物理/提交余量各至少 6 GiB。
+完成后用 `scripts/pango/summarize_benchmark.py <工程目录> --output <结果.json>` 收集
+资源、各时钟域综合估算、存储裁剪和最差路径；未布通数与布线 Fmax 仍为未测。
+DDR 原生 C1/C4 时钟候选保留，core80/ddr100/periph50 只属于仿真扫频。
+CoreMark/MHz 统一按 Core 周期计算；不同域只能通过 CPU 的等待、争用、中断开销
+改变结果。每秒成绩必须用同次运行的实际 Core 频率，不能拼接另一频率比例下的分数。
+
+以下为 2026-10-23 的 `soc/p2-p3-clock-study` 快照，从B19 `0501f10` 推进P2/P3步骤1–3，
+生产RTL为 `1a4f8fa`。远端P1 Core固定，新增I-cache宽安装候选、分域时钟发现/BSP、
+独立GPLL与DDR协调恢复，并补齐持续DMA、IRQ-only/DMA-only和W源等待观测。
+当前为RTL/软件/仿真候选，标准PDS与板级启动尚未执行，85MHz仍待当前树验收。
+保存点 `baseline/p2-before-p1-20261023@f2b33b4`、B19分支与原本地历史均保留。
+
+Core、TCM和Cache命中仍共域。C1为Core/SYS/DDR/periph=100/80/125/25MHz，
+C4只将SYS提高为100MHz。I-cache默认安装4字节，候选显式选择8字节；32B行安装
+尾部9→5Core拍，IF64命中II=1。M1队列及生产DMA未改，已有等待分别归因于同bank
+争用、AW到首W固定一拍及下游反压。软件频率发现、程序布局和复位见
+[SoC系统](understand/SOC_SYSTEM.md)，PLL/物理准备见[FPGA适配](fpga/FPGA_ADAPTATION.md)。
+
+RV32仍用GCC16.1冻结镜像，M0/M1各两种模式与B19周期一致；M1四组合都没有
+DDR、MMIO、DMA或Cache refill。M2两种安装宽度×C1/C4×cold/warm/background×
+两模式×i2/i64的48模式联合矩阵全部通过。
+
+| 层次 | C1 fill4 基线 | C1 fill8 候选 | C4 fill4 对照 | C4 fill8 候选 |
+| --- | ---: | ---: | ---: | ---: |
+| M0 Core-only | 3.237325 | 3.237325 | 3.237325 | 3.237325 |
+| M1 SoC-TCM | 2.797692 | 2.797692 | 2.797692 | 2.797692 |
+| M2 cold | 2.246406 | 2.254766 | 2.254507 | 2.263539 |
+| M2 warm | 2.246827 | 2.255064 | 2.254787 | 2.263801 |
+| M2-B DMA/IRQ | 1.949692 | 1.958627 | 1.971318 | 1.980001 |
+
+数值为64次迭代performance的CoreMark/MHz。M0控制组独立重放两模式一次，
+其余列复用该不变Core结果；M1四组合均实跑两模式。C1/C4的Core均为100MHz，
+仅SYS为80/100MHz，DDR125/periph25MHz保持。
+
+M2 cold在C1下提高0.372%，C4下提高0.401%；M2 warm在C1下提高0.367%，C4下提高0.400%；M2-B DMA/IRQ在C1下提高0.458%，C4下提高0.440%。
+
+M0/M1控制10模式、旧binary C4长测6模式、观测关闭4模式另列，共68次独立运行；
+新fill4与同钟旧模型等周期，fill8与同钟fill4两模式均无回退。
+
+CoreMark/MHz只除以Core周期，四域Hz单独记录；仿真周期不代表FPGA Fmax。
+64次迭代的实际持续时间不足10秒，虚拟1MHz打印不作为正式十秒成绩。M2-B继续
+按100μs绝对期限触发；程序变快时IRQ/DMA次数自然减少。TCM/DDR预装基准不代表
+生产Flash loader已完成。与B19的M1对照保留CLOCK_HZ/UART和DDR模型参数差异，
+无MMIO/DDR访问支持ROI比较，不声称全部elaboration参数相同。
+
+双宽通用回归为RV32 233 PASS/5 SKIP、RV64 272 PASS/5 SKIP，另两项lint；
+双宽整机/时钟软件20次、独立启动/恢复4次、Cache安装及兼容65次通过。
+W观测器14项、DMA连续8次、IRQ/DMA软件8次、观测开关CoreMark4次通过。
+工具111项、Pango规划/暂存46项、wrapper展开20次、厂商PLL/复位3项通过。
+持续DMA在当前DDR模型下测得SYS80/100为519.20/615.85MB/s，按独立负载单列。
+
+RT-Thread双宽smoke与CoreMark应用4个镜像编译通过；完整RT运行0PASS/2未完成：
+原 `tb_soc_benchmark.sv`/`tb_rt_thread.sv` 引用旧 `soc_top` 层级，RV32构建失败，
+RV64同因未启动。裸机时钟软件已运行通过，RT调度器运行仍需后续测试台适配。
+RV64本轮只验功能，没有RV64 CoreMark或P&R。
+
+结果、精确命令、源码/ELF/HEX/binary哈希在 `logs/p2/joint-step3-20261023/`。
+固定镜像需要本地 `build/frozen/p0-c6-m{0,1}-rv32/` 与
+`build/frozen/p2-step1-{i2,i64}-20261022/`；这些生成资产及日志不随Git交付。
+主要复现入口如下，示例另选日志目录；I-cache和CoreMark同时另选构建目录，
+clock-contract按XLEN/profile复用构建目录。重复运行时给新日志换名：
+
+```bash
+source scripts/verilator/p1_core_config.sh
+ICACHE_INSTALL_LOG_ROOT=logs/p2/replay-icache32 ICACHE_INSTALL_BUILD_ROOT=build/p2/replay-icache32 \
+  bash scripts/verilator/run_icache_install_width.sh 32 8
+ICACHE_INSTALL_LOG_ROOT=logs/p2/replay-icache64 ICACHE_INSTALL_BUILD_ROOT=build/p2/replay-icache64 \
+  bash scripts/verilator/run_icache_install_width.sh 64 8
+P2_LOG_ROOT=logs/p2/replay-clock32 bash scripts/verilator/run_soc_clock_contract.sh 32
+P2_LOG_ROOT=logs/p2/replay-clock64 bash scripts/verilator/run_soc_clock_contract.sh 64
+python3 scripts/verilator/run_p2_coremark.py --replay build/frozen/p2-step1-i64-20261022 \
+  --sim build/p2/b20-replay-c1-if8/Vtb_soc_system --build-sim --expect-core-profile p1 \
+  --clock-profile 1 --clocks 1 --icache-fill-bytes 8 --log-root logs/p2/b20-replay-c1-if8
+```
+
+首次需按环境设置RISCV_TOOL_ROOT；Pango模型专测另需PDS_HOME，详见FPGA适配。
+历史B19在C1、fill4下M0/M1/M2cold/warm/M2-B为
+3.237325/2.797692/2.246406/2.246827/1.949692，完整旧结果在
+`logs/p2/p1-adapt-20261023/summary.json`。以下P1/P0数值属于各自源码与镜像，
+GCC11.4与GCC16.1分开比较。
 
 P1.1a 的 LQ/SQ 控制与数据已拆分，实测源码 `core/p1-1a-split-lq-sq@a23b65c`。
 双宽完整仿真及 RV32 四次同镜像比较通过，标准 PDS 为 86.1721 MHz、85 MHz WNS
@@ -45,6 +201,15 @@ F/V、图像链路作为交付前提。
 - CoreMark/MHz、Fmax 和 CoreMark/LUT 同时记录，后续再继续整体提频。
 - 资源效率、外设和 AI 接口单独验收。
 
+此前 P2 的 `soc/p2-unified-bus` 固定 P0 Core，新增 `soc_system` 四域顶层、
+统一 AXI4、TCM 系统端口、AXI4-Lite64、DMA 单主口和 SPI Flash 只读目标。
+TCM/Cache 命中仍留 core 域；系统通路增加 FIFO、地址译码寄存和 CDC。
+新 SoC 双宽异频功能与 ISA 已通过；标准 PDS 一次结果为 84.9856 MHz、
+WNS −0.002 ns、1 个 slow setup 端点失败，未达 85 MHz。M2 正式性能尚未验收。
+结构、地址表、启动与 DMA 路径见 [SoC 系统](understand/SOC_SYSTEM.md)。
+P0 的 85.2464 MHz 仍只属于原实测源码；新 SoC 的 84.9856 MHz 是单时钟结果，
+四域独立时钟未验证。
+
 ## 2. 目录
 
 | 路径 | 内容 |
@@ -54,7 +219,8 @@ F/V、图像链路作为交付前提。
 | `vsrc/soc/` | Cache、总线、TCM、ROM、DMA、UART/Timer/GPIO |
 | `vsrc/cpu/` | FPGA wrapper、Pango DDR 桥 |
 | `vsrc/sim_cpu/` | 仿真存储模型 |
-| `tb/unit/` | 单元测试 |
+| `tb/unit/` | 通用单元测试 |
+| `tb/fpga/` | Pango厂商PLL模型与独立复位专测，由专用runner运行 |
 | `tb/core/` | Core 定向测试 |
 | `tb/soc/` | SoC 定向、Cache、DMA、benchmark |
 | `tb/riscv_tests/` | 上游 ISA 测试适配 |
@@ -73,15 +239,21 @@ F/V、图像链路作为交付前提。
 | `DIV_IMPL` | 0 | 0、1 | 移位、SRT4 除法 |
 | `PREDICTOR_MODE` | 0 | 0、1 | GShare、GShare+Local+chooser |
 | `RAS_ENABLE` | 0 | 0、1 | 4 深 RAS 与年龄恢复 |
-| `RETIRE_ENTRIES` | 4 | 2、4、8、16 | 唯一退休队列容量 |
+| `RETIRE_ENTRIES` | 4 | 2、4、8、16、32 | 唯一退休队列容量 |
 | `ISSUE_WIDTH` | 1 | 1、2 | 单发射或对应后端的双发射 |
 | `CORE_BACKEND` | legacy | legacy、scoreboard | 旧控制组或新 RAT/scoreboard 双发射 |
 
-新 P0 候选使用 `CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16`，
+冻结 P0 使用 `CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16`，
 IQ8、LQ4/SQ4、checkpoint4、p0/r0、DSP/SRT4；C6 已完成双宽功能与固定镜像回归，
-RV32 标准 PDS 的 85 MHz 门槛待验证。旧正式性能对照使用 `MUL_IMPL=0 DIV_IMPL=1 PREDICTOR_MODE=1 RAS_ENABLE=1`，
+r15 已通过 RV32 标准 PDS 的 85 MHz 门槛。旧正式性能对照使用 `MUL_IMPL=0 DIV_IMPL=1 PREDICTOR_MODE=1 RAS_ENABLE=1`，
 双发射加 `ISSUE_WIDTH=2 RETIRE_ENTRIES=8`。普通 `make` 的 DIV 默认 0，不能把
 默认构建写成 DSP/SRT 结果。
+
+P1 选定配置由 `source scripts/verilator/p1_core_config.sh` 提供：ROB32、int8/mem4、
+有限整数乱序、转发模式 3、Tournament、DSP/SRT4。2026-10-24 起正式配置使用
+`RAS_ENABLE=0`，综合裁掉 RAS 及恢复逻辑；历史 RAS 候选保留在独立分支。
+P2 测试入口通过统一配置
+传递这些参数；未选择 P1 时保留原 P0 参数对照，不能将默认入口误记为 P1 测试。
 
 SoC 开关：
 
@@ -93,8 +265,10 @@ SoC 开关：
 | `SOC_LOCAL_TCM_ENABLE` | 0 | TCM 走局部 hot 路 |
 
 旧板级控制组固定 i1、full、local0、cache_block1、dma_wide1、dma_block1。
-新后端按原 RV32 模板保留外围与块口，Core 改为 i2/q16，TCM 固定走原生 bank 路由；
-`SOC_LOCAL_TCM_ENABLE` 仅对 legacy 路径有效。
+scoreboard 整机使用 `soc_system`，TCM 固定走本地 bank，Cache 与 DMA 固定汇入
+统一 AXI。上表四个开关只控制 legacy；新 runner 保留其 CLI 兼容性，实际结构
+写入 manifest，不能用旧开关名推断新 RTL。外部时钟由 `clk_core/clk_sys/clk_ddr/clk_periph`
+输入；`DDR_BYTES/FLASH_BYTES/NPU_BYTES` 分别控制窗口容量，0 表示未装配。
 
 ## 4. 环境
 
@@ -118,6 +292,11 @@ SOC=1 make soc-coremark XLEN=32
 
 RT-Thread 和 UART loader 需要先恢复依赖或用 `RTTHREAD_ROOT` 指向已核验副本。
 固定镜像回放用 `COREMARK_REPLAY_DIR=<snapshot>`。
+新总线与四域整机入口为 `make soc-axi-test XLEN=32` 和
+`make soc-system-test XLEN=32`，RV64 使用相同入口改 XLEN。
+旧 `make test` 的配置 TB 仅支持退休队列 2/4/8；P0 的 ROB16 使用
+`make scoreboard-test` 和明确的 scoreboard ISA/benchmark 配置验证，不能把
+旧配置 TB 的拒绝当成新 Core 功能失败。
 
 ## 5. 仿真性能
 
@@ -165,6 +344,13 @@ SoC TCM：
 | 第十轮 branch10 | 0.839793 | 0.731472 |
 
 这些是仿真周期归一化值，不是板上成绩。Core-only、SoC TCM、DDR/RT 不能混用。
+
+新 SoC 本轮日志在 `logs/p2/unified-bus/final/`。每宽 AXI/CDC 定向 9 PASS、
+C0–C4 整机程序 5 PASS；SoC ISA 为 RV32 59 PASS/1 SKIP、RV64 79 PASS/1 SKIP。
+固定 Core 的 M0 重放 performance/validation 为 22,381,822/22,507,018 拍，
+与 P0 一致。M1 C1 同冻结镜像的两模式为 25,658,220/25,792,596 拍，分数与上表 P0 相同；
+512 MiB DDR 译码、64 KiB DDR 模型，100/80/125/25 MHz 仿真时钟。TB 各增加
+88 个 ROI 外启动周期。M2 cold/warm 与 M2-B 尚待专门测量。
 
 ## 6. FPGA 性能
 
@@ -244,14 +430,14 @@ AI：
 
 - 目标接口是文本输入、模型推理、文本输出。
 - 加速器尚未交付；DMA 和 MMIO 接口先准备。
-- 当前完成 P1 有限整数乱序 Core 的联合验收；C 扩展暂缓，AI 接口单独规划。
+- P1 有限整数乱序 Core 已通过原功能回归，最终物理验收未完成；C 扩展暂缓，AI 接口单独规划。
 
 ## 8. 未来
 
-1. P0 已冻结，完成 P1 的最终双宽回归、八次重放和完整 SoC 85 MHz 标准 PDS。
-2. 按工作区 `OPTIMIZATION_PLAN.md` 的 P1 Core、P2 Memory/SoC、P3 Clock/CDC 推进，
-   每轮复测 CoreMark/MHz 与 Fmax；本轮保持 ALU/Load/DSP 8/10/10 级，不增加 CMT。
-3. 补 DDR 执行、外设背景负载和资源效率成绩，保留 M0/M1 分项。
+1. 在独立分支完成 P1 Core 与 P2 SoC 适配，保留双方源码与原始性能证据。
+2. 使用相同冻结软件比较 M0/M1/M2 cold/warm 和独立 M2-B，双宽验证功能、取消和完整标签。
+3. P3 完成真实时钟、CDC 与 IO 约束后，按内存实际峰值安排标准 PDS，保持 85 MHz 门槛。
+   现有 8/10/10 级保持；本次适配不启动 PDS。
 4. 恢复 RT-Thread 依赖并完成真实 DDR/UART/ILA、十秒 CoreMark、功耗和 AI 接口。
 
 ## 9. 文档

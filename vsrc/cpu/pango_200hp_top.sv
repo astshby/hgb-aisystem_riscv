@@ -4,6 +4,7 @@ module pango_200hp_top #(
     parameter ITCM_INIT_FILE = "",
     parameter DTCM_INIT_FILE = "",
     parameter int unsigned SOC_PROFILE = soc_config_pkg::SOC_PROFILE_FULL,
+    parameter int unsigned BOARD_CLOCK_PROFILE = 0,
     parameter bit LOCAL_TCM_ENABLE = 1'b0,
     parameter bit DMA_WIDE_ENABLE = 1'b1,
     parameter bit DMA_BLOCK_ENABLE = 1'b1,
@@ -27,6 +28,12 @@ module pango_200hp_top #(
     logic ref_clk, core_clk, pll_lock, phy_pll_lock, ddr_init_done;
     logic [1:0] reset_sync_q;
     logic soc_rst;
+    wire hot_clk, sys_clk, periph_clk;
+    logic ddr_reset_n, ddr_bridge_rst;
+    localparam int unsigned HOT_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 : 100000000;
+    localparam int unsigned SYS_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :
+        (BOARD_CLOCK_PROFILE == 4 ? 100000000 : 80000000);
+    localparam int unsigned PERIPH_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 : 25000000;
     logic [1:0] uart_rx, uart_tx;
     logic [31:0] gpio_in [3], gpio_out [3], gpio_oe [3];
     logic ddr_req_valid, ddr_req_ready, ddr_rsp_valid, ddr_rsp_ready;
@@ -64,19 +71,70 @@ module pango_200hp_top #(
 
     GTP_INBUFDS u_refclk_inbuf (.O(ref_clk), .I(ref_clk_p), .IB(ref_clk_n));
 
-    // DDR 校准成功后同步释放 SoC；参考 IP 的 core_clk 为 125 MHz 用户时钟。
-    always_ff @(posedge core_clk or negedge board_reset_n) begin
-        if (!board_reset_n) reset_sync_q <= '0;
-        else reset_sync_q <= {reset_sync_q[0], pll_lock && phy_pll_lock && ddr_init_done};
+    // Profile 0 保留已记录的同钟平台；C1/C4 使用独立 GPLL，并允许 DDR 校准前启动。
+    // DDR IP 端口名 core_clk 仍表示 DDR 用户钟，勿与 Core 热域 hot_clk 混同。
+    generate
+        if (BOARD_CLOCK_PROFILE == 0) begin : g_common_clock
+            assign hot_clk = core_clk;
+            assign sys_clk = core_clk;
+            assign periph_clk = core_clk;
+            always_ff @(posedge core_clk or negedge board_reset_n) begin
+                if (!board_reset_n) reset_sync_q <= '0;
+                else reset_sync_q <= {reset_sync_q[0], pll_lock && phy_pll_lock && ddr_init_done};
+            end
+            assign soc_rst = !reset_sync_q[1];
+            assign ddr_reset_n = board_reset_n;
+            assign ddr_bridge_rst = soc_rst;
+        end else begin : g_domain_clocks
+            wire soc_pll_locked;
+            pango_soc_pll #(.CLOCK_PROFILE(BOARD_CLOCK_PROFILE)) u_soc_pll (
+                .ref_clk, .reset_n(board_reset_n), .clk_core(hot_clk), .clk_sys(sys_clk),
+                .clk_periph(periph_clk), .locked(soc_pll_locked));
+            pango_soc_reset u_reset (
+                .ref_clk, .clk_ddr(core_clk), .board_reset_n, .soc_pll_locked,
+                .ddr_pll_locked(pll_lock), .ddr_phy_locked(phy_pll_lock), .ddr_ready(ddr_init_done),
+                .reset_async(soc_rst), .ddr_reset_n);
+            // 与 soc_system 内部 DDR 端口同时异步置位、同域三拍释放，防止只清 FIFO 一侧。
+            soc_reset_controller u_bridge_reset (
+                .clk_core(hot_clk), .clk_sys(sys_clk), .clk_ddr(core_clk), .clk_periph(periph_clk),
+                .reset_async(soc_rst), .rst_core(), .rst_sys(), .rst_ddr(ddr_bridge_rst), .rst_periph());
+            assign reset_sync_q = '0;
+        end
+    endgenerate
+    initial begin
+        assert (BOARD_CLOCK_PROFILE == 0 || BOARD_CLOCK_PROFILE == 1 || BOARD_CLOCK_PROFILE == 4)
+            else $fatal(1, "unsupported board clock profile");
+`ifndef CORE_SCOREBOARD
+        assert (BOARD_CLOCK_PROFILE == 0)
+            else $fatal(1, "independent domains require soc_system");
+`endif
     end
-    assign soc_rst = !reset_sync_q[1];
-    assign ddr_ready_led = reset_sync_q[1];
+    assign ddr_ready_led = ddr_init_done && !soc_rst;
     assign uart_rx = {1'b1, uart_rxd};
     assign uart_txd = uart_tx[0];
     assign gpio_in[0] = '0;
     assign gpio_in[1] = '0;
     assign gpio_in[2] = '0;
 
+`ifdef CORE_SCOREBOARD
+    axi_types_pkg::axi_req_t unified_ddr_req;
+    axi_types_pkg::axi_rsp_t unified_ddr_rsp;
+    // C1/C4 的 PLL/复位 RTL 与仿真不代表板上时序验收；Flash 管脚仍待板级接入。
+    soc_system #(.ITCM_INIT_FILE(ITCM_INIT_FILE),.DTCM_INIT_FILE(DTCM_INIT_FILE),
+        .SOC_PROFILE(SOC_PROFILE),.DDR_BYTES(512*1024*1024),.CLOCK_HZ(125000000),
+        .CLOCK_INFO_ENABLE(BOARD_CLOCK_PROFILE != 0), .CORE_CLOCK_HZ(HOT_HZ), .SYS_CLOCK_HZ(SYS_HZ),
+        .DDR_CLOCK_HZ(125000000), .PERIPH_CLOCK_HZ(PERIPH_HZ), .UART_DIVISOR((PERIPH_HZ+57600)/115200)) u_soc (
+        .clk_core(hot_clk),.clk_sys(sys_clk),.clk_ddr(core_clk),.clk_periph(periph_clk),.reset_async(soc_rst),.ddr_ready(ddr_init_done),
+        .uart_rx,.uart_tx,.gpio_in,.gpio_out,.gpio_oe,
+        .flash_cs_n(),.flash_sck(),.flash_mosi(),.flash_miso(1'b0),
+        .ddr_req(unified_ddr_req),.ddr_rsp(unified_ddr_rsp),.external_req('0),.external_rsp(),.npu_req(),.npu_rsp('0),
+        .commit_valid(),.commit_pc(),.commit_inst(),.commit_rd(),.commit_rd_we(),.commit_rd_data(),
+        .commit_exception(),.commit_trace(),.dmem_store_fire(),.dmem_store_addr(),.dmem_store_data(),.dmem_store_strb());
+    ddr_axi_target u_ddr_target (.clk(core_clk),.rst(ddr_bridge_rst),.memory_ready(ddr_init_done),
+        .axi_req(unified_ddr_req),.axi_rsp(unified_ddr_rsp),
+        .rd_cmd_valid,.rd_cmd_ready,.rd_cmd,.rd_valid,.rd_ready,.rd_data,
+        .wr_cmd_valid,.wr_cmd_ready,.wr_cmd,.wr_valid,.wr_ready,.wr_data,.wr_rsp_valid,.wr_rsp_ready,.wr_rsp);
+`else
     soc_top #(.ITCM_INIT_FILE(ITCM_INIT_FILE), .DTCM_INIT_FILE(DTCM_INIT_FILE),
               .SOC_PROFILE(SOC_PROFILE), .LOCAL_TCM_ENABLE(LOCAL_TCM_ENABLE),
               .DDR_BYTES(512 * 1024 * 1024), .DMA_WIDE_ENABLE(DMA_WIDE_ENABLE), .DMA_BLOCK_ENABLE(DMA_BLOCK_ENABLE),
@@ -120,8 +178,9 @@ module pango_200hp_top #(
         .wr_cmd_valid, .wr_cmd_ready, .wr_cmd, .wr_valid, .wr_ready, .wr_data,
         .wr_rsp_valid, .wr_rsp_ready, .wr_rsp
     );
+`endif
     pango_block_bridge #(.DDR_BYTES(512 * 1024 * 1024)) u_ddr_bridge (
-        .clk(core_clk), .rst(soc_rst),
+        .clk(core_clk), .rst(ddr_bridge_rst),
         .rd_cmd_valid, .rd_cmd_ready, .rd_cmd, .rd_valid, .rd_ready, .rd_data,
         .wr_cmd_valid, .wr_cmd_ready, .wr_cmd, .wr_valid, .wr_ready, .wr_data,
         .wr_rsp_valid, .wr_rsp_ready, .wr_rsp,
@@ -133,7 +192,7 @@ module pango_200hp_top #(
 
     // 使用 200HP 参考例程的 DDR3 用户接口。需在 PDS 2025.2 用板载颗粒参数重新生成同名 IP。
     ddr3_test I_ips_ddr_top (
-        .ref_clk, .resetn(board_reset_n), .core_clk, .pll_lock, .phy_pll_lock,
+        .ref_clk, .resetn(ddr_reset_n), .core_clk, .pll_lock, .phy_pll_lock,
         .gpll_lock(), .rst_gpll_lock(), .ddrphy_cpd_lock(), .ddr_init_done,
         .axi_awaddr, .axi_awuser_ap, .axi_awuser_id, .axi_awlen, .axi_awready, .axi_awvalid,
         .axi_wdata, .axi_wstrb, .axi_wready, .axi_wusero_id(), .axi_wusero_last(),

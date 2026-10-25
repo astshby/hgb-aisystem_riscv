@@ -16,7 +16,7 @@ module tb_scoreboard_completion_queue;
     retire_completion_t item, discarded;
     int transfers = 0, cancellations = 0, checked = 0;
     logic take_in, take_out, output_preview_valid;
-    int flushed_previews = 0;
+    int flushed_previews = 0, cancelled_previews = 0;
     completion_queue dut (.*);
     function automatic retire_completion_t packet(input int slot, value);
         retire_completion_t result;
@@ -39,12 +39,13 @@ module tb_scoreboard_completion_queue;
             assert (output_valid == (!flush && expected.size() != 0 &&
                 !(recovery.valid && younger_than(expected[0].id, recovery.id, head_slot))))
                 else $fatal(1, "cancelled/held output valid");
-            assert (output_preview_valid == (expected.size() != 0 &&
-                !(recovery.valid && younger_than(expected[0].id, recovery.id, head_slot))))
-                else $fatal(1, "preview candidate does not match registered survivor");
+            assert (output_preview_valid == (expected.size() != 0))
+                else $fatal(1, "preview candidate does not match registered occupancy");
             if (output_preview_valid) begin
                 assert (output_completion == expected[0]) else $fatal(1, "completion payload changed");
                 if (flush) flushed_previews++;
+                if (recovery.valid && younger_than(expected[0].id, recovery.id, head_slot))
+                    cancelled_previews++;
             end
             assert (input_ready == (!flush && expected.size() < 2))
                 else $fatal(1, "completion FIFO capacity");
@@ -95,8 +96,9 @@ module tb_scoreboard_completion_queue;
         recovery = '0; input_valid = 0; output_ready = 1; repeat (3) cycle();
         assert (expected.size() == 0 && !busy && transfers > 200 && cancellations >= 2)
             else $fatal(1, "insufficient completion queue coverage");
-        assert (flushed_previews > 0) else $fatal(1, "flush preview/blocked handshake not covered");
-        $display("PREVIEW flush_cycles=%0d", flushed_previews);
+        assert (flushed_previews > 0 && cancelled_previews > 0)
+            else $fatal(1, "flush/recovery preview with blocked handshake not covered");
+        $display("PREVIEW flush_cycles=%0d cancelled_cycles=%0d", flushed_previews, cancelled_previews);
         $display("PASS tb_scoreboard_completion_queue RV%0d cycles=%0d transfers=%0d cancellations=%0d", XLEN, checked, transfers, cancellations);
         $finish;
     end

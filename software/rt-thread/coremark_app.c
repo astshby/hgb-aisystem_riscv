@@ -87,7 +87,9 @@ static void coremark_entry(void *arg)
 
 void hgb_app_init(void)
 {
-    REG32(UART_BASE(0) + 12) = REG32(INFO_BASE + 4) / HGB_COREMARK_BAUD;
+    rt_uint32_t divisor = hgb_soc_uart_divisor(hgb_clocks.periph_hz, HGB_COREMARK_BAUD);
+    if (!divisor) hgb_finish(162);
+    REG32(UART_BASE(0) + 12) = divisor;
     if (rt_thread_init(&coremark_thread, "coremark", coremark_entry, RT_NULL,
                        coremark_stack, sizeof(coremark_stack), 8, 2) != RT_EOK)
         hgb_finish(156);

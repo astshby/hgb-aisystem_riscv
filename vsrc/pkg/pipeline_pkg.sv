@@ -252,6 +252,8 @@ package pipeline_pkg;
         uop_t        uop;
         pred_info_t  pred;
         exception_t  exc;
+        // 分支已在 ISS 判定过；随包移动，避免复用 retire_id 时重复上报恢复。
+        logic        branch_reported;
     } d2_ex_t;
 
     typedef struct packed {

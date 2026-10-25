@@ -18,6 +18,9 @@ module tb_retire_gpr_query;
     retire_result_t head_result;
     retire_query_t query;
     retire_query_result_t query_result;
+    retire_id_t probe_id [5];
+    logic [4:0] probe_accept;
+    initial for (int probe = 0; probe < 5; probe++) probe_id[probe] = '0;
     typedef struct packed {
         retire_id_t id;
         retire_alloc_t meta;

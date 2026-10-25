@@ -21,21 +21,48 @@ module tb_scoreboard_lsu_forward;
     retire_completion_t completion [2], held;
     retire_gpr_forward_t early_forward [2];
     retire_gpr_forward_t load_return [2], store_forward_hint [2];
+    retire_gpr_forward_t store_slot_hint [LOAD_QUEUE_ENTRIES];
     logic busy, draining, store_owner_valid;
     retire_id_t store_owner_id;
     int cases = 0;
-    int return_hints = 0, store_hints = 0;
+    int return_hints = 0, store_hints = 0, slot_checks = 0, return_suppressed = 0;
+    logic [LOAD_QUEUE_ENTRIES-1:0] seen_slot_hint = '0;
     load_store_queue dut (
         .clk, .rst, .flush, .recovery, .head_slot, .head_valid, .head_id,
         .offer_valid, .issue_fire, .descriptor, .issue_ready,
         .mem_req_valid, .mem_req_ready, .mem_request,
         .mem_rsp_valid, .mem_rsp_ready, .mem_response, .response_reject,
-        .complete_valid, .complete_ready, .completion, .early_forward, .load_return, .store_forward_hint,
+        .complete_valid, .complete_ready, .completion, .early_forward, .load_return, .store_forward_hint, .store_slot_hint,
         .busy, .draining, .store_owner_valid, .store_owner_id
     );
     always #5 clk = ~clk;
     always @(posedge clk) if (!rst) begin
+        // 原双端口提示作参考；比较完整标签和数据，双向检查没有多播或漏播。
+        for (int slot = 0; slot < LOAD_QUEUE_ENTRIES; slot++) begin
+            int match_count;
+            match_count = 0;
+            for (int portno = 0; portno < 2; portno++)
+                if (store_forward_hint[portno].valid &&
+                    store_forward_hint[portno].id == store_slot_hint[slot].id) match_count++;
+            if (store_slot_hint[slot].valid) begin
+                assert (match_count == 1) else $fatal(1, "fixed slot has no unique legacy hint");
+                for (int portno = 0; portno < 2; portno++)
+                    if (store_forward_hint[portno].valid && store_forward_hint[portno].id == store_slot_hint[slot].id)
+                        assert (store_forward_hint[portno] == store_slot_hint[slot])
+                            else $fatal(1, "fixed slot hint payload differs");
+                seen_slot_hint[slot] = 1;
+                slot_checks++;
+            end
+        end
         for (int portno = 0; portno < 2; portno++) begin
+            int match_count;
+            match_count = 0;
+            for (int slot = 0; slot < LOAD_QUEUE_ENTRIES; slot++)
+                if (store_slot_hint[slot].valid && store_forward_hint[portno].id == store_slot_hint[slot].id)
+                    match_count++;
+            if (store_forward_hint[portno].valid)
+                assert (match_count == 1) else $fatal(1, "legacy hint lost or duplicated in fixed slots");
+            if (load_return[portno].valid && dut.forward_fire[portno]) return_suppressed++;
             assert (!(load_return[portno].valid && store_forward_hint[portno].valid) &&
                     early_forward[portno].valid == (load_return[portno].valid || store_forward_hint[portno].valid))
                 else $fatal(1, "split forward source priority");
@@ -143,6 +170,24 @@ module tb_scoreboard_lsu_forward;
             forward_pair(MEM_BYTE,0,7,xlen_t'(-2),MEM_HALF,1,6,xlen_t'(16'hfedc));
         end
 
+        // 保留已完成但尚未接纳的前两个槽，迫使后续转发使用 LQ2/LQ3。
+        // 起点靠近 ROB 尾部，完整 ID 跨槽回卷；所有代次取值及再次复用均覆盖。
+        for (int generation = 0; generation <= (1 << RETIRE_GEN_W); generation++) begin
+            head_slot = RETIRE_IDX_W'(RETIRE_ENTRIES-2);
+            enqueue('{id:tag(RETIRE_ENTRIES-2,generation),address:xlen_t'(256),write:1'b1,
+                      size:MEM_WORD,unsigned_load:1'b0,wdata:xlen_t'(32'h55667788),wstrb:DBUS_BYTES'(15)});
+            enqueue(load(RETIRE_ENTRIES-1,256,MEM_WORD,0,generation),load(0,256,MEM_WORD,0,generation),1);
+            expect_early(0,tag(RETIRE_ENTRIES-1,generation),xlen_t'(32'h55667788));
+            expect_early(1,tag(0,generation),xlen_t'(32'h55667788)); tick();
+            enqueue(load(1,256,MEM_WORD,0,generation),load(2,256,MEM_WORD,0,generation),1);
+            expect_early(0,tag(1,generation),xlen_t'(32'h55667788));
+            expect_early(1,tag(2,generation),xlen_t'(32'h55667788)); tick();
+            complete_ready = 3; tick(); complete_ready = 3; tick();
+            flush = 1; tick(); assert (!busy) else $fatal(1, "fixed slot reuse drain");
+            cases++;
+        end
+        head_slot = 0;
+
         // 返回口不绑定请求口；完整 ID 决定操作数归属。
         enqueue(load(0,256),load(1,264),1); mem_req_ready = 3; tick();
         reply(0,tag(1),22); reply(1,tag(0),11);
@@ -187,8 +232,9 @@ module tb_scoreboard_lsu_forward;
         // Store 的成功响应不包含可广播的 GPR 值。
         head_valid = 1; head_id = tag(0); mem_req_ready = 1; tick();
         reply(1,tag(0),'0); expect_none(); tick(); consume(); cases++;
-        assert (return_hints > 0 && store_hints > 0) else $fatal(1, "split forwarding source coverage");
-        $display("FORWARD_SOURCES returns=%0d store_hints=%0d", return_hints, store_hints);
+        assert (return_hints > 0 && store_hints > 0 && &seen_slot_hint && return_suppressed > 0) else $fatal(1, "split forwarding source coverage");
+        $display("FORWARD_SOURCES returns=%0d store_hints=%0d slot_checks=%0d seen=%b return_suppressed=%0d",
+                 return_hints, store_hints, slot_checks, seen_slot_hint, return_suppressed);
         $display("PASS tb_scoreboard_lsu_forward XLEN=%0d cases=%0d formatted tagged duplicate error cancel backpressure",XLEN,cases);
         $finish;
     end

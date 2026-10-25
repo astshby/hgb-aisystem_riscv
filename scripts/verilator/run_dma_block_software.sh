@@ -6,7 +6,7 @@ xlen="${1:-32}"
 export SOC=1 SOC_DDR_BYTES=65536 SOC_LOCAL_TCM_ENABLE="${SOC_LOCAL_TCM_ENABLE:-1}"
 export SOC_DMA_WIDE_ENABLE=1 SOC_DMA_BLOCK_ENABLE=1 SOC_CACHE_BLOCK_ENABLE=1
 export ISSUE_WIDTH=2 RETIRE_ENTRIES="${RETIRE_ENTRIES:-8}" MUL_IMPL=0 DIV_IMPL=1
-export PREDICTOR_MODE="${PREDICTOR_MODE:-1}" RAS_ENABLE="${RAS_ENABLE:-1}"
+export PREDICTOR_MODE="${PREDICTOR_MODE:-1}" RAS_ENABLE="${RAS_ENABLE:-0}"
 tool_prefix="${RISCV_TOOL_ROOT:?set RISCV_TOOL_ROOT to the toolchain bin directory}/riscv64-unknown-elf-"
 config="m${MUL_IMPL}d${DIV_IMPL}"
 source scripts/verilator/benchmark_platform.sh

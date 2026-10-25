@@ -22,7 +22,8 @@ module integer_issue_queue #(
     output logic serial_pending,
     output pipeline_pkg::retire_id_t serial_id,
     output logic [1:0] oldest_pending,
-    output pipeline_pkg::retire_id_t oldest_id [2]
+    output pipeline_pkg::retire_id_t oldest_id [2],
+    output logic first_is_oldest
 );
     import core_config_pkg::*;
     import pipeline_pkg::*;
@@ -79,6 +80,8 @@ module integer_issue_queue #(
             (class_q[slot] != SCHED_MDU && !(|older_non_mdu[slot])) : ready_rank[slot] == RANK_ONE);
     end
     assign oldest_ready = |(oldest_mask[0] & base_ready);
+    // 合并器直接使用选择掩码的交集，避免选出宽包后再比较完整退休标签。
+    assign first_is_oldest = |(selected_mask[0] & oldest_mask[0]);
 
     // 标签含代次。已捕获的值不再查询复用后的 ROB 槽。
     function automatic d2_ex_t capture(input d2_ex_t packet, input logic probe_rob, input logic issue_view);

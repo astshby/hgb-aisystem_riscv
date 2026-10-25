@@ -23,8 +23,11 @@ module tb_scoreboard_retirement;
     logic [RETIRE_COUNT_W-1:0] occupancy;
     branch_recovery_t branch_recovery;
     retire_gpr_entry_t producer_entries [RETIRE_ENTRIES];
+    retire_id_t probe_id [5];
+    logic [4:0] probe_accept;
     retire_id_t ids [256];
-    int dual_streak, maximum_streak, retired;
+    int dual_streak, maximum_streak, retired, head_recovery_checks = 0;
+    int probe_checks = 0;
     always #5 clk = ~clk;
     retire_queue #(.RENAMED(1), .REGISTER_RETIRE(1)) dut (.ras_entries(), .ras_head_slot(), .*);
 
@@ -57,6 +60,7 @@ module tb_scoreboard_retirement;
     endtask
 
     initial begin
+        for (int probe = 0; probe < 5; probe++) probe_id[probe] = '0;
         restart();
         // 反压期间先完成年轻项；队头本拍完成时，退休与异常观察都必须等待寄存沿。
         offer_pair(0); tick(); offer_pair(2); tick();
@@ -167,8 +171,62 @@ module tb_scoreboard_retirement;
         end
         assert (occupancy == 0 && retired == 200 && maximum_streak == 100)
             else $fatal(1, "throughput or drain");
-        $display("PASS tb_scoreboard_retirement XLEN=%0d retired=%0d dual_streak=%0d fault duplicate recovery wrap",
-                 XLEN, retired, maximum_streak);
+
+        // 完成预检同时覆盖活 ID、旧代次、空槽和同 ID 多来源；恢复只拒绝年轻项。
+        restart(); offer_pair(0); tick();
+        probe_id[0] = ids[0];
+        probe_id[1] = ids[0]; probe_id[1].generation -= RETIRE_GEN_W'(1);
+        probe_id[2] = ids[1]; probe_id[2].slot += RETIRE_IDX_W'(1);
+        probe_id[3] = ids[1]; probe_id[4] = ids[0];
+        #1;
+        assert (probe_accept == 5'b11001) else $fatal(1, "probe ID/generation/empty-slot ownership");
+        probe_checks++;
+        branch_recovery = '{valid:1, id:ids[0], pc:xlen_t'(128)};
+        #1;
+        assert (probe_accept == 5'b10001) else $fatal(1, "probe recovery accepted younger ID");
+        probe_checks++;
+        branch_recovery = '0;
+        complete_pair(0); tick();
+        assert (probe_accept == 0) else $fatal(1, "probe accepted completed ID");
+        probe_checks++;
+
+        // 独立程序顺序模型：遍历所有物理 head 和存活分支位置，含 head+1 回卷。
+        // 两个队头已完成，恢复同拍允许保留前缀退休；年轻第二项绝不能退休。
+        for (int head_index = 0; head_index < RETIRE_ENTRIES; head_index++) begin
+            for (int branch_index = 0; branch_index < RETIRE_ENTRIES; branch_index++) begin
+                restart();
+                for (int advance = 0; advance < head_index; advance++) begin
+                    alloc_valid = 1; alloc_meta.kind = RET_EXEC;
+                    #1; ids[0] = alloc_id; tick();
+                    complete_valid = 1; completion.id = ids[0]; tick();
+                    retire_ready = 1; tick();
+                end
+                for (int index = 0; index < RETIRE_ENTRIES; index += 2) begin
+                    offer_pair(index);
+                    alloc_meta.kind = index == branch_index ? RET_BRANCH : RET_EXEC;
+                    alloc_meta_1.kind = index+1 == branch_index ? RET_BRANCH : RET_EXEC;
+                    tick();
+                end
+                complete_pair(0); tick();
+                branch_recovery = '{valid:1, id:ids[branch_index], pc:xlen_t'(128)};
+                retire_ready = 1; retire_ready_1 = 1;
+                #1;
+                // 恢复取消第二头时，其寄存 ID 视图仍属于原分配项；退休许可必须关闭。
+                assert (head_id == ids[0] && head_id_1 == ids[1] && head_valid && head_complete && retire_fire &&
+                        head_valid_1 == (branch_index != 0) &&
+                        retire_fire_1 == (branch_index != 0))
+                    else $fatal(1, "recovery prefix head=%0d branch=%0d", head_index, branch_index);
+                if (branch_index != 0)
+                    assert (head_id_1 == ids[1] && head_result_1.gpr_data == 1)
+                        else $fatal(1, "second surviving head payload");
+                tick();
+                assert (int'(occupancy) == (branch_index == 0 ? 0 : branch_index-1))
+                    else $fatal(1, "recovery/retirement lost prefix head=%0d branch=%0d", head_index, branch_index);
+                head_recovery_checks++;
+            end
+        end
+        $display("PASS tb_scoreboard_retirement XLEN=%0d retired=%0d dual_streak=%0d head_recovery=%0d probes=%0d fault duplicate recovery wrap",
+                 XLEN, retired, maximum_streak, head_recovery_checks, probe_checks);
         $finish;
     end
 endmodule

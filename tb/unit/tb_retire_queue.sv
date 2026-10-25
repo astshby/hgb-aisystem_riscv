@@ -22,6 +22,9 @@ module tb_retire_queue;
     retire_result_t head_result;
     logic retire_ready, retire_fire, recovering;
     logic [RETIRE_COUNT_W-1:0] occupancy;
+    retire_id_t probe_id [5];
+    logic [4:0] probe_accept;
+    initial for (int probe = 0; probe < 5; probe++) probe_id[probe] = '0;
 
     // 参考模型是按程序顺序排列的软件队列，不使用 DUT 指针、valid 位或数组。
     typedef struct packed {
@@ -163,8 +166,9 @@ module tb_retire_queue;
                     assert (head_result == '0) else $fatal(1, "unfinished head exposed stale payload");
                 end
             end else begin
-                assert (head_id == '0 && head_meta == '0 && head_result == '0)
-                    else $fatal(1, "empty queue exposed stale payload");
+                // 无效 ID 可以保留寄存槽视图；空队列不能退休，metadata/结果仍保持原语义。
+                assert (!retire_fire && head_meta == '0 && head_result == '0)
+                    else $fatal(1, "empty queue retired or exposed stale result");
             end
         end
 

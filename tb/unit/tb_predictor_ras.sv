@@ -11,15 +11,15 @@ module tb_predictor_ras #(
     import predictor_types_pkg::*;
     import riscv_unpriv_pkg::*;
     logic clk = 0, rst = 1, clear = 0, fetch_fire = 0, commit_valid = 0, recover = 0;
-    ras_event_t fetch_event, commit_event, commit_event_1, replay [REPLAY_SLOTS];
+    ras_event_t fetch_event, fetch_event_1, commit_event, commit_event_1, replay [REPLAY_SLOTS];
+    logic fetch_second = 0;
     logic commit_valid_1 = 0;
     logic [REPLAY_SLOTS-1:0] replay_valid;
     logic top_valid;
     xlen_t top_addr;
     logic [31:0] inst;
     ras_op_e decoded_op;
-    ras #(.DEPTH(DEPTH), .REPLAY_SLOTS(REPLAY_SLOTS)) dut (
-        .fetch_second(1'b0), .fetch_event_1('0), .*);
+    ras #(.DEPTH(DEPTH), .REPLAY_SLOTS(REPLAY_SLOTS)) dut (.*);
     ras_decode decode_dut (.inst, .op(decoded_op));
     always #5 clk = ~clk;
 
@@ -27,6 +27,7 @@ module tb_predictor_ras #(
     xlen_t committed_model[$], speculative_model[$];
     int cycles = 0, checks = 0, decode_checks = 0;
     int recoveries = 0, simultaneous = 0, blocked_fetches = 0, dual_commits = 0;
+    int dual_fetches = 0, boundary_recoveries = 0;
     logic [31:0] random_q = 32'h7b13e609;
 
     function automatic logic [31:0] random_word();
@@ -73,7 +74,13 @@ module tb_predictor_ras #(
                     if (replay_valid[i]) apply_model(speculative_model, replay[i]);
                 recoveries++;
                 if (commit_valid && fetch_fire) simultaneous++;
-            end else if (fetch_fire) apply_model(speculative_model, fetch_event);
+            end else if (fetch_fire) begin
+                apply_model(speculative_model, fetch_event);
+                if (fetch_second) begin
+                    apply_model(speculative_model, fetch_event_1);
+                    dual_fetches++;
+                end
+            end
             else if (fetch_event.op != RAS_NONE) blocked_fetches++;
         end
         cycles++;
@@ -83,7 +90,8 @@ module tb_predictor_ras #(
 
     task automatic idle_inputs();
         clear = 0; fetch_fire = 0; commit_valid = 0; commit_valid_1 = 0; recover = 0;
-        fetch_event = '0; commit_event = '0; commit_event_1 = '0; replay_valid = '0;
+        fetch_second = 0; fetch_event = '0; fetch_event_1 = '0;
+        commit_event = '0; commit_event_1 = '0; replay_valid = '0;
         foreach (replay[i]) replay[i] = '0;
     endtask
 
@@ -164,6 +172,46 @@ module tb_predictor_ras #(
         foreach (replay[i]) replay[i] = commit_event;
         tick(); idle_inputs(); recover = 1; tick();
 
+        // 遍历所有 committed 深度；长重放覆盖满栈先推后弹造成的底部丢弃、空栈弹出和协程。
+        for (int count = 0; count <= DEPTH; count++) begin
+            for (int pattern = 0; pattern < 6; pattern++) begin
+                idle_inputs(); clear = 1; tick();
+                for (int i = 0; i < count; i++) begin
+                    idle_inputs(); commit_valid = 1;
+                    commit_event = '{op:RAS_PUSH, addr:xlen_t'(64'h2000+64'(i*4))};
+                    tick();
+                end
+                idle_inputs(); recover = 1;
+                for (int i = 0; i < REPLAY_SLOTS; i++) begin
+                    replay_valid[i] = pattern != 5 || i % 3 != 1;
+                    replay[i].addr = xlen_t'(64'hfedcba98_12340000 + 64'(i*4));
+                    unique case (pattern)
+                        0: replay[i].op = RAS_PUSH;
+                        1: replay[i].op = RAS_POP;
+                        2: replay[i].op = i % 2 == 0 ? RAS_PUSH : RAS_POP;
+                        3: replay[i].op = i % 2 == 0 ? RAS_POP : RAS_PUSH;
+                        4: replay[i].op = RAS_POP_PUSH;
+                        default: replay[i].op = ras_op_e'(2'(i));
+                    endcase
+                end
+                tick(); boundary_recoveries++;
+                for (int i = 0; i <= DEPTH; i++) fetch_step(RAS_POP, '0);
+            end
+        end
+
+        // 两个取指事件必须先老后年轻；恢复仍优先于同拍双取指，并包含同拍双退休。
+        idle_inputs(); fetch_fire = 1; fetch_second = 1;
+        fetch_event = '{op:RAS_PUSH, addr:xlen_t'(16'h3100)};
+        fetch_event_1 = '{op:RAS_POP_PUSH, addr:xlen_t'(16'h3200)};
+        tick();
+        idle_inputs(); recover = 1; commit_valid = 1; commit_valid_1 = 1;
+        fetch_fire = 1; fetch_second = 1;
+        commit_event = '{op:RAS_PUSH, addr:xlen_t'(16'h4100)};
+        commit_event_1 = '{op:RAS_POP_PUSH, addr:xlen_t'(16'h4200)};
+        fetch_event = '{op:RAS_PUSH, addr:xlen_t'(16'h5100)};
+        fetch_event_1 = '{op:RAS_PUSH, addr:xlen_t'(16'h5200)};
+        tick();
+
         // 确定性组合事件压力；模型不依赖 DUT 内部数组或计数器。
         for (int i = 0; i < 1500; i++) begin
             idle_inputs(); sample = random_word();
@@ -171,6 +219,8 @@ module tb_predictor_ras #(
             rst = i == 731;
             fetch_fire = sample[8]; commit_valid = sample[9]; recover = sample[11:10] == 0;
             commit_valid_1 = commit_valid && sample[16];
+            fetch_second = sample[20];
+            fetch_event_1 = '{op:ras_op_e'(sample[22:21]), addr:xlen_t'({sample, sample ^ 32'hc1234567})};
             fetch_event = '{op:ras_op_e'(sample[13:12]), addr:xlen_t'({sample, ~sample})};
             commit_event = '{op:ras_op_e'(sample[15:14]), addr:xlen_t'({~sample, sample})};
             commit_event_1 = '{op:ras_op_e'(sample[18:17]), addr:xlen_t'({sample ^ 32'h9876abcd, sample})};
@@ -182,10 +232,12 @@ module tb_predictor_ras #(
         end
         rst = 0; idle_inputs(); recover = 1; tick();
         for (int i = 0; i < DEPTH + 1; i++) fetch_step(RAS_POP, '0);
-        assert (recoveries > 100 && simultaneous > 20 && blocked_fetches > 100 && dual_commits > 100)
+        assert (recoveries > 100 && simultaneous > 20 && blocked_fetches > 100 && dual_commits > 100 &&
+                dual_fetches > 100 && boundary_recoveries == 6*(DEPTH+1))
             else $fatal(1, "insufficient RAS event coverage");
-        $display("PASS tb_predictor_ras RV%0d depth=%0d replay=%0d decode=%0d checks=%0d cycles=%0d recover=%0d simultaneous=%0d blocked=%0d dual_commit=%0d",
-                 XLEN, DEPTH, REPLAY_SLOTS, decode_checks, checks, cycles, recoveries, simultaneous, blocked_fetches, dual_commits);
+        $display("PASS tb_predictor_ras RV%0d depth=%0d replay=%0d decode=%0d checks=%0d cycles=%0d recover=%0d simultaneous=%0d blocked=%0d dual_commit=%0d dual_fetch=%0d boundary_recover=%0d",
+                 XLEN, DEPTH, REPLAY_SLOTS, decode_checks, checks, cycles, recoveries, simultaneous, blocked_fetches, dual_commits,
+                 dual_fetches, boundary_recoveries);
         $finish;
     end
     initial begin #1000000; $fatal(1, "RAS watchdog"); end

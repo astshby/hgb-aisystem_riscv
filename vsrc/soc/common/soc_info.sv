@@ -4,6 +4,11 @@ module soc_info #(
     parameter int unsigned SOC_PROFILE = soc_config_pkg::SOC_PROFILE_FULL,
     parameter logic [14:0] PRESENT = soc_config_pkg::SOC_FULL_PRESENT,
     parameter logic [31:0] CLOCK_HZ = 50000000,
+    parameter bit CLOCK_INFO_ENABLE = 1'b0,
+    parameter logic [31:0] CORE_CLOCK_HZ = CLOCK_HZ,
+    parameter logic [31:0] SYS_CLOCK_HZ = CLOCK_HZ,
+    parameter logic [31:0] DDR_CLOCK_HZ = CLOCK_HZ,
+    parameter logic [31:0] PERIPH_CLOCK_HZ = CLOCK_HZ,
     parameter bit DCACHE_ENABLE = 1'b1,
     parameter int unsigned DCACHE_BYTES = 4096,
     parameter int unsigned DCACHE_LINE_BYTES = 32
@@ -30,7 +35,7 @@ module soc_info #(
     always_comb begin
         access_error = request.write;
         read_data = '0;
-        case (request.addr[11:0])
+        unique case (request.addr[11:0])
             12'h000: read_data = 32'(core_config_pkg::XLEN);
             12'h004: read_data = CLOCK_HZ;
             12'h008: read_data = soc_config_pkg::ITCM_BYTES;
@@ -48,7 +53,15 @@ module soc_info #(
             12'h034: read_data = 32'(cache_fault_addr);
             // 新增只读发现接口；既有容量、时钟与 Cache 维护寄存器保持原 ABI。
             12'h038: read_data = {17'b0, PRESENT};
-            12'h03c: read_data = {soc_config_pkg::SOC_DISCOVERY_ABI, 8'b0, 8'(SOC_PROFILE)};
+            12'h03c: read_data = {soc_config_pkg::SOC_DISCOVERY_ABI, 7'b0, CLOCK_INFO_ENABLE, 8'(SOC_PROFILE)};
+            // 仅在发现 bit8 置位后探测新窗口；旧硬件/BSP 继续使用 +0x04。
+            // version=1，低五位依次表示 core/sys/ddr/periph/timer 频率有效。
+            12'h050: begin read_data = 32'h0001001f; access_error = request.write || !CLOCK_INFO_ENABLE; end
+            12'h054: begin read_data = CORE_CLOCK_HZ; access_error = request.write || !CLOCK_INFO_ENABLE; end
+            12'h058: begin read_data = SYS_CLOCK_HZ; access_error = request.write || !CLOCK_INFO_ENABLE; end
+            12'h05c: begin read_data = DDR_CLOCK_HZ; access_error = request.write || !CLOCK_INFO_ENABLE; end
+            12'h060: begin read_data = PERIPH_CLOCK_HZ; access_error = request.write || !CLOCK_INFO_ENABLE; end
+            12'h064: begin read_data = PERIPH_CLOCK_HZ; access_error = request.write || !CLOCK_INFO_ENABLE; end
             default: access_error = 1'b1;
         endcase
     end
