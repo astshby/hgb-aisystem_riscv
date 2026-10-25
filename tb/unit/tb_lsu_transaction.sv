@@ -23,6 +23,9 @@ module tb_lsu_transaction;
     logic queue_mode, auto_trap, alloc_valid, alloc_ready, queue_ready, complete_reject;
     logic queue_head_valid, queue_head_complete, retire_ready, retire_fire, recovering;
     logic [RETIRE_COUNT_W-1:0] occupancy;
+    retire_id_t probe_id [5];
+    logic [4:0] probe_accept;
+    initial for (int probe = 0; probe < 5; probe++) probe_id[probe] = '0;
     retire_id_t alloc_id, queue_head_id;
     retire_alloc_t alloc_meta, head_meta;
     retire_result_t head_result;
@@ -59,7 +62,8 @@ module tb_lsu_transaction;
         .clk, .rst, .flush_all(queue_mode && cancel), .drain_complete(!busy),
         .alloc_valid, .alloc_ready, .alloc_meta, .alloc_id,
         .complete_valid(queue_mode && complete_valid), .complete_ready(queue_ready),
-        .completion, .complete_reject, .query('0), .query_result(),
+        .completion, .complete_reject, .probe_id(probe_id), .probe_accept(probe_accept),
+        .query('0), .query_result(),
         .head_valid(queue_head_valid), .head_complete(queue_head_complete),
         .head_id(queue_head_id), .head_meta, .head_result,
         .retire_ready, .retire_fire, .occupancy, .recovering

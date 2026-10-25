@@ -5,7 +5,8 @@
 // 有限代次不能识别任意长时间后的旧响应；drain_complete 是外部所有者提供的协议保证。
 module retire_queue #(
     parameter bit RENAMED = 1'b0,
-    parameter bit REGISTER_RETIRE = 1'b0
+    parameter bit REGISTER_RETIRE = 1'b0,
+    parameter int unsigned PROBE_PORTS = 5
 ) (
     input  logic                                  clk,
     input  logic                                  rst,
@@ -50,7 +51,10 @@ module retire_queue #(
     input  logic                                  retire_ready_1,
     output logic                                  retire_fire_1,
     input  scoreboard_pkg::branch_recovery_t       branch_recovery,
-    output pipeline_pkg::retire_gpr_entry_t        producer_entries [core_config_pkg::RETIRE_ENTRIES]
+    output pipeline_pkg::retire_gpr_entry_t        producer_entries [core_config_pkg::RETIRE_ENTRIES],
+    // 完成源用寄存 ID 并行预检；选中后不再经 ROB 动态读决定是否广播。
+    input  pipeline_pkg::retire_id_t               probe_id [PROBE_PORTS],
+    output logic [PROBE_PORTS-1:0]                 probe_accept
 );
     import core_config_pkg::*;
     import pipeline_pkg::*;
@@ -86,6 +90,14 @@ module retire_queue #(
             scoreboard_pkg::younger_than(
                 '{slot:RETIRE_IDX_W'(slot), generation:generation_q[slot]}, branch_recovery.id, head_q);
         assign producer_entries[slot] = query_entries[slot];
+    end
+
+    // 每个完成源在仲裁前用自己的寄存 ID 检查槽状态；条件与 complete_match 相同，
+    // 结果只用于选中后关闭广播，不替代 complete 握手，旧完成仍照常弹出。
+    for (genvar probe = 0; probe < PROBE_PORTS; probe++) begin : g_accept_probe
+        assign probe_accept[probe] = valid_q[probe_id[probe].slot] &&
+            generation_q[probe_id[probe].slot] == probe_id[probe].generation &&
+            !done_q[probe_id[probe].slot] && !killed[probe_id[probe].slot];
     end
 
     assign second_head = head_q + RETIRE_IDX_W'(1);
@@ -177,14 +189,16 @@ module retire_queue #(
     // 独立外部取消须由提交端关闭 retire_ready；队头产生的事件可与清队列同拍。
     // 旁路只允许匹配两个最老槽的完成；源来自已寄存的 WB、LSU 响应、MDU RESULT或第二ALU结果。
     // scoreboard 使用已存储的结果退休，隔开完成仲裁与全局异常/取指反馈；每拍仍可退休两条。
+    // ID 直接描述寄存队头，消费由 head_valid/retire_fire 授权；无效时无需清零载荷。
+    // 第二头的分支取消只改变许可，避免恢复经 ID 比较串入 RAT 与下一组操作数查询。
+    assign head_id = '{slot:head_q, generation:generation_q[head_q]};
+    assign head_id_1 = '{slot:second_head, generation:generation_q[second_head]};
     always_comb begin
         head_valid = !rst && valid_q[head_q];
         head_complete = head_valid && (done_q[head_q] || (!REGISTER_RETIRE && (|head_bypass)));
-        head_id = '0;
         head_meta = '0;
         head_result = '0;
         if (head_valid) begin
-            head_id = '{slot: head_q, generation: generation_q[head_q]};
             head_meta = meta_q[head_q];
             if (!REGISTER_RETIRE && head_bypass[0])
                 head_result = completed_result;
@@ -199,16 +213,16 @@ module retire_queue #(
 
     // 第二头永远是 head+1，不允许跳过未完成的第一头。异常/CSR等架构配对限制由提交端给出。
     // 两个完成源都能旁路到任一队头；flush不参与有效性计算，避免自身Trap组合反馈。
+    // 第二头年龄固定为 1，只有在 head 恢复才被取消；直接比较边界，避开 killed 向量动态选择。
+    // 指针按二次幂容量回卷，因此末槽 head 与第 0 槽第二头也满足此关系。
     always_comb begin
         head_valid_1 = !rst && (ISSUE_WIDTH == 2) && (count_q > RETIRE_COUNT_W'(1)) &&
-                       valid_q[second_head] && !killed[second_head];
+                       valid_q[second_head] && !(recover_branch && branch_recovery.id.slot == head_q);
         head_complete_1 = head_valid_1 && (done_q[second_head] ||
                           (!REGISTER_RETIRE && (|second_head_bypass)));
-        head_id_1 = '0;
         head_meta_1 = '0;
         head_result_1 = '0;
         if (head_valid_1) begin
-            head_id_1 = '{slot:second_head, generation:generation_q[second_head]};
             head_meta_1 = meta_q[second_head];
             if (!REGISTER_RETIRE && second_head_bypass[0])
                 head_result_1 = completed_result;

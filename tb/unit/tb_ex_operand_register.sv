@@ -24,6 +24,9 @@ module tb_ex_operand_register;
     retire_result_t head_result;
     retire_query_t query;
     retire_query_result_t query_result;
+    retire_id_t probe_id [5];
+    logic [4:0] probe_accept;
+    initial for (int probe = 0; probe < 5; probe++) probe_id[probe] = '0;
     int checks = 0, ii1_cycles = 0, partial_captures = 0, retired_sources = 0;
     int retire_lookup_partial = 0, capacity_adapted = 0;
 
@@ -36,6 +39,7 @@ module tb_ex_operand_register;
         .clk, .rst, .flush_all(qflush), .drain_complete(1'b1),
         .alloc_valid, .alloc_ready, .alloc_meta, .alloc_id,
         .complete_valid, .complete_ready, .completion, .complete_reject,
+        .probe_id(probe_id), .probe_accept(probe_accept),
         .query, .query_result,
         .head_valid, .head_complete, .head_id, .head_meta, .head_result,
         .retire_ready, .retire_fire, .occupancy, .recovering

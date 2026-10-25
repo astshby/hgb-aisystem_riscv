@@ -21,6 +21,9 @@ module tb_mdu_completion_adapter;
     retire_result_t head_result;
     logic head_valid, head_complete, retire_ready, retire_fire, recovering;
     logic [RETIRE_COUNT_W-1:0] occupancy;
+    retire_id_t probe_id [5];
+    logic [4:0] probe_accept;
+    initial for (int probe = 0; probe < 5; probe++) probe_id[probe] = '0;
 
     typedef struct packed {
         retire_id_t id;
@@ -58,7 +61,8 @@ module tb_mdu_completion_adapter;
         .clk, .rst, .flush_all(queue_flush), .drain_complete(req_ready && !wb_valid),
         .alloc_valid, .alloc_ready, .alloc_meta, .alloc_id,
         .complete_valid(use_queue && complete_valid), .complete_ready(queue_ready), .completion,
-        .complete_reject, .head_valid, .head_complete, .head_id, .head_meta, .head_result,
+        .complete_reject, .probe_id(probe_id), .probe_accept(probe_accept),
+        .head_valid, .head_complete, .head_id, .head_meta, .head_result,
         .query('0), .query_result(),
         .retire_ready, .retire_fire, .occupancy, .recovering
     );

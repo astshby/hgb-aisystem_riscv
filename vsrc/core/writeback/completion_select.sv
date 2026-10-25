@@ -6,9 +6,12 @@ module completion_select #(
     input logic rst,
     input logic [core_config_pkg::RETIRE_IDX_W-1:0] head_slot,
     input logic [SOURCES-1:0] source_valid,
+    // 接受位与年龄仲裁并行计算；选中后只做一次固定来源多路选择。
+    input logic [SOURCES-1:0] source_accept,
     output logic [SOURCES-1:0] source_ready,
     input pipeline_pkg::retire_completion_t source_completion [SOURCES],
     output logic [1:0] complete_valid,
+    output logic [1:0] complete_accept,
     output pipeline_pkg::retire_completion_t completion [2]
 );
     import core_config_pkg::*;
@@ -35,6 +38,7 @@ module completion_select #(
     always_comb begin
         for (int portno = 0; portno < 2; portno++) begin
             complete_valid[portno] = |select[portno];
+            complete_accept[portno] = |(select[portno] & source_accept);
             completion[portno] = '0;
             for (int src = 0; src < SOURCES; src++)
                 completion[portno] |= source_completion[src] &

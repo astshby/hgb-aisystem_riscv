@@ -60,7 +60,9 @@ module cache_port #(
     assign rsp_valid = active_q && (cached_q ? cache_rsp_valid : (buffer_valid_q || mem_rsp_valid));
     assign response = cached_q ? cache_response : (buffer_valid_q ? buffer_q : mem_response);
     assign response_fire = rsp_valid && rsp_ready;
-    assign available = !active_q || (!cached_q && response_fire);
+    // D-cache 的旧缓存响应可与下一缓存请求交接；旧 refill 仍占下游选择，不能同沿接旁路。
+    // 旁路响应保留原有交接能力，I-cache 的缓存响应边界保持不变。
+    assign available = !active_q || (response_fire && (!cached_q || (!INSTRUCTION && cacheable)));
     assign idle = !active_q;
     assign req_ready = !rst && !invalidate && !maintenance_active && !maintenance_pending && available && (cacheable ? cache_req_ready : mem_req_ready);
     assign request_fire = req_valid && req_ready;

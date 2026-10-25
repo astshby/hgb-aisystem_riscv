@@ -1,5 +1,5 @@
 // Module: tb_core_load_pipeline
-// Description: Checks hit-through load timing and the single load-use bubble.
+// Description: Checks load data/dependencies, dual retirement and legacy single-issue load timing.
 module tb_core_load_pipeline;
     timeunit 1ns;
     timeprecision 1ps;
@@ -29,20 +29,46 @@ module tb_core_load_pipeline;
     integer cycles;
     integer first_load_cycle;
     integer second_load_cycle;
+    logic dependent_source_seen = 0;
+    logic dual_retired_seen = 0;
+`ifdef CORE_SCOREBOARD
+    always @(posedge clk) if (!rst) begin
+        if (commit_trace[0].valid && commit_trace[1].valid) dual_retired_seen = 1;
+        for (int lane = 0; lane < 2; lane++)
+            if (dut.u_core.issue_fire[lane] && dut.u_core.scheduled[lane].pc == xlen_t'(16)) begin
+                assert (dut.u_core.scheduled[lane].rs1_data == xlen_t'(50))
+                    else $fatal(1, "dependent ALU issued before capturing its Load value");
+                dependent_source_seen = 1;
+            end
+    end
+`endif
 
     // 成功时先跳出采样循环，统一结束仿真，避免继续执行循环后的超时路径。
     logic completed = 1'b0;
 
     always #5 clk = ~clk;
-    sim_cpu_top dut (.commit_trace(), .*);
+    pipeline_pkg::retire_trace_t commit_trace [2], sampled_trace [2];
+    sim_cpu_top dut (.*);
+    // 上升沿记录本拍真实退休，下降沿按年龄遍历两个端口。
+    always_ff @(posedge clk) begin
+        if (rst) begin sampled_trace[0] <= '0; sampled_trace[1] <= '0; end
+        else sampled_trace <= commit_trace;
+    end
     assign result_addr = xlen_t'(TEST_RESULT_ADDR);
     // 结果 Store 的总线所有者与退休 ID 从 TB 层级读取，不扩展 FPGA 接口。
     store_result_monitor u_result_monitor (
+`ifdef CORE_SCOREBOARD
+        .store_request_id(dut.u_core.store_request_id),
+        .store_response_fire(dut.u_core.store_response_fire),
+        .store_response_error(dut.u_core.store_response_error),
+        .store_response_id(dut.u_core.store_response_id),
+`else
         .store_request_id(dut.u_core.lsu_owner_id),
         .store_response_fire(dut.u_core.dmem_rsp_valid && dut.u_core.dmem_rsp_ready &&
                              dut.u_core.lsu_owner_valid && dut.u_core.dmem_req_write),
         .store_response_error(dut.u_core.dmem_rsp_error),
         .store_response_id(dut.u_core.lsu_owner_id),
+`endif
         .store_retire_fire(dut.u_core.queue_retire_fire &&
                            dut.u_core.head_meta.kind == pipeline_pkg::RET_STORE),
         .store_retire_error(dut.u_core.head_result.exc.valid),
@@ -89,34 +115,46 @@ module tb_core_load_pipeline;
 
         for (cycles = 0; cycles < 200; cycles = cycles + 1) begin
             @(negedge clk);
-            if (commit_exception && commit_valid)
-                $fatal(1, "unexpected exception at pc=%h", commit_pc);
-            if (commit_valid) begin
-                unique case (commit_pc)
-                    xlen_t'(0): begin
-                        first_load_cycle = cycles;
-                        assert (commit_rd_data == xlen_t'(41))
-                            else $fatal(1, "first load data");
-                    end
-                    xlen_t'(4): begin
-                        assert (cycles == first_load_cycle + 1)
-                            else $fatal(1, "independent instruction stalled after load");
-                    end
-                    xlen_t'(8): begin
-                        assert (cycles == first_load_cycle + 2)
-                            else $fatal(1, "load hit did not sustain one instruction per cycle");
-                    end
-                    xlen_t'(12): second_load_cycle = cycles;
-                    xlen_t'(16): begin
-                        assert (cycles == second_load_cycle + 2)
-                            else $fatal(1, "load-use must insert exactly one bubble");
-                        assert (commit_rd_data == xlen_t'(51))
-                            else $fatal(1, "load-use WB forwarding data");
-                    end
-                    default: ;
-                endcase
+            for (int lane = 0; lane < 2; lane++) begin
+                if (sampled_trace[lane].exception && sampled_trace[lane].valid)
+                    $fatal(1, "unexpected exception at pc=%h", sampled_trace[lane].pc);
+                if (sampled_trace[lane].valid) begin
+                    unique case (sampled_trace[lane].pc)
+                        xlen_t'(0): begin
+                            first_load_cycle = cycles;
+                            assert (sampled_trace[lane].rd_data == xlen_t'(41))
+                                else $fatal(1, "first load data");
+                        end
+                        xlen_t'(4): begin
+`ifndef CORE_SCOREBOARD
+                            assert (cycles == first_load_cycle + 1)
+                                else $fatal(1, "independent instruction stalled after load");
+`endif
+                        end
+                        xlen_t'(8): begin
+`ifndef CORE_SCOREBOARD
+                            assert (cycles == first_load_cycle + 2)
+                                else $fatal(1, "load hit did not sustain one instruction per cycle");
+`endif
+                        end
+                        xlen_t'(12): second_load_cycle = cycles;
+                        xlen_t'(16): begin
+`ifndef CORE_SCOREBOARD
+                            assert (cycles == second_load_cycle + 2)
+                                else $fatal(1, "load-use must insert exactly one bubble");
+`endif
+                            assert (sampled_trace[lane].rd_data == xlen_t'(51))
+                                else $fatal(1, "load-use WB forwarding data");
+                        end
+                        default: ;
+                    endcase
+                end
             end
             if (test_done) begin
+`ifdef CORE_SCOREBOARD
+                assert (dependent_source_seen && dual_retired_seen && first_load_cycle >= 0 && second_load_cycle >= 0)
+                    else $fatal(1, "missing dual-retirement/Load dependency coverage");
+`endif
                 assert (test_pass) else $fatal(1, "load pipeline program failed code=%0d", test_code);
                 $display("PASS tb_core_load_pipeline cycles=%0d", cycles);
                 completed = 1'b1;

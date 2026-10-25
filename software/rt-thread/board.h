@@ -4,6 +4,7 @@
 #include <rthw.h>
 #include <rtdevice.h>
 #include "../common/soc_capabilities.h"
+#include "../common/soc_clocks.h"
 #define REG32(addr) (*(volatile rt_uint32_t *)(rt_ubase_t)(addr))
 #define UART_BASE(n) (0x10000000u + (n) * 0x1000u)
 #define GPIO_BASE(n) (0x10020000u + (n) * 0x1000u)
@@ -16,6 +17,8 @@ extern volatile unsigned char sim_console;
 extern volatile rt_uint32_t hgb_irq_count[8], hgb_tick_irqs, hgb_dma_bytes;
 extern volatile rt_uint32_t hgb_uart_errors[2];
 extern rt_uint32_t hgb_soc_presence, hgb_soc_profile;
+extern struct hgb_soc_clocks hgb_clocks;
+rt_uint32_t hgb_spi_divider(rt_uint32_t maximum_sck_hz);
 void hgb_finish(unsigned code) __attribute__((noreturn));
 void hgb_drivers_init(void);
 void hgb_uart_irq(unsigned n);

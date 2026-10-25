@@ -2,7 +2,9 @@
 // Description: Two bounded DDR blocks overlap one read and one ordered write with exact narrow fallback and completion prefix.
 module dma_block_engine #(
     parameter int unsigned DDR_BYTES = 0,
-    parameter bit WIDE_ENABLE = 1'b0
+    parameter bit WIDE_ENABLE = 1'b0,
+    parameter bit UNIFIED_BUS = 1'b0,
+    parameter int unsigned FLASH_BYTES = 0
 ) (
     input logic clk, rst,
     input logic start_valid,
@@ -71,7 +73,9 @@ module dma_block_engine #(
         dst_end = {1'b0, start_dst} + {1'b0, start_length};
         src_allowed = (start_src >= ITCM_BASE && src_end <= 33'(ITCM_BASE) + ITCM_BYTES) ||
                       (start_src >= DTCM_BASE && src_end <= 33'(DTCM_BASE) + DTCM_BYTES) ||
-                      (DDR_BYTES != 0 && start_src >= DDR_BASE && src_end <= 33'(DDR_BASE) + DDR_BYTES);
+                      (DDR_BYTES != 0 && start_src >= DDR_BASE && src_end <= 33'(DDR_BASE) + DDR_BYTES) ||
+                      (UNIFIED_BUS && FLASH_BYTES != 0 && start_src >= 32'h30000000 &&
+                       src_end <= 33'h030000000 + 33'(FLASH_BYTES));
         dst_allowed = (start_dst >= ITCM_BASE && dst_end <= 33'(ITCM_BASE) + ITCM_BYTES) ||
                       (start_dst >= DTCM_BASE && dst_end <= 33'(DTCM_BASE) + DTCM_BYTES) ||
                       (DDR_BYTES != 0 && start_dst >= DDR_BASE && dst_end <= 33'(DDR_BASE) + DDR_BYTES);
@@ -85,11 +89,12 @@ module dma_block_engine #(
         plan_src = src_q + reserved_q;
         plan_dst = dst_q + reserved_q;
         plan_remaining = length_q - reserved_q;
-        wide_plan = WIDE_ENABLE && DDR_BYTES != 0 && plan_remaining >= 32 &&
-                    plan_src[4:0] == 0 && plan_dst[4:0] == 0 &&
-                    plan_src >= DDR_BASE && plan_dst >= DDR_BASE &&
-                    33'(plan_src) + 33'd32 <= 33'(DDR_BASE) + DDR_BYTES &&
-                    33'(plan_dst) + 33'd32 <= 33'(DDR_BASE) + DDR_BYTES;
+        // 统一总线已验证整个源/目的区间；TCM、Flash 和 DDR 都可使用相同块命令。
+        // 旧实例保持原 DDR-only 选择，历史验证入口仍可重放。
+        wide_plan = WIDE_ENABLE && plan_remaining >= 32 && plan_src[4:0] == 0 && plan_dst[4:0] == 0 &&
+                    (UNIFIED_BUS || (DDR_BYTES != 0 && plan_src >= DDR_BASE && plan_dst >= DDR_BASE &&
+                     33'(plan_src) + 33'd32 <= 33'(DDR_BASE) + DDR_BYTES &&
+                     33'(plan_dst) + 33'd32 <= 33'(DDR_BASE) + DDR_BYTES));
         plan_beats = plan_remaining >> 5;
         if (plan_beats > BLOCK_MAX_BEATS) plan_beats = BLOCK_MAX_BEATS;
         if (plan_beats > ((32'd4096 - 32'(plan_src[11:0])) >> 5))

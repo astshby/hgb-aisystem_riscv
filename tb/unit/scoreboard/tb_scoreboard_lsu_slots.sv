@@ -25,8 +25,8 @@ module tb_scoreboard_lsu_slots;
     logic busy, draining, store_owner_valid;
     logic [2:0] synthetic_valid;
     retire_completion_t synthetic [3], source_completion [SOURCES], selected [2];
-    logic [SOURCES-1:0] source_valid, source_ready;
-    logic [1:0] selected_valid;
+    logic [SOURCES-1:0] source_valid, source_accept, source_ready;
+    logic [1:0] selected_valid, selected_accept;
     logic [2:0] accepted_synthetic;
     int order [7] = '{RETIRE_ENTRIES-2, RETIRE_ENTRIES-1, 0, 1, 2, 3, 4};
     int checked, dual_completions;
@@ -37,11 +37,13 @@ module tb_scoreboard_lsu_slots;
     end
     retire_gpr_forward_t early_forward [2];
     retire_gpr_forward_t load_return [2], store_forward_hint [2];
+    retire_gpr_forward_t store_slot_hint [LOAD_QUEUE_ENTRIES];
     load_store_queue #(.COMPLETION_PORTS(ENTRIES)) dut (.*);
     completion_select #(.SOURCES(SOURCES)) u_select (
-        .rst, .head_slot, .source_valid, .source_ready, .source_completion,
-        .complete_valid(selected_valid), .completion(selected)
+        .rst, .head_slot, .source_valid, .source_accept, .source_ready, .source_completion,
+        .complete_valid(selected_valid), .complete_accept(selected_accept), .completion(selected)
     );
+    assign source_accept = source_valid;
     for (genvar slot = 0; slot < ENTRIES; slot++) begin : g_lsu_source
         assign source_valid[slot+3] = complete_valid[slot];
         assign source_completion[slot+3] = completion[slot];

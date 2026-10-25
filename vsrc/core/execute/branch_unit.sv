@@ -17,8 +17,9 @@ module branch_unit (
         taken = 1'b0;
         target = seq_pc;  // 默认情况下，跳转不发生，目标地址为顺序PC
         unique case (branch_op)
-            BR_EQ:   begin taken = (operand_a == operand_b); target = pc + imm; end
-            BR_NE:   begin taken = (operand_a != operand_b); target = pc + imm; end
+            // 等值判断用并行 XNOR/OR 归约，避免综合成 32 位减法进位链。
+            BR_EQ:   begin taken = &(operand_a ~^ operand_b); target = pc + imm; end
+            BR_NE:   begin taken = |(operand_a ^ operand_b); target = pc + imm; end
             BR_LT:   begin taken = ($signed(operand_a) < $signed(operand_b)); target = pc + imm; end
             BR_GE:   begin taken = ($signed(operand_a) >= $signed(operand_b)); target = pc + imm; end
             BR_LTU:  begin taken = (operand_a < operand_b); target = pc + imm; end

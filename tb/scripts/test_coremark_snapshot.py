@@ -40,7 +40,7 @@ class SnapshotTest(unittest.TestCase):
                         "import pathlib, sys\nxlen = 32 if pathlib.Path(sys.argv[-1]).read_bytes()[4] == 1 else 64\n"
                         "print(f'Tag_RISCV_arch: \"rv{xlen}i2p1_m2p0_zicsr2p0_zmmul1p0\"')\n")
         self.executable(self.root / "simulator", '''import os, pathlib, sys
-arguments = dict(arg[1:].split('=', 1) for arg in sys.argv[1:])
+arguments = dict(arg[1:].split('=', 1) if '=' in arg else (arg[1:], '1') for arg in sys.argv[1:])
 image = pathlib.Path(arguments['IMEM'])
 text = (image.parent / 'baseline.log').read_text()
 bad = os.environ.get('STUB_BAD', '')
@@ -52,6 +52,8 @@ if bad == 'metrics-partition': text = text.replace('"issue_0": 1000', '"issue_0"
 if bad == 'metrics-window': text = text.replace('"cycles": 11010001', '"cycles": 11010002')
 if bad == 'metrics-stall': text = text.replace('"no_issue_empty": 1000', '"no_issue_empty": 999')
 if bad == 'metrics-negative': text = text.replace('"memory_requests": 10', '"memory_requests": -1')
+if bad.startswith('soc-metrics-window-'):
+    text = text.replace('cycles=11010000 clocks=', 'cycles=' + bad.rsplit('-', 1)[1] + ' clocks=')
 if bad == 'metrics-duplicate':
     text += next(line for line in text.splitlines() if line.startswith('SCOREBOARD_STATS')) + '\\n'
 if bad.startswith('short'):
@@ -182,6 +184,105 @@ print(text, end='')
         for failure in ("partition", "window", "stall", "negative", "duplicate"):
             with self.subTest(failure=failure):
                 self.replay(success=False, STUB_BAD="metrics-" + failure)
+
+    def test_four_clock_soc_metadata_survives_freeze_and_replay(self):
+        suffix = (" clocks=C1 core_half_ns=5.000000 sys_half_ns=6.250000"
+                  " ddr_half_ns=4.000000 periph_half_ns=20.000000 SPI_reads=73")
+        for log in (self.root / "input-logs").glob("*.log"):
+            log.write_text(log.read_text().replace("cycles=11010000\n", "cycles=11010000" + suffix + "\n"))
+        self.freeze()
+        self.replay()
+        report = json.loads(next((self.root / "logs").glob("*/result.json")).read_text())
+        for mode in ("performance", "validation"):
+            clocks = report["modes"][mode]["simulation_clocks"]
+            self.assertEqual(clocks["configuration"], "C1")
+            self.assertEqual(clocks["half_period_ns"], {"core": 5, "sys": 6.25, "ddr": 4, "periph": 20})
+            self.assertEqual(clocks["spi_reads"], 73)
+
+    def test_p1_profile_and_p2_topology_replay_the_same_old_images(self):
+        self.soc_inputs()
+        self.freeze()
+        original = (self.root / 'frozen/manifest.json').read_bytes()
+        for name in ('benchmark_platform.sh', 'core_build_config.sh'):
+            shutil.copyfile(REPO / 'scripts/verilator' / name, self.root / 'scripts/verilator' / name)
+        shutil.copyfile(REPO / 'scripts/soc_profile.sh', self.root / 'scripts/soc_profile.sh')
+        self.replay(CORE_BACKEND='scoreboard', ISSUE_WIDTH='2', RETIRE_ENTRIES='32',
+                    SPLIT_ISSUE_QUEUE='1', INTEGER_QUEUE_ENTRIES='8', MEMORY_QUEUE_ENTRIES='4',
+                    LIMITED_INTEGER_OOO='1', SCHEDULER_FORWARD_MODE='3', PREDICTOR_MODE='1', RAS_ENABLE='1',
+                    COREMARK_REPLAY_SOC_METRICS='1')
+        report = json.loads(next((self.root / 'logs').glob('*/result.json')).read_text())
+        parameters = report['rtl_parameters']
+        self.assertEqual(parameters['system_bus'], 'axi4')
+        self.assertEqual(parameters['retire_entries'], 32)
+        self.assertEqual(parameters['limited_integer_ooo'], 1)
+        self.assertEqual(parameters['scheduler_forward_mode'], 3)
+        self.assertTrue(parameters['actual_unified_dma'])
+        self.assertEqual((self.root / 'frozen/manifest.json').read_bytes(), original)
+        self.assertTrue(report['soc_memory_observation'])
+        for mode in ('performance', 'validation'):
+            self.assertIn('+P2_METRICS', report['modes'][mode]['command'])
+            self.assertIn('+P2_EXPECT_M1', report['modes'][mode]['command'])
+            self.assertNotIn('+P2_PLATFORM', report['modes'][mode]['command'])
+
+    def test_soc_observation_cannot_silently_apply_to_core_only_harness(self):
+        self.freeze()
+        for setting in ('1', 'yes'):
+            self.replay(success=False, COREMARK_REPLAY_SOC_METRICS=setting)
+
+    def test_counter_window_is_runtime_metadata_not_a_new_frozen_image_requirement(self):
+        self.freeze()
+        manifest = json.loads((self.root / 'frozen/manifest.json').read_text())
+        for mode in ('performance', 'validation'):
+            self.assertNotIn('core_statistics_counter_offset', manifest['modes'][mode])
+        self.replay()
+        report = json.loads(next((self.root / 'logs').glob('*/result.json')).read_text())
+        self.assertEqual(report['modes']['performance']['core_statistics_counter_offset'], 1)
+
+    def test_four_clock_scoreboard_window_has_its_own_exact_offset(self):
+        counters = dict(window='whole_run', cycles=11009999,
+                        issue_0=1000, issue_1=10000000, issue_2=1008999,
+                        retire_0=1000, retire_1=10000000, retire_2=1008999,
+                        no_issue_redirect=0, no_issue_empty=1000, no_issue_raw=0, no_issue_lsq=0,
+                        no_issue_mdu=0, no_issue_serial=0, no_issue_result=0, no_issue_other=0,
+                        dispatch_rob_full=2, dispatch_iq_full=3, dispatch_checkpoint=4,
+                        completion_pressure=5, memory_requests=10, memory_responses=10, forwarded_loads=2)
+        suffix = (' clocks=C1 core_half_ns=5.000000 sys_half_ns=6.250000'
+                  ' ddr_half_ns=4.000000 periph_half_ns=20.000000 SPI_reads=0')
+        for log in (self.root / 'input-logs').glob('*.log'):
+            log.write_text(log.read_text().replace('cycles=11010000\n', 'cycles=11010000' + suffix + '\n') +
+                           'SCOREBOARD_STATS ' + json.dumps(counters) + '\n')
+        self.freeze()
+        self.replay()
+        report = json.loads(next((self.root / 'logs').glob('*/result.json')).read_text())
+        self.assertEqual(report['modes']['performance']['core_statistics_counter_offset'], -1)
+        # 改 PASS 窗口而不改计数器，0/+1/-2 均必须拒绝，不能靠容差吞下差异。
+        for cycles in (11009999, 11009998, 11010001):
+            result = self.replay(success=False, STUB_BAD='soc-metrics-window-' + str(cycles))
+            self.assertIn('scoreboard metrics/harness window mismatch', result.stderr)
+
+    def test_scheduler_metrics_survive_freeze_and_replay(self):
+        counters = dict(window='whole_run', cycles=11010001, occupied_cycles=11000000,
+                        ready_cycles=10000000, full_cycles=20, raw_cycles=500000,
+                        raw_alu_cycles=200000, raw_mdu_cycles=300000, raw_load_cycles=300000,
+                        mdu_resource_cycles=200, mdu_iq_idle_cycles=100, accepted_cycles=9000000,
+                        accepted_operations=10000000, bypass_raw_cycles=300, bypass_mdu_cycles=50)
+        for log in (self.root / 'input-logs').glob('*.log'):
+            log.write_text(log.read_text() + 'SCHEDULER_STATS ' + json.dumps(counters) + '\n')
+        self.freeze()
+        self.replay()
+        report = json.loads(next((self.root / 'logs').glob('*/result.json')).read_text())
+        for mode in ('performance', 'validation'):
+            self.assertEqual(report['modes'][mode]['scheduler_metrics'], counters)
+
+    def test_invalid_clock_suffix_does_not_validate_completion(self):
+        suffix = (" clocks=C1 core_half_ns=5.000000 sys_half_ns=6.250000"
+                  " ddr_half_ns=4.000000 periph_half_ns=20.000000 SPI_reads=0")
+        for bad in (suffix.replace("C1", "C9"), suffix.replace("5.000000", "0.000000"), suffix + " garbage"):
+            with self.subTest(suffix=bad):
+                self.make_inputs(32)
+                for log in (self.root / "input-logs").glob("*.log"):
+                    log.write_text(log.read_text().replace("cycles=11010000\n", "cycles=11010000" + bad + "\n"))
+                self.freeze(success=False)
 
     def test_freeze_rejects_existing_target_and_missing_mode(self):
         self.freeze()

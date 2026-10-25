@@ -22,6 +22,9 @@ if [[ "$core_backend" == scoreboard ]]; then
 fi
 if [[ "${SOC:-0}" == "1" ]]; then
     extra_sources+=(tb/soc/axi_memory_model.sv tb/soc/axi_block_memory_model.sv)
+    if [[ "$core_backend" == scoreboard ]]; then
+        extra_sources+=(tb/soc/axi_system_memory_model.sv tb/soc/spi_flash_model.sv)
+    fi
     extra_options+=("-GDDR_BYTES=${SOC_DDR_BYTES:-0}" "-GDDR_MODEL_BYTES=${bench_ddr_model_bytes}" "-GDCACHE_ENABLE=${SOC_DCACHE_ENABLE:-1}"
                     "-GCLOCK_HZ=${bench_clock_hz}" "-GUART_DIVISOR=${bench_uart_divisor}"
                     "-GLOCAL_TCM_ENABLE=${bench_local_tcm_enable}"

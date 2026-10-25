@@ -27,6 +27,9 @@ module tb_scoreboard_core;
     int length, stop_pc, cycles, retired, issue_streak, retire_streak, max_issue_streak, max_retire_streak;
     int live_waw, background_alu, branches, requests, dual_requests, pair_counts [5][5];
     int decode_jals [2], frontend_jumps;
+    int store_stall_cycles;
+    int store_hint_count [2], zero_hint_count, reused_hint_count;
+    int rob_slot_allocations [RETIRE_ENTRIES];
     int integer_bypasses = 0;
     bit fence_executed = 0;
     logic [31:0] random_state = 32'h6532af01;
@@ -52,7 +55,15 @@ module tb_scoreboard_core;
     assign imem_req_ready = !rst && (!imem_rsp_valid || imem_rsp_ready);
     for (genvar lane = 0; lane < 2; lane++) begin : g_memory_ready
         assign mem_req_ready[lane] = !rst && (!mem_rsp_valid[lane] || mem_rsp_ready[lane]) &&
-                                     (cycles % 7 != 3);
+                                     (cycles % 7 != 3) &&
+                                     !(mem_request[lane].write && mem_request[lane].address == 600 &&
+                                       store_stall_cycles < 24);
+    end
+    // 对一条 Store 施加固定反压，让 x0 Load 和普通 Load 真正从 SQ 捕获数据。
+    always_ff @(posedge clk) begin
+        if (rst) store_stall_cycles <= 0;
+        else if (mem_req_valid[0] && !mem_req_ready[0] && mem_request[0].write &&
+                 mem_request[0].address == 600) store_stall_cycles <= store_stall_cycles + 1;
     end
     always_ff @(posedge clk) begin
         if (rst) begin
@@ -195,14 +206,22 @@ module tb_scoreboard_core;
         if ((mem_req_valid & mem_req_ready) == 3) dual_requests++;
         if (|issue_fire && !dut.mdu_req_ready && dut.lane_class[0] == SCHED_ALU) background_alu++;
         for (int lane = 0; lane < 2; lane++) begin
+            if (dut.alloc_fire[lane]) rob_slot_allocations[dut.alloc_id[lane].slot]++;
+            if (dut.lsu_store_forward_hint[lane].valid && !dut.selected_redirect.valid) begin
+                store_hint_count[lane]++;
+                if (dut.producers[dut.lsu_store_forward_hint[lane].id.slot].rd == 0) zero_hint_count++;
+                // 独立统计槽分配次数，必须超过完整代次周期；非零 generation 本身不代表回卷。
+                if (rob_slot_allocations[dut.lsu_store_forward_hint[lane].id.slot] > (1 << RETIRE_GEN_W))
+                    reused_hint_count++;
+            end
             if (issue_fire[lane] && dut.scheduled[lane].uop.sys_op == SYS_FENCE) begin
                 assert (!dut.lsu_busy) else $fatal(1, "FENCE executed before LSU drain");
                 fence_executed = 1;
             end
             if ($test$plusargs("DEBUG") && issue_fire[lane] && dut.scheduled[lane].uop.branch_op != BR_NONE)
-                $display("BR issue cycle=%0d lane=%0d pc=%h op=%0d shared_lane=%0d taken=%0d target=%h computed_next=%h",
-                    cycles, lane, dut.scheduled[lane].pc, dut.scheduled[lane].uop.branch_op, dut.branch_lane,
-                    dut.branch_taken, dut.branch_target, dut.computed[lane].result.next_pc);
+                $display("BR issue cycle=%0d lane=%0d pc=%h op=%0d taken=%0d target=%h computed_next=%h",
+                    cycles, lane, dut.scheduled[lane].pc, dut.scheduled[lane].uop.branch_op,
+                    dut.branch_taken[lane], dut.branch_target[lane], dut.computed[lane].result.next_pc);
             for (int slot = 0; slot < RETIRE_ENTRIES; slot++) begin
                 if (dut.alloc_fire[lane] && dut.alloc_meta[lane].gpr_write && dut.alloc_meta[lane].rd != 0 &&
                     dut.producers[slot].valid && dut.producers[slot].gpr_write &&
@@ -229,6 +248,8 @@ module tb_scoreboard_core;
     end
     initial begin
         length = 0; cycles = 0; retired = 0; reference_pc = 0; done = 0;
+        store_hint_count[0] = 0; store_hint_count[1] = 0; zero_hint_count = 0; reused_hint_count = 0;
+        for (int slot = 0; slot < RETIRE_ENTRIES; slot++) rob_slot_allocations[slot] = 0;
         decode_jals[0] = 0; decode_jals[1] = 0; frontend_jumps = 0;
         for (int regno = 0; regno < 32; regno++) registers[regno] = 0;
         for (int idx = 0; idx < 4096; idx++) begin rom[idx] = nop(); ram[idx] = 0; reference_ram[idx] = 0; end
@@ -245,6 +266,10 @@ module tb_scoreboard_core;
         emit(enc_mul(4, 1, 2)); emit(enc_addi(4, 0, 71)); emit(enc_add(5, 4, 3));
         emit(enc_sw(5, 0, 512)); emit(enc_lw(6, 0, 512)); emit(enc_addi(7, 6, 1));
         emit(32'h0ff0000f); emit(enc_lw(29, 0, 548));
+        // Store 未得到外部 ready 时，两个 Load 仍须完成转发；x0 不能成为依赖者。
+        emit(32'h0ff0000f); emit(enc_addi(25, 0, 90)); emit(enc_sw(25, 0, 600));
+        emit(enc_lw(0, 0, 600)); emit(enc_lw(26, 0, 600));
+        emit(enc_addi(27, 26, 1)); emit(enc_addi(28, 0, 7));
         // 错路的同名写者、访存与 MDU 都必须被恢复取消。
         emit(enc_beq(7, 7, 16)); emit(enc_addi(7, 0, 999)); emit(enc_sw(7, 0, 516)); emit(enc_divu(8, 7, 2));
         emit(enc_addi(8, 7, 2)); emit(enc_addi(9, 0, 1));
@@ -273,6 +298,9 @@ module tb_scoreboard_core;
         assert (live_waw > 0 && background_alu > 0 && branches >= 3) else $fatal(1, "coverage WAW/MDU/branch missing");
         if (LIMITED_INTEGER_OOO) assert (integer_bypasses > 0) else $fatal(1, "integer bypass coverage missing");
         assert (fence_executed) else $fatal(1, "FENCE coverage missing");
+        assert (store_hint_count[0] + store_hint_count[1] >= 2 && zero_hint_count > 0 && reused_hint_count > 0)
+            else $fatal(1, "Store hint coverage lane0=%0d lane1=%0d x0=%0d reused=%0d",
+                        store_hint_count[0], store_hint_count[1], zero_hint_count, reused_hint_count);
         assert (dual_requests > 0 && pair_counts[int'(SCHED_MEMORY)][int'(SCHED_MEMORY)] > 0)
             else $fatal(1, "dual LSU issue/request coverage missing");
         assert (ram[516] == 0 && ram[520] == 0 && ram[544] == 0) else $fatal(1, "wrong-path Store");
@@ -286,6 +314,8 @@ module tb_scoreboard_core;
             for (int b = 0; b < 5; b++)
                 if (pair_counts[a][b] > 0) $display("PAIR class=%0d/%0d count=%0d", a, b, pair_counts[a][b]);
         $display("LSU requests=%0d dual_request_cycles=%0d", requests, dual_requests);
+        $display("LSU Store hints lane0=%0d lane1=%0d x0=%0d reused=%0d stalled=%0d",
+                 store_hint_count[0], store_hint_count[1], zero_hint_count, reused_hint_count, store_stall_cycles);
         $finish;
     end
 endmodule

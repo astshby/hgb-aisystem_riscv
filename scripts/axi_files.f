@@ -1,0 +1,12 @@
+vsrc/pkg/axi_types_pkg.sv
+vsrc/soc/common/rv_fifo.sv
+vsrc/soc/common/async_fifo.sv
+vsrc/soc/common/soc_reset_controller.sv
+vsrc/soc/bus/axi_register_slice.sv
+vsrc/soc/bus/axi_clock_bridge.sv
+vsrc/soc/bus/axi_system_fabric.sv
+vsrc/soc/bus/axi_error_target.sv
+vsrc/soc/bus/axi_bus_target.sv
+vsrc/soc/bus/cache_axi_adapter.sv
+vsrc/soc/bus/ddr_axi_target.sv
+vsrc/soc/bus/axi_availability_gate.sv

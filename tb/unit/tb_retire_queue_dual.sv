@@ -38,6 +38,9 @@ module tb_retire_queue_dual;
     int cycles, dual_allocs, dual_retires, dual_completes, replacements, cross_bypasses;
     int duplicates, rejects, flushes, recovery_waits, second_blocked, registered_queries, retiring_queries;
     retire_id_t old_id;
+    retire_id_t probe_id [5];
+    logic [4:0] probe_accept;
+    initial for (int probe = 0; probe < 5; probe++) probe_id[probe] = '0;
 
     always #5 clk = ~clk;
     retire_queue dut (.branch_recovery('0), .producer_entries(), .ras_entries(), .ras_head_slot(), .*);
@@ -203,10 +206,10 @@ module tb_retire_queue_dual;
             else $fatal(1, "retirement value cycle=%0d", cycles);
         if (expected_valid[0]) begin
             assert (head_id == model[0].id && head_meta == model[0].meta) else $fatal(1, "head0 age");
-        end else assert (head_id == '0 && head_meta == '0) else $fatal(1, "empty head0");
+        end else assert (!retire_fire && head_meta == '0) else $fatal(1, "empty head0 retired");
         if (expected_valid[1]) begin
             assert (head_id_1 == model[1].id && head_meta_1 == model[1].meta) else $fatal(1, "head1 age");
-        end else assert (head_id_1 == '0 && head_meta_1 == '0) else $fatal(1, "empty head1");
+        end else assert (!retire_fire_1 && head_meta_1 == '0) else $fatal(1, "empty head1 retired");
         check_query(query, query_result, 1'b1, pops, visible);
         check_query(query_1, query_result_1, ISSUE_WIDTH == 2, pops, visible);
 

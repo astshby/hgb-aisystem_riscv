@@ -67,6 +67,13 @@ module tb_scoreboard_rename;
         // 分支自身写 x6，下一条覆盖 x6；恢复必须回到分支版本。
         writer(0, 2, 6, 5, 0, 1); writer(1, 3, 6, 6, 0); alloc_fire = 3;
         expect_source(1, 0, 2); tick();
+        // 无效退休载荷同时命中当前映射和 checkpoint；两个端口均不能删除这些版本。
+        for (int swap = 0; swap < 2; swap++) begin
+            retire[swap] = '{valid:0, id:tag(2), rd:gpr_addr_t'(6), rd_we:1, default:'0};
+            retire[1-swap] = '{valid:0, id:tag(3), rd:gpr_addr_t'(6), rd_we:1, default:'0};
+            writer(0, 4, 0, 6, 0); expect_source(0, 0, 3); tick();
+            writer(0, 4, 0, 6, 0); expect_source(0, 0, 3);
+        end
         // 老 x5 在 checkpoint 存活期间退休，恢复后不能引用已释放槽。
         retire[0] = '{valid:1, id:tag(1), rd:gpr_addr_t'(5), rd_we:1, default:'0};
         tick();
@@ -92,10 +99,24 @@ module tb_scoreboard_rename;
         end
         writer(0, BRANCH_CHECKPOINTS, 10, 0, 0, 1);
         #1; assert (!checkpoint_ready) else $fatal(1, "checkpoint missing backpressure");
+        // 无效载荷可命中真实 checkpoint；没有有效位时，不能释放容量或恢复映射。
+        for (int cp = 0; cp < BRANCH_CHECKPOINTS; cp++) begin
+            resolved_id = tag(cp);
+            recovery.id = tag(cp);
+            recovery.pc = xlen_t'(66 + cp * 4);
+            #1; assert (!checkpoint_ready) else $fatal(1, "invalid payload released checkpoint");
+            tick();
+            writer(0, BRANCH_CHECKPOINTS, 10, 0, 0, 1);
+            #1; assert (!checkpoint_ready) else $fatal(1, "invalid payload changed checkpoint state");
+            writer(1, BRANCH_CHECKPOINTS + 1, 0, 1, 0);
+            expect_source(1, 0, 0);
+            decode[1] = '0;
+        end
         branch_resolved = 1; resolved_id = tag(0);
         #1; assert (checkpoint_ready) else $fatal(1, "checkpoint not reusable");
         alloc_fire = 1; tick();
-        $display("PASS tb_scoreboard_rename XLEN=%0d same_group retirement recovery checkpoint_full", XLEN);
+        $display("PASS tb_scoreboard_rename XLEN=%0d same_group retirement recovery checkpoint_full invalid_retire_payloads=4 invalid_payloads=%0d",
+                 XLEN, BRANCH_CHECKPOINTS);
         $finish;
     end
 endmodule

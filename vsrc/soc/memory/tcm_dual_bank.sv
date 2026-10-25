@@ -16,16 +16,15 @@ module tcm_dual_bank #(
     localparam int BYTE_W = $clog2(DBUS_BYTES);
     localparam int WORDS = BYTES / (2 * DBUS_BYTES);
     localparam int INDEX_W = $clog2(WORDS);
-    logic [1:0] bank_valid_q, used, bank_fire;
+    logic [1:0] bank_valid_q, bank_fire;
     logic [1:0] bank_owner_q [2], selected [2], next_q;
     logic [1:0] needed [4];
     logic [XLEN-1:0] bank_data [2];
     logic [3:0] request_fire;
     logic [3:0] buffer_valid_q, direct_valid;
     logic [63:0] buffer_data_q [4], direct_data [4];
-    logic found;
+    logic [3:0] bank_grant [2];
     logic [1:0] first_selected;
-    logic [1:0] client;
 
     for (genvar c = 0; c < 4; c++) begin : g_bank_mask
         if (c == 0 && XLEN == 32) begin : g_if_pair
@@ -61,27 +60,10 @@ module tcm_dual_bank #(
             end
         end
     end
-    // 轮询首选后贪心填入不冲突请求；宽 IF 的两个 bank 原子接纳，避免半个请求占死。
-    always_comb begin
-        used = 0; req_ready = 0; bank_fire = 0;
-        selected[0] = 0; selected[1] = 0; found = 0; first_selected = next_q;
-        client = 0;
-        for (int offset = 0; offset < 4; offset++) begin
-            // 两位无符号索引自然回绕，避免综合器保留有符号余数单元。
-            client = next_q + 2'(offset);
-            if (req_valid[client] && !rst && (!rsp_valid[client] || rsp_ready[client]) &&
-                (needed[client] & used) == 0) begin
-                req_ready[client] = 1;
-                used |= needed[client];
-                if (!found) begin found = 1; first_selected = 2'(client); end
-                for (int b = 0; b < 2; b++) begin
-                    if (needed[client][b]) begin
-                        bank_fire[b] = 1; selected[b] = 2'(client);
-                    end
-                end
-            end
-        end
-    end
+    tcm_bank_arbiter u_arbiter (
+        .rst, .req_valid, .rsp_valid, .rsp_ready, .needed, .next_q,
+        .req_ready, .bank_grant, .bank_fire, .selected, .first_selected
+    );
     assign request_fire = req_valid & req_ready;
     always_ff @(posedge clk) begin
         if (rst) begin
@@ -99,7 +81,12 @@ module tcm_dual_bank #(
         logic [XLEN-1:0] mem [WORDS];
         logic [INDEX_W-1:0] index;
         bus_types_pkg::bus_req_t access;
-        assign access = request[selected[b]];
+        // 载荷由互斥 one-hot 掩码直接选择，不再经过二进制 winner 编码再解码。
+        always_comb begin
+            access = '0;
+            for (int c = 0; c < 4; c++)
+                access |= request[c] & {$bits(bus_types_pkg::bus_req_t){bank_grant[b][c]}};
+        end
         assign index = access.addr[BYTE_W+1 +: INDEX_W];
         initial begin
             if (INIT_FILE != "")
@@ -117,6 +104,10 @@ module tcm_dual_bank #(
         end
     end
 `ifndef SYNTHESIS
+    for (genvar b = 0; b < 2; b++) begin : g_check_grant
+        always_ff @(posedge clk) if (!rst)
+            assert ($onehot0(bank_grant[b])) else $fatal(1, "TCM bank grant is not one-hot");
+    end
     task automatic load_image(input string path);
         logic [XLEN-1:0] words [2*WORDS];
         $readmemh(path, words);
@@ -132,4 +123,54 @@ module tcm_dual_bank #(
                 (bank_valid_q[1] && bank_owner_q[1] == 0))
             else $fatal(1, "IF64 bank ownership split");
 `endif
+endmodule
+
+// Module: tcm_bank_arbiter
+// Description: Two-bank round-robin packing with parallel first/disjoint-second selection.
+module tcm_bank_arbiter (
+    input logic rst,
+    input logic [3:0] req_valid, rsp_valid, rsp_ready,
+    input logic [1:0] needed [4],
+    input logic [1:0] next_q,
+    output logic [3:0] req_ready,
+    output logic [3:0] bank_grant [2],
+    output logic [1:0] bank_fire,
+    output logic [1:0] selected [2],
+    output logic [1:0] first_selected
+);
+    logic [3:0] eligible, first_grant, remaining, second_grant;
+    logic [3:0] higher_priority [4];
+    logic [1:0] rank [4], first_needed;
+    // 两个物理 bank 最多接纳两个请求。先并行找轮询首选，再找与其不冲突的次选，
+    // 与逐项 greedy 的选择完全相同；IF64 需要两 bank，不能拆成两个独立仲裁器。
+    for (genvar c = 0; c < 4; c++) begin : g_priority
+        assign rank[c] = 2'(c) - next_q;
+        assign eligible[c] = req_valid[c] && !rst && (!rsp_valid[c] || rsp_ready[c]);
+        for (genvar other = 0; other < 4; other++) begin : g_precedes
+            assign higher_priority[c][other] = rank[other] < rank[c];
+        end
+        assign first_grant[c] = eligible[c] && !(|(eligible & higher_priority[c]));
+        assign remaining[c] = eligible[c] && ((needed[c] & first_needed) == 0);
+        assign second_grant[c] = remaining[c] && !(|(remaining & higher_priority[c]));
+    end
+    always_comb begin
+        first_needed = '0;
+        first_selected = '0;
+        for (int c = 0; c < 4; c++) begin
+            first_needed |= needed[c] & {2{first_grant[c]}};
+            first_selected |= 2'(c) & {2{first_grant[c]}};
+        end
+    end
+    assign req_ready = first_grant | second_grant;
+    for (genvar b = 0; b < 2; b++) begin : g_bank_grant
+        for (genvar c = 0; c < 4; c++) begin : g_client
+            assign bank_grant[b][c] = req_ready[c] && needed[c][b];
+        end
+        assign bank_fire[b] = |bank_grant[b];
+        always_comb begin
+            selected[b] = '0;
+            for (int c = 0; c < 4; c++)
+                selected[b] |= 2'(c) & {2{bank_grant[b][c]}};
+        end
+    end
 endmodule

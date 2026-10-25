@@ -14,6 +14,7 @@ enum hgb_soc_target {
 #define HGB_SOC_PRESENCE_OFFSET 0x038u
 #define HGB_SOC_DISCOVERY_OFFSET 0x03cu
 #define HGB_SOC_DISCOVERY_ABI 1u
+#define HGB_SOC_CLOCK_INFO_PRESENT (1u << 8)
 
 static inline int hgb_soc_has(uint32_t presence, unsigned target)
 {
@@ -23,7 +24,7 @@ static inline int hgb_soc_has(uint32_t presence, unsigned target)
 static inline int hgb_soc_discovery_valid(uint32_t presence, uint32_t discovery)
 {
     return (discovery >> 16) == HGB_SOC_DISCOVERY_ABI &&
-           (discovery & 0xff00u) == 0 && (discovery & 0xffu) <= 1u &&
+           (discovery & 0xfe00u) == 0 && (discovery & 0xffu) <= 1u &&
            (presence >> HGB_TARGET_COUNT) == 0;
 }
 

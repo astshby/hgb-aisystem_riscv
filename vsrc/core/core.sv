@@ -58,6 +58,9 @@ module core (
     retire_completion_t secondary_completion;
     retire_query_t retire_query_1;
     retire_query_result_t retire_query_result_1;
+    // legacy 后端没有完成预检路径；固定零 ID 保持端口完整，probe_accept 不参与逻辑。
+    retire_id_t legacy_probe_id [5];
+    always_comb for (int probe = 0; probe < 5; probe++) legacy_probe_id[probe] = '0;
     gpr_forward_t wb_gpr_write_1;
     csr_forward_t unused_csr_write_1;
     retire_gpr_forward_t secondary_forward;
@@ -446,7 +449,8 @@ module core (
         .head_valid_1, .head_complete_1, .head_id_1, .head_meta_1, .head_result_1,
         .retire_ready(!rst), .retire_fire(queue_retire_fire),
         .retire_ready_1(second_retire_ready), .retire_fire_1(queue_retire_fire_1),
-        .occupancy(retire_occupancy), .recovering(retire_recovering)
+        .occupancy(retire_occupancy), .recovering(retire_recovering),
+        .probe_id(legacy_probe_id), .probe_accept()
     );
     assign second_retire_ready = !rst && (ISSUE_WIDTH == 2) && !head_result.exc.valid &&
         !(head_meta.kind inside {RET_CSR, RET_SERIAL}) && head_meta_1.kind == RET_EXEC &&

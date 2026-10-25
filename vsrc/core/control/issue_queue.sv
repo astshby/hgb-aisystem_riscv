@@ -7,17 +7,22 @@ module issue_queue (
     input logic [1:0] push_count,
     input pipeline_pkg::d2_ex_t push_packet [2],
     input pipeline_pkg::branch_result_t push_branch [2],
+    // 对当前槽内分支置位；标记随包压缩/弹出移动。
+    input logic [1:0] mark_reported,
     output logic [1:0] push_capacity,
     input logic [1:0] pop_count,
     output pipeline_pkg::d2_ex_t issue_packet [2],
+    // 不经当拍 flush/recovery 门控的寄存包视图，只供分支判定读取。
+    output pipeline_pkg::d2_ex_t raw_packet [2],
     output pipeline_pkg::branch_result_t issue_branch [2],
+    output logic [1:0] present,
     output logic [1:0] occupancy,
     output logic busy
 );
     import core_config_pkg::*;
     import pipeline_pkg::*;
     import scoreboard_pkg::*;
-    d2_ex_t packet_q [2], packet_d [2];
+    d2_ex_t packet_q [2], packet_d [2], marked_q [2];
     branch_result_t branch_q [2], branch_d [2];
     logic [1:0] count_q, count_d;
     logic [1:0] killed;
@@ -27,6 +32,10 @@ module issue_queue (
     end
     assign occupancy = count_q;
     assign busy = count_q != 0;
+    for (genvar slot = 0; slot < 2; slot++) assign raw_packet[slot] = packet_q[slot];
+    // 包存在性与 flush/recovery 无关；分支判定读取寄存包，不受当拍取消门控。
+    for (genvar slot = 0; slot < 2; slot++)
+        assign present[slot] = !rst && slot < int'(count_q);
     // 输出从寄存包取得；允许双出双入和仅消费第一条，保持每拍最多两条的稳态吞吐。
     always_comb begin
         push_capacity = 0;
@@ -37,12 +46,16 @@ module issue_queue (
             issue_branch[slot] = branch_q[slot];
             issue_packet[slot].valid = slot < int'(count_q) && !rst && !flush && !recovery.valid;
         end
-        packet_d = packet_q;
+        for (int slot = 0; slot < 2; slot++) begin
+            marked_q[slot] = packet_q[slot];
+            if (mark_reported[slot]) marked_q[slot].branch_reported = 1'b1;
+        end
+        packet_d = marked_q;
         branch_d = branch_q;
         count_d = 0;
         for (int slot = 0; slot < 2; slot++) begin
             if (slot < int'(count_q) && slot >= int'(pop_count) && !killed[slot]) begin
-                packet_d[count_d[0]] = packet_q[slot];
+                packet_d[count_d[0]] = marked_q[slot];
                 branch_d[count_d[0]] = branch_q[slot];
                 count_d = count_d + 1'b1;
             end
