@@ -4,6 +4,60 @@
 
 ## 1. 当前结构
 
+2026-10-26 的 `soc/npu128-five-domain` 增加可选 128-MAC NPU，源码固定到
+[YOLO-accelerate 47ffb55](https://github.com/astshby/YOLO-accelerate/tree/47ffb558bf35bbe017a136903a7464e93132ea2c)。
+计算核和分级 MMIO 七份 RTL 不改字节。下面的基线 Core 配置继续保留，第四组
+`soc_npu` 在完整 DDR SoC 上挂 NPU；关闭 NPU 时原三组资源边界不变。
+
+```text
+Core + TCM + I/D Cache [Core 域]
+        │ CPU I/D AXI CDC
+        ▼
+系统 AXI [SYS 域] ─── DMA 主端（CPU 配置，完成状态/IRQ）
+   ├── DDR CDC ── 控制器用户口 [DDR 域] ── PHY/DDR3
+   ├── MMIO CDC ── UART/Timer/GPIO/IRQ/控制寄存器 [periph 域]
+   └── NPU AXI CDC（5 通道、各深度 4）[NPU 域]
+         └── AXI beat 拆成 32 位访问 ── 分级 MMIO ── 128-MAC + 双激活 bank
+```
+
+NPU 域初始目标 100 MHz，原四域目标为 100/80/125/25 MHz。板级候选使用现有
+800 MHz GPLL 的 CLKOUT3 /8，独立 BUFG；SYS→NPU 的请求/响应仍经过 CDC。
+新增 5 个 FIFO、10 组 Gray 指针交叉，物理端点、偏斜和复位时序待合体报告核验。
+不将独立 NPU 的 100 MHz 布线结果直接写成合体结果，也不通过 false path 隐藏路径。
+
+NPU 设备窗口为 `0x20000000–0x2000ffff`。沿用原预留常量名 `NPU_SRAM_BASE`，
+目前实际映射为寄存器及暂存区，软件不能把它当成普通 SRAM；`0x10060000` 仍未实现。
+控制 ABI 保留上游偏移。DMA 只允许以下完整、四字节对齐区间：
+
+| 方向 | NPU 地址 | 操作顺序 |
+|---|---|---|
+| TCM/DDR/Flash → 激活暂存 | `0x20000060–67`，8 字节 | CPU 写 bank/index，DMA 完成后 CPU 写 ACT_COMMIT |
+| TCM/DDR/Flash → 权重暂存 | `0x20000100–17f`，128 字节 | CPU 写 index，DMA 完成后 CPU 写 WEIGHT_COMMIT |
+| NPU → TCM/DDR | `0x20000200–24f`，RAW/INT8 输出 | CPU 确认 OUTPUT_VALID，DMA 读完并核对后 CPU 写 POP |
+
+CPU 是索引、暂存、提交和输出槽的单一所有者。DMA 不写 START/COMMIT/POP；DMA
+完成只代表一次搬运结束，NPU DONE 仍可能伴随最后一个未弹出的输出。多像素任务
+需要边算边读，先等整任务 DONE 再读会把单输出槽堵住。CPU 对 DDR 缓冲先 clean/flush，
+DMA 写回后 invalidate；TCM 不经过 Cache。现有 NPU ABI 采用轮询，未增加专用 IRQ。
+AXI 接受后请求不可取消，设备错误返回原 ID；系统硬复位同时清两侧 FIFO，设备
+SOFT_RESET 保留自身响应，七份上游 RTL 不变。
+
+已完成双宽两组 CPU/DMA 卷积及各四组异频/背压/复位测试。第四组 CoreMark 增加
+`npu_background`：Timer IRQ 服务驻留 4×1、Ci8/Co16 任务，原 DDR 16 KiB DMA 独立
+运行，每个 RAW 向量用 CPU 标量公式核对。CoreMark/MHz 仍只除 Core 周期；NPU
+开始/输出/忙周期、软件完成任务和结果错误单列。频率组合和完整数值见项目介绍。
+
+复现入口（输出目录需未占用）：
+
+```bash
+make npu-test XLEN=32 NPU_TEST_OUT=build/npu-axi/new32
+make npu-test XLEN=64 NPU_TEST_OUT=build/npu-axi/new64
+RISCV_TOOL_ROOT=/opt/riscv/bin python3 scripts/verilator/run_unified_coremark.py \
+  --output build/unified-coremark/new-npu --platforms soc_npu
+```
+
+工具链路径是本机参考，其他环境设置 `RISCV_TOOL_ROOT`。RV64 使用 `--functional --xlen 64`。
+
 当前采用 E0u `9a7edd1` 的 Core 和 `7449fe7` 的统一测量入口，固定 RAS0、OOO0、
 ROB32、int8/mem4、forward3、Tournament1。核级测试包含真实 TCM；片上组裁掉
 Cache RAM 和 DDR；完整组保留 Cache/DDR，按 TCM、DDR cold/warm、背景负载

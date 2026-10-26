@@ -161,6 +161,11 @@ coremark-platforms:
 coremark-platforms-test:
 	python3 -m unittest tb.scripts.test_unified_coremark tb.scripts.test_p2_coremark tb.scripts.test_p2_build_config tb.tools.test_soc_clock_plan tb.tools.test_measurement_constraints
 
+.PHONY: npu-test
+NPU_TEST_OUT ?= build/npu-axi/run-rv$(XLEN)
+npu-test:
+	python3 scripts/verilator/run_npu_tests.py --output $(NPU_TEST_OUT) --xlen $(XLEN)
+
 soc-lint:
 	$(VERILATOR) $(VFLAGS) --lint-only -f scripts/soc_files.f --top-module soc_top
 

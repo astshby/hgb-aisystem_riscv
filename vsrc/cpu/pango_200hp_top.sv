@@ -5,6 +5,7 @@ module pango_200hp_top #(
     parameter DTCM_INIT_FILE = "",
     parameter int unsigned SOC_PROFILE = soc_config_pkg::SOC_PROFILE_FULL,
     parameter int unsigned BOARD_CLOCK_PROFILE = 0,
+    parameter bit NPU_ENABLE = 0,
     parameter bit LOCAL_TCM_ENABLE = 1'b0,
     parameter bit DMA_WIDE_ENABLE = 1'b1,
     parameter bit DMA_BLOCK_ENABLE = 1'b1,
@@ -28,7 +29,7 @@ module pango_200hp_top #(
     logic ref_clk, core_clk, pll_lock, phy_pll_lock, ddr_init_done;
     logic [1:0] reset_sync_q;
     logic soc_rst;
-    wire hot_clk, sys_clk, periph_clk;
+    wire hot_clk, sys_clk, periph_clk, npu_clk;
     logic ddr_reset_n, ddr_bridge_rst;
     localparam int unsigned HOT_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 : 100000000;
     localparam int unsigned SYS_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :
@@ -78,6 +79,7 @@ module pango_200hp_top #(
             assign hot_clk = core_clk;
             assign sys_clk = core_clk;
             assign periph_clk = core_clk;
+            assign npu_clk = core_clk;
             always_ff @(posedge core_clk or negedge board_reset_n) begin
                 if (!board_reset_n) reset_sync_q <= '0;
                 else reset_sync_q <= {reset_sync_q[0], pll_lock && phy_pll_lock && ddr_init_done};
@@ -87,9 +89,9 @@ module pango_200hp_top #(
             assign ddr_bridge_rst = soc_rst;
         end else begin : g_domain_clocks
             wire soc_pll_locked;
-            pango_soc_pll #(.CLOCK_PROFILE(BOARD_CLOCK_PROFILE)) u_soc_pll (
+            pango_soc_pll #(.CLOCK_PROFILE(BOARD_CLOCK_PROFILE),.NPU_ENABLE(NPU_ENABLE)) u_soc_pll (
                 .ref_clk, .reset_n(board_reset_n), .clk_core(hot_clk), .clk_sys(sys_clk),
-                .clk_periph(periph_clk), .locked(soc_pll_locked));
+                .clk_periph(periph_clk), .clk_npu(npu_clk), .locked(soc_pll_locked));
             pango_soc_reset u_reset (
                 .ref_clk, .clk_ddr(core_clk), .board_reset_n, .soc_pll_locked,
                 .ddr_pll_locked(pll_lock), .ddr_phy_locked(phy_pll_lock), .ddr_ready(ddr_init_done),
@@ -104,6 +106,8 @@ module pango_200hp_top #(
     initial begin
         assert (BOARD_CLOCK_PROFILE == 0 || BOARD_CLOCK_PROFILE == 1 || BOARD_CLOCK_PROFILE == 4)
             else $fatal(1, "unsupported board clock profile");
+        assert (!NPU_ENABLE || BOARD_CLOCK_PROFILE != 0)
+            else $fatal(1, "NPU uses its dedicated 100 MHz C1/C4 output");
 `ifndef CORE_SCOREBOARD
         assert (BOARD_CLOCK_PROFILE == 0)
             else $fatal(1, "independent domains require soc_system");
@@ -119,15 +123,27 @@ module pango_200hp_top #(
 `ifdef CORE_SCOREBOARD
     axi_types_pkg::axi_req_t unified_ddr_req;
     axi_types_pkg::axi_rsp_t unified_ddr_rsp;
+    axi_types_pkg::axi_req_t npu_req;
+    axi_types_pkg::axi_rsp_t npu_rsp;
+    if (NPU_ENABLE) begin : g_npu
+        logic rst_npu, rst_npu_sys;
+        soc_reset_controller u_reset (.reset_async(soc_rst),.clk_core(npu_clk),.clk_sys(sys_clk),
+            .clk_ddr(core_clk),.clk_periph(periph_clk),.rst_core(rst_npu),.rst_sys(rst_npu_sys),
+            .rst_ddr(),.rst_periph());
+        npu_axi_target u_target (.clk_sys(sys_clk),.rst_sys(rst_npu_sys),.clk_npu(npu_clk),.rst_npu,
+            .axi_req(npu_req),.axi_rsp(npu_rsp));
+    end else begin : g_no_npu
+        assign npu_rsp = '0;
+    end
     // C1/C4 的 PLL/复位 RTL 与仿真不代表板上时序验收；Flash 管脚仍待板级接入。
     soc_system #(.ITCM_INIT_FILE(ITCM_INIT_FILE),.DTCM_INIT_FILE(DTCM_INIT_FILE),
-        .SOC_PROFILE(SOC_PROFILE),.DDR_BYTES(512*1024*1024),.CLOCK_HZ(125000000),
+        .SOC_PROFILE(SOC_PROFILE),.DDR_BYTES(512*1024*1024),.NPU_BYTES(NPU_ENABLE ? 65536 : 0),.CLOCK_HZ(125000000),
         .CLOCK_INFO_ENABLE(BOARD_CLOCK_PROFILE != 0), .CORE_CLOCK_HZ(HOT_HZ), .SYS_CLOCK_HZ(SYS_HZ),
         .DDR_CLOCK_HZ(125000000), .PERIPH_CLOCK_HZ(PERIPH_HZ), .UART_DIVISOR((PERIPH_HZ+57600)/115200)) u_soc (
         .clk_core(hot_clk),.clk_sys(sys_clk),.clk_ddr(core_clk),.clk_periph(periph_clk),.reset_async(soc_rst),.ddr_ready(ddr_init_done),
         .uart_rx,.uart_tx,.gpio_in,.gpio_out,.gpio_oe,
         .flash_cs_n(),.flash_sck(),.flash_mosi(),.flash_miso(1'b0),
-        .ddr_req(unified_ddr_req),.ddr_rsp(unified_ddr_rsp),.external_req('0),.external_rsp(),.npu_req(),.npu_rsp('0),
+        .ddr_req(unified_ddr_req),.ddr_rsp(unified_ddr_rsp),.external_req('0),.external_rsp(),.npu_req,.npu_rsp,
         .commit_valid(),.commit_pc(),.commit_inst(),.commit_rd(),.commit_rd_we(),.commit_rd_data(),
         .commit_exception(),.commit_trace(),.dmem_store_fire(),.dmem_store_addr(),.dmem_store_data(),.dmem_store_strb());
     ddr_axi_target u_ddr_target (.clk(core_clk),.rst(ddr_bridge_rst),.memory_ready(ddr_init_done),

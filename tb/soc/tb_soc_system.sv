@@ -12,6 +12,8 @@ module tb_soc_system #(
     parameter int SYS_PERIOD_PS=0,
     parameter int DDR_PERIOD_PS=0,
     parameter int PERIPH_PERIOD_PS=0,
+    parameter bit NPU_ENABLE=0,
+    parameter int NPU_PERIOD_PS=10000,
     parameter int SOC_PROFILE=soc_config_pkg::SOC_PROFILE_FULL,
     parameter bit ICACHE_ENABLE=1,
     parameter bit DCACHE_ENABLE=1,
@@ -424,12 +426,30 @@ module tb_soc_system #(
     end
 
     assign external_req='0;
-    assign npu_rsp='0;
+    if (NPU_ENABLE) begin : g_npu
+        logic clk_npu=0, rst_npu;
+        longint unsigned roi_cycles=0, roi_busy=0, roi_starts=0, roi_outputs=0;
+        always #(NPU_PERIOD_PS * 0.5ps) clk_npu=~clk_npu;
+        soc_reset_controller u_reset (.reset_async,.clk_core(clk_npu),.clk_sys,.clk_ddr,.clk_periph,
+            .rst_core(rst_npu),.rst_sys(),.rst_ddr(),.rst_periph());
+        npu_axi_target u_npu (.clk_sys,.rst_sys(dut.rst_sys),.clk_npu,.rst_npu,
+            .axi_req(npu_req),.axi_rsp(npu_rsp));
+        initial $display("NPU_HARDWARE enabled=1 period_ps=%0d implementation=128mac mmio_abi=65536",NPU_PERIOD_PS);
+        always @(posedge clk_npu) if (!rst_npu && p2_roi_enable && p2_roi_phase==1) begin
+            roi_cycles++;
+            if (u_npu.u_device.core_busy) roi_busy++;
+            if (u_npu.u_device.start_commit_q) roi_starts++;
+            if (u_npu.u_device.output_push) roi_outputs++;
+        end
+        final $display("NPU_ACTIVITY roi_cycles=%0d busy=%0d starts=%0d outputs=%0d",roi_cycles,roi_busy,roi_starts,roi_outputs);
+    end else begin : g_no_npu
+        assign npu_rsp='0;
+    end
     assign uart_rx=$test$plusargs("UART_LOOPBACK") ? uart_tx : 2'b11;
     for(genvar g=0;g<3;g++) begin : g_gpio
         assign gpio_in[g]=$test$plusargs("GPIO_LOOPBACK") ? gpio_out[g]&gpio_oe[g] : '0;
     end
-    soc_system #(.DDR_BYTES(DDR_BYTES),.FLASH_BYTES(FLASH_BYTES),.UART_DIVISOR(UART_DIVISOR),
+    soc_system #(.DDR_BYTES(DDR_BYTES),.FLASH_BYTES(FLASH_BYTES),.NPU_BYTES(NPU_ENABLE ? 65536 : 0),.UART_DIVISOR(UART_DIVISOR),
         .CLOCK_INFO_ENABLE(1),.CORE_CLOCK_HZ(frequency_hz(0)),.SYS_CLOCK_HZ(frequency_hz(1)),
         .DDR_CLOCK_HZ(DDR_BYTES!=0 ? frequency_hz(2) : 0),.PERIPH_CLOCK_HZ(frequency_hz(3)),
         .SOC_PROFILE(SOC_PROFILE),.ICACHE_ENABLE(ICACHE_ENABLE),.DCACHE_ENABLE(DCACHE_ENABLE),.CLOCK_HZ(CLOCK_HZ)) dut(.*);

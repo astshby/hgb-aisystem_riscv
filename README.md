@@ -4,12 +4,25 @@ RV32 优先的 RISC-V Core/SoC 协作仓库。目标是 RT-Thread 上的文本�
 推理、文本输出；RV64 跟随共享架构验证。近期不把 Linux、MMU、F/V、图像链路作为
 交付前提。
 
-最新开发基线为 **`baseline-rv32-soc-20261025`**，采用 `7449fe7` 的 Core/SoC 和
-三组统一测量配置，并补齐 C1/C4 原生 PDS 暂存依赖。Core 为 RV32 优先、scoreboard
-双发射、ROB32、int8/mem4、LQ4/SQ4、forward3、Tournament1、RAS0、OOO0，
-ALU/Load/DSP 流水为 8/10/10。后续优化和上板从此标签的新分支开始。
+最新开发基线为 **`baseline-rv32-soc-npu-20261027`**。本基线固定经验证的 ROB16
+Core、四组可运行平台、128-MAC NPU 和 AXI 地址递增优化；选定代码树来自 `ec85d36`，
+其中地址优化为 `aaf63f9`。正常 ALU/Load/DSP 流水为 **8/10/10**，C 尚未实现。
+Core 配置为 scoreboard 双发射/双退休、int8/mem4、LQ4/SQ4、forward3、Tournament1、
+RAS0、OOO0；RV32 优化，RV64 做功能/ISA/SoC 验证。
 
-基线功能测试加载已固定的 Core 参数：
+真实 Core+TCM 的 64 次仿真为 **3.015015 CoreMark/MHz**（validation 2.996395）。
+核级综合 **104.7120 MHz** 来自相同 Core 的 `6cb7535` 测量，本轮未重跑；完整
+SoC+NPU 综合 Core/SYS/DDR-user/periph/NPU 为
+**89.3096/83.8926/144.6969/89.0076/112.3343 MHz**，71,659 LUT/66,825 FF/162.5 DRM/86 APM。
+工作时钟目标保持 100/80/125/25/100 MHz；整机 Core 的 100 MHz 目标仍未满足。
+以上是仿真与综合估计，当前版本未布局布线、未合体上板，短仿真未满足正式十秒规则。
+
+本次以单个汇总提交和基线标签发布选定快照；原优化提交、未采用的 TCM 专用译码
+比较分支及原始报告保留在开发者本地。旧 `baseline-rv32-soc-20261025` 保留作比较。
+后续工作从新标签建立用途分支。配置、结果、构建命令与证据边界见
+[项目介绍](docs/PROJECT_INTRO.md)和[FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。
+
+在检出的分支上加载对应 Core 参数：
 
 ```bash
 source scripts/verilator/p1_core_config.sh
@@ -21,13 +34,14 @@ make test XLEN=64
 RAT 绑定 ROB 标签、IQ8 顺序双发射、两个完整 ALU、共享分支/MDU、LQ4/SQ4 双 AGU，
 两个完成口与按序双退休。原生 IF64 和双数据口已接入 SoC；MMIO/Store 受队头许可。
 默认 `CORE_BACKEND=legacy` 保留旧 IF→D1→D2→EX→MEM→WB 控制组。
-P1 使用 `source scripts/verilator/p1_core_config.sh`，选择 ROB32、int8/mem4、有限整数
-乱序可选结构和按序双退休；当前入口选择 OOO0、RAS0、Tournament1、forward3。
+`source scripts/verilator/p1_core_config.sh` 在当前候选选择 ROB16、int8/mem4、
+按序双退休、OOO0、RAS0、Tournament1、forward3；原基线分支保留 ROB32。
 
-CoreMark 与综合的新入口共用 [三组配置](scripts/benchmark_platforms.json)：
+CoreMark 与综合的新入口共用 [四组配置](scripts/benchmark_platforms.json)：
 `core_tcm` 为 Core 和真实 TCM；`soc_tcm` 增加片上总线/DMA/MMIO；`soc_ddr`
 再增加 Cache 和 DDR3。三组时钟域分别为 1/3/4 个，完整组目标为
-Core/SYS/DDR 用户口/periph = 100/80/125/25 MHz。
+Core/SYS/DDR 用户口/periph = 100/80/125/25 MHz。第四组 `soc_npu` 增加
+独立 NPU 100 MHz 域，分别测空闲与实际工作场景。
 `make coremark-platforms COREMARK_PLATFORM_OUT=build/unified-coremark/new-run` 同时输出
 CoreMark/Core-MHz、按本次频率计算的仿真每秒成绩和镜像/源哈希；默认 2 次迭代仅做
 短仿真适配。综合用 `scripts/pango/prepare_benchmark.py`，必须提供相同软件 bundle
@@ -45,7 +59,7 @@ CoreMark/Core-MHz、按本次频率计算的仿真每秒成绩和镜像/源哈�
 - DMA 两块 128B 双槽引擎与统一 AXI 主口，读写可重叠；legacy 控制组保留。
 - 标准 AXI 与 Pango 原生 DDR 桥；RT-Thread BSP、UART loader、CoreMark。
 
-## 当前状态
+## 上一基线状态（2026-10-25）
 
 2026-10-25：三组可运行平台完成 RV32 短 CoreMark 和标准综合。相同 TCM 镜像均为
 733,915 周期、2.725111 CoreMark/MHz；DDR cold/warm/背景负载分别为
@@ -198,4 +212,6 @@ bash scripts/verilator/run_dma_block.sh 32
 - 125 MHz setup 未收敛，工具 Fmax 不是板上频率。
 - 没有硬件 Cache 一致性；DMA 需要软件 clean/flush/invalidate。
 - 每个 D$ bank 的 miss 阻塞；跨 bank 可独立排队，共享外部填充/写回带宽。
-- AI 加速器尚未接入。
+- `soc/npu128-five-domain` 已接入固定版本的 128-MAC NPU，双宽 CPU/DMA 卷积和异频 AXI
+  仿真通过；合体 FPGA 验收、完整 YOLOX 定点图和 RT-Thread 推理尚未完成。
+  来源与接口见 [固定依赖](third_party/yolo_npu128/README.md) 和 [SoC 系统](docs/understand/SOC_SYSTEM.md)。

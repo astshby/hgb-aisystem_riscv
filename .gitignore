@@ -1,5 +1,8 @@
 # 根目录采用白名单：未明确列出的顶层文件和目录默认不进入版本库。
 /*
+!/third_party/
+/third_party/*
+!/third_party/yolo_npu128/
 !/.gitignore
 !/.gitattributes
 !/.gitmodules

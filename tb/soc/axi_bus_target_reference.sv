@@ -1,7 +1,8 @@
 // Module: axi_bus_target_reference
-// Description: Frozen aac71ce AXI target for cycle comparison of incremental request addressing.
+// Description: Frozen 6cb7535 AXI target for cycle comparison of running beat addresses.
 module axi_bus_target_reference #(
-    parameter bit READ_ONLY = 0
+    parameter bit READ_ONLY = 0,
+    parameter int LOCAL_BYTES = core_config_pkg::DBUS_BYTES
 ) (
     input logic clk, rst,
     input axi_types_pkg::axi_req_t axi_req,
@@ -41,8 +42,8 @@ module axi_bus_target_reference #(
     assign write_addr = write_q.addr + (32'(write_beat_q) << write_q.size) + 32'(write_offset_q);
     assign read_bytes = 6'd1 << read_q.size;
     assign write_bytes = 6'd1 << write_q.size;
-    assign read_step = read_q.prot[2] ? 6'd4 : 6'(DBUS_BYTES);
-    assign write_step = 6'(DBUS_BYTES);
+    assign read_step = read_q.prot[2] ? 6'd4 : 6'(LOCAL_BYTES);
+    assign write_step = 6'(LOCAL_BYTES);
     assign read_end = read_offset_q + read_step >= read_bytes;
     assign write_end = write_offset_q + write_step >= write_bytes;
     assign allowed_strb = (32'hffffffff >> (32-int'(write_bytes))) << write_q.addr[4:0];
@@ -65,9 +66,9 @@ module axi_bus_target_reference #(
         request.execute = choose_read && read_q.prot[2];
         request.addr = xlen_t'(choose_write ? write_addr : read_addr);
         request.size = mem_size_e'(choose_write ?
-            (int'(write_q.size) > $clog2(DBUS_BYTES) ? 3'($clog2(DBUS_BYTES)) : write_q.size) :
+            (int'(write_q.size) > $clog2(LOCAL_BYTES) ? 3'($clog2(LOCAL_BYTES)) : write_q.size) :
             (read_q.prot[2] && read_q.size > 2 ? 3'd2 :
-             int'(read_q.size) > $clog2(DBUS_BYTES) ? 3'($clog2(DBUS_BYTES)) : read_q.size));
+             int'(read_q.size) > $clog2(LOCAL_BYTES) ? 3'($clog2(LOCAL_BYTES)) : read_q.size));
         request.wdata = xlen_t'(q.w.data >> ((int'(write_addr[4:0]) / DBUS_BYTES) * XLEN));
         request.wstrb = DBUS_BYTES'(q.w.strb >> ((int'(write_addr[4:0]) / DBUS_BYTES) * DBUS_BYTES));
         p = '0;
@@ -77,7 +78,10 @@ module axi_bus_target_reference #(
         p.r_valid = !rst && r_valid_q; p.r = r_q;
         p.b_valid = !rst && b_valid_q; p.b = b_q;
         merged_read = read_data_q;
-        merged_read[(int'(read_addr[4:0]) / DBUS_BYTES)*XLEN +: XLEN] = response.rdata;
+        // 32 位设备在 RV64 下仍逐字访问；只填当前字，不能覆盖同 beat 的相邻读回值。
+        merged_read[(int'(read_addr[4:0]) / LOCAL_BYTES)*(8*LOCAL_BYTES) +: 8*LOCAL_BYTES] =
+            (8*LOCAL_BYTES)'(response.rdata >>
+                (8*(int'(read_addr[$clog2(DBUS_BYTES)-1:0]) / LOCAL_BYTES)*LOCAL_BYTES));
     end
     always_ff @(posedge clk) begin
         if (rst) begin

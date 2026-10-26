@@ -4,11 +4,13 @@ module store_queue (
     input logic clk, rst, flush,
     input scoreboard_pkg::branch_recovery_t recovery,
     input logic [core_config_pkg::RETIRE_IDX_W-1:0] head_slot,
+    input scoreboard_pkg::lsu_age_matrix_t age_order,
     input logic head_valid,
     input pipeline_pkg::retire_id_t head_id,
     input logic [1:0] offer_valid, issue_fire,
     input pipeline_pkg::lsu_descriptor_t descriptor [2],
     output logic [1:0] issue_ready,
+    output logic [$clog2(core_config_pkg::STORE_QUEUE_ENTRIES)-1:0] allocation_slot [2],
     input scoreboard_pkg::lsu_entry_view_t loads [core_config_pkg::LOAD_QUEUE_ENTRIES],
     output scoreboard_pkg::lsu_entry_view_t view [core_config_pkg::STORE_QUEUE_ENTRIES],
     output logic [core_config_pkg::STORE_QUEUE_ENTRIES-1:0] eligible, done, kill_now,
@@ -50,6 +52,9 @@ module store_queue (
             end
         end
     end
+    for (genvar lane = 0; lane < 2; lane++) begin : g_allocation_view
+        assign allocation_slot[lane] = $clog2(SQ)'(alloc_slot[lane]);
+    end
     for (genvar slot = 0; slot < SQ; slot++) begin : g_slot
         assign view[slot] = '{valid:valid_q[slot], killed:killed_q[slot], descriptor:descriptor_q[slot]};
         assign kill_now[slot] = valid_q[slot] && (flush ||
@@ -66,11 +71,11 @@ module store_queue (
             older_ordered[slot] = 0;
             for (int prior = 0; prior < LOAD_QUEUE_ENTRIES; prior++)
                 if (loads[prior].valid && !loads[prior].killed &&
-                    younger_than(descriptor_q[slot].id, loads[prior].descriptor.id, head_slot) &&
+                    age_order[LOAD_QUEUE_ENTRIES+slot][prior] &&
                     !speculative_ram(loads[prior].descriptor.address)) older_ordered[slot] = 1;
             for (int prior = 0; prior < SQ; prior++)
                 if (valid_q[prior] && !killed_q[prior] &&
-                    younger_than(descriptor_q[slot].id, descriptor_q[prior].id, head_slot) &&
+                    age_order[LOAD_QUEUE_ENTRIES+slot][LOAD_QUEUE_ENTRIES+prior] &&
                     !speculative_ram(descriptor_q[prior].address)) older_ordered[slot] = 1;
             if (valid_q[slot] && !killed_q[slot]) begin
                 eligible[slot] = state_q[slot] == QUEUED && !older_ordered[slot] &&

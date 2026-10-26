@@ -233,7 +233,7 @@ module soc_system #(
         .cache_busy(p_busy),.cache_fatal(p_fatal),.cache_error(p_error),.cache_fault_addr(p_fault_addr),
         .dma_req_valid,.dma_req_ready,.dma_request,.dma_rsp_valid,.dma_rsp_ready,.dma_response,.dma_irq,
         .flash_req_valid,.flash_req_ready,.flash_request,.flash_rsp_valid,.flash_rsp_ready,.flash_response);
-    dma_command_cdc #(.DDR_BYTES(DDR_BYTES),.FLASH_BYTES(FLASH_BYTES)) u_dma (
+    dma_command_cdc #(.DDR_BYTES(DDR_BYTES),.FLASH_BYTES(FLASH_BYTES),.NPU_ENABLE(NPU_BYTES != 0)) u_dma (
         .clk_sys,.rst_sys,.clk_periph,.rst_periph,.req_valid(dma_req_valid),.req_ready(dma_req_ready),.request(dma_request),
         .rsp_valid(dma_rsp_valid),.rsp_ready(dma_rsp_ready),.response(dma_response),.irq(dma_irq),
         .axi_req(masters[2]),.axi_rsp(master_responses[2]));

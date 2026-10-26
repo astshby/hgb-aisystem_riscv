@@ -45,10 +45,13 @@ package scoreboard_pkg;
         lsu_descriptor_t descriptor;
     } lsu_entry_view_t;
 
-    // 仅无副作用的物理内存允许提前读，MMIO 和高位地址须取得 ROB 队头授权。
+    typedef logic [core_config_pkg::LOAD_QUEUE_ENTRIES+core_config_pkg::STORE_QUEUE_ENTRIES-1:0] lsu_age_matrix_t [core_config_pkg::LOAD_QUEUE_ENTRIES+core_config_pkg::STORE_QUEUE_ENTRIES];
+
+    // 仅无副作用的物理内存允许提前读。DDR 采用实际窗口；越界、MMIO 和高位地址等队头授权。
     function automatic logic speculative_ram(input xlen_t address);
         return address < xlen_t'(soc_addr_pkg::MTIME_BASE) ||
-               ((address >> 31) == xlen_t'(1));
+               (address >= xlen_t'(soc_addr_pkg::DDR_BASE) &&
+                address < xlen_t'(soc_addr_pkg::DDR_BASE) + xlen_t'(soc_config_pkg::DDR_WINDOW_BYTES));
     endfunction
 
     typedef enum logic [2:0] {

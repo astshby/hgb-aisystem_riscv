@@ -4,11 +4,14 @@ module load_queue (
     input logic clk, rst, flush,
     input scoreboard_pkg::branch_recovery_t recovery,
     input logic [core_config_pkg::RETIRE_IDX_W-1:0] head_slot,
+    input scoreboard_pkg::lsu_age_matrix_t age_order,
     input logic head_valid,
     input pipeline_pkg::retire_id_t head_id,
     input logic [1:0] offer_valid, issue_fire,
     input pipeline_pkg::lsu_descriptor_t descriptor [2],
     output logic [1:0] issue_ready,
+    input logic [1:0] admission_request_fire,
+    output logic [$clog2(core_config_pkg::LOAD_QUEUE_ENTRIES)-1:0] allocation_slot [2],
     input scoreboard_pkg::lsu_entry_view_t stores [core_config_pkg::STORE_QUEUE_ENTRIES],
     output scoreboard_pkg::lsu_entry_view_t view [core_config_pkg::LOAD_QUEUE_ENTRIES],
     output logic [core_config_pkg::LOAD_QUEUE_ENTRIES-1:0] eligible, forwarded, done, kill_now,
@@ -68,6 +71,9 @@ module load_queue (
             end
         end
     end
+    for (genvar lane = 0; lane < 2; lane++) begin : g_allocation_view
+        assign allocation_slot[lane] = $clog2(LQ)'(alloc_slot[lane]);
+    end
     for (genvar slot = 0; slot < LQ; slot++) begin : g_slot
         assign view[slot] = '{valid:valid_q[slot], killed:killed_q[slot], descriptor:descriptor_q[slot]};
         assign kill_now[slot] = valid_q[slot] && (flush ||
@@ -77,7 +83,7 @@ module load_queue (
         for (genvar byte_no = 0; byte_no < DBUS_BYTES; byte_no++) begin : g_forward_byte
             for (genvar store = 0; store < SQ; store++) begin : g_store
                 assign forward_candidates[slot][byte_no][store] = stores[store].valid && !stores[store].killed &&
-                    younger_than(descriptor_q[slot].id, stores[store].descriptor.id, head_slot) &&
+                    age_order[slot][LQ+store] &&
                     (stores[store].descriptor.address >> $clog2(DBUS_BYTES)) ==
                     (descriptor_q[slot].address >> $clog2(DBUS_BYTES)) && stores[store].descriptor.wstrb[byte_no];
                 assign forward_select[slot][byte_no][store] = forward_candidates[slot][byte_no][store] &&
@@ -91,8 +97,7 @@ module load_queue (
     end
     for (genvar store = 0; store < SQ; store++) begin : g_age
         for (genvar other = 0; other < SQ; other++) begin : g_compare
-            assign newer[store][other] = younger_than(stores[other].descriptor.id, stores[store].descriptor.id, head_slot) ||
-                (stores[other].descriptor.id.slot == stores[store].descriptor.id.slot && other < store);
+            assign newer[store][other] = age_order[LQ+other][LQ+store];
         end
     end
     // Load 逐字节选择最新的更老 Store。部分覆盖时等待 Store 成功，不能混入旧 RAM 字节。
@@ -112,11 +117,11 @@ module load_queue (
             end
             for (int prior = 0; prior < LQ; prior++)
                 if (valid_q[prior] && !killed_q[prior] &&
-                    younger_than(descriptor_q[slot].id, descriptor_q[prior].id, head_slot) &&
+                    age_order[slot][prior] &&
                     !speculative_ram(descriptor_q[prior].address)) older_ordered[slot] = 1;
             for (int prior = 0; prior < SQ; prior++)
                 if (stores[prior].valid && !stores[prior].killed &&
-                    younger_than(descriptor_q[slot].id, stores[prior].descriptor.id, head_slot) &&
+                    age_order[slot][LQ+prior] &&
                     !speculative_ram(stores[prior].descriptor.address)) older_ordered[slot] = 1;
             partial_overlap[slot] = |(covered[slot] & read_mask[slot]);
             forwarded[slot] = partial_overlap[slot] && (covered[slot] & read_mask[slot]) == read_mask[slot] &&
@@ -191,8 +196,12 @@ module load_queue (
                     if (issue_fire[lane] && !descriptor[lane].write && alloc_slot[lane] == slot) begin
                         valid_q[slot] <= 1;
                         killed_q[slot] <= 0;
-                        state_q[slot] <= QUEUED;
+                        // 预发与分配同沿接纳时直接等待返回，未接纳则由此槽继续持有请求。
+                        state_q[slot] <= admission_request_fire[lane] ? WAIT_RESPONSE : QUEUED;
                         descriptor_q[slot] <= descriptor[lane];
+                        descriptor_q[slot].write <= 0;
+                        descriptor_q[slot].wdata <= 0;
+                        descriptor_q[slot].wstrb <= 0;
                     end
                 end
             end

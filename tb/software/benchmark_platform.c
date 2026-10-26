@@ -29,6 +29,10 @@ static int maintain(unsigned command)
     return 1;
 }
 
+#if BENCH_NPU
+#include "npu_platform.h"
+#endif
+
 int main(void)
 {
     if (REG(0x10040000) != __riscv_xlen) return 10;
@@ -50,5 +54,9 @@ int main(void)
     // 无 DDR 配置的非法目的命令应返回错误和零字节，不能等待不存在的 DDR 时钟。
     if (copy((uint32_t)(uintptr_t)source, 0x80004000, 32) != 1 || REG(0x10030014) != 0) return 30;
 #endif
+#if BENCH_NPU
+    return npu_platform_test();
+#else
     return 0;
+#endif
 }

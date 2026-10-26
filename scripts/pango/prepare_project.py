@@ -94,7 +94,7 @@ def verify_independent_board_clocks(wrapper, profile):
                         ("ddr", "core_clk"), ("periph", "periph_clk")):
         if not re.search(rf"\.clk_{domain}\s*\(\s*{net}\s*\)", body):
             raise ValueError(f"wrapper board clk_{domain} wiring changed")
-    if not re.search(r"pango_soc_pll\s*#\(\.CLOCK_PROFILE\(BOARD_CLOCK_PROFILE\)\)\s+u_soc_pll", text):
+    if not re.search(r"pango_soc_pll\s*#\(\.CLOCK_PROFILE\(BOARD_CLOCK_PROFILE\)(?:,\s*\.NPU_ENABLE\(NPU_ENABLE\))?\)\s+u_soc_pll", text):
         raise ValueError("missing independent GPLL instance")
     if not re.search(r"pango_soc_reset\s+u_reset", text):
         raise ValueError("missing independent boot reset supervisor")
@@ -109,7 +109,7 @@ def verify_independent_board_clocks(wrapper, profile):
         raise ValueError("unexpected PERIPH_HZ profile formula")
 
 
-def board_clock_constraints(profile):
+def board_clock_constraints(profile, npu_enable=False):
     """只生成 C1/C4 的 generated clock 与时钟不确定性，不加载 CDC 例外。"""
     if profile not in BOARD_CLOCK_RATIOS:
         raise ValueError("board clock constraints require C1 or C4")
@@ -120,8 +120,9 @@ def board_clock_constraints(profile):
     ]
     for domain, pin, clock in (("core", "CLKOUT0", "clk_core"),
                                ("sys", "CLKOUT1", "clk_sys"),
-                               ("periph", "CLKOUT2", "clk_periph")):
-        multiply, divide = BOARD_CLOCK_RATIOS[profile][domain]
+                               ("periph", "CLKOUT2", "clk_periph"),
+                               *(([("npu", "CLKOUT3", "clk_npu")]) if npu_enable else [])):
+        multiply, divide = (4, 5) if domain == "npu" else BOARD_CLOCK_RATIOS[profile][domain]
         lines.append(
             f"create_generated_clock -name {{{clock}}} -source [get_ports {{ref_clk_p}}] "
             f"[get_pins {{g_domain_clocks.u_soc_pll.u_pll/{pin}}}] "
@@ -134,6 +135,20 @@ def board_clock_constraints(profile):
         "# CDC FIFO exceptions require a native binding audit before they may be loaded.",
     ]
     return "\n".join(lines) + "\n"
+
+
+def verify_npu_board_clocks(root):
+    """Bind the optional 100 MHz domain to the actual GPLL output and NPU wrapper."""
+    wrapper = (root / 'vsrc/cpu/pango_200hp_top.sv').read_text()
+    pll = (root / 'vsrc/cpu/pango_soc_pll.sv').read_text()
+    checks = ((wrapper, r'\.NPU_ENABLE\(NPU_ENABLE\)'),
+              (wrapper, r'\.clk_npu\(npu_clk\)'),
+              (wrapper, r'\.NPU_BYTES\(NPU_ENABLE\s*\?\s*65536\s*:\s*0\)'),
+              (pll, r'\.STATIC_RATIO3\(8\)'),
+              (pll, r'\.CLKOUT3\(pll_npu\)'),
+              (pll, r'if\s*\(NPU_ENABLE\).*?\.CLKIN\(pll_npu\),\s*\.CLKOUT\(clk_npu\)'))
+    if any(not re.search(pattern, text, re.S) for text, pattern in checks):
+        raise ValueError('NPU clock or target wiring differs from the paired 100 MHz profile')
 
 
 def staged_soc_system(root, manifest):
@@ -154,7 +169,7 @@ def core_profile(configuration):
 
 def compile_command(xlen, profile_id, local_tcm, dma_wide=1,
                     cache_block=None, dma_block=None, core_issue_width=None, scoreboard=False,
-                    scoreboard_config=None, soc_system=False, board_clock_profile=0):
+                    scoreboard_config=None, soc_system=False, board_clock_profile=0, npu_enable=False):
     if soc_system and not scoreboard:
         raise ValueError("soc_system requires scoreboard")
     # schema 1--7 保持历史 Tcl；schema 8 的 AXI 系统没有这些 legacy 开关。
@@ -186,6 +201,10 @@ def compile_command(xlen, profile_id, local_tcm, dma_wide=1,
                 issue_directive += f" CORE_SCHEDULER_FORWARD_MODE={scoreboard_config['core_scheduler_forward_mode']}"
     # profile 0 不写入 BOARD_CLOCK_PROFILE，保持既有 compile.tcl 逐字节兼容。
     board_directive = "" if board_clock_profile == 0 else f" BOARD_CLOCK_PROFILE {board_clock_profile}"
+    if npu_enable:
+        if not soc_system or not board_clock_profile:
+            raise ValueError("NPU requires independent scoreboard SoC clocks")
+        board_directive += " NPU_ENABLE 1"
     return ("compile -top_module pango_200hp_top -verilog_standard SystemVerilog "
             f"-compiler_directives {{CORE_XLEN={xlen} CORE_MUL_IMPL=0 CORE_DIV_IMPL=1{issue_directive}}} "
             '-defined_parameters {ITCM_INIT_FILE "firmware/imem.hex" '
@@ -265,6 +284,9 @@ def verify_staged_manifest(root, manifest):
             verify_independent_board_clocks(wrapper, profile)
             expected_domains = {domain: BOARD_CLOCK_PROFILES[profile][domain]
                                 for domain in ("core", "sys", "ddr", "periph")}
+            if manifest.get("npu_enable"):
+                verify_npu_board_clocks(root)
+                expected_domains["npu"] = 100000000
             if (manifest.get("clock_profile") != BOARD_CLOCK_PROFILES[profile]["name"] or
                     manifest.get("board_clock_domains_hz") != expected_domains or
                     manifest.get("clock_relationship") != "independent_gpll_800mhz_vco" or
@@ -272,7 +294,7 @@ def verify_staged_manifest(root, manifest):
                 raise ValueError("unexpected independent board clock configuration")
             if "board_clocks.fdc" not in manifest["files"]:
                 raise ValueError("independent clock constraints not covered by manifest")
-            if (root / "board_clocks.fdc").read_text(encoding="utf-8") != board_clock_constraints(profile):
+            if (root / "board_clocks.fdc").read_text(encoding="utf-8") != board_clock_constraints(profile, manifest.get("npu_enable", False)):
                 raise ValueError("independent clock constraints differ from staging configuration")
         if manifest.get("local_tcm_enable") != 1:
             raise ValueError("soc_system always uses local TCM")
@@ -309,7 +331,8 @@ def verify_staged_manifest(root, manifest):
                                        scoreboard=schema >= 4,
                                        scoreboard_config=scoreboard_config if schema >= 5 else None,
                                        soc_system=schema in (8, 9),
-                                       board_clock_profile=manifest.get("board_clock_profile", 0))
+                                       board_clock_profile=manifest.get("board_clock_profile", 0),
+                                       npu_enable=manifest.get("npu_enable", False))
     accepted_commands = [[expected_compile]]
     # P2 在合入 P1 前使用 schema 4。仅其已覆盖哈希的 AXI wrapper 可省略旧参数。
     if schema == 4 and staged_soc_system(root, manifest):
@@ -379,8 +402,11 @@ def main():
     parser.add_argument("--ras-enable", type=int, choices=(0, 1), default=None)
     parser.add_argument("--board-clock-profile", type=int, choices=(0, 1, 4), default=0,
                         help="0=125 MHz common, 1=C1, 4=C4; non-zero requires scoreboard")
+    parser.add_argument("--npu-enable", action="store_true", help="attach pinned 128-MAC NPU on dedicated 100 MHz clock")
     args = parser.parse_args()
     scoreboard = args.core_backend == "scoreboard"
+    if args.npu_enable and (not scoreboard or not args.board_clock_profile):
+        parser.error("NPU requires scoreboard C1/C4")
     if args.board_clock_profile and not scoreboard:
         parser.error("C1/C4 board clock profiles require --core-backend scoreboard")
     if args.local_tcm is None:
@@ -503,6 +529,9 @@ def main():
             manifest.update(soc_topology="soc_system", core_profile=core_profile(manifest),
                             board_clock_domains_hz=dict(BOARD_CLOCK_DOMAINS),
                             clock_relationship="common_ddr_user_clock", mtime_clock_domain="periph")
+    if args.npu_enable:
+        manifest["npu_enable"] = True
+        manifest["board_clock_domains_hz"]["npu"] = 100000000
     try:
         manifest["source_commit"] = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True,
                                                             stderr=subprocess.DEVNULL).strip()
@@ -531,7 +560,7 @@ def main():
     manifest["files"]["board_ddr.fdc"] = hashlib.sha256((root / "board_ddr.fdc").read_bytes()).hexdigest()
     if args.board_clock_profile:
         (root / "board_clocks.fdc").write_text(
-            board_clock_constraints(args.board_clock_profile), encoding="utf-8")
+            board_clock_constraints(args.board_clock_profile, args.npu_enable), encoding="utf-8")
         manifest["files"]["board_clocks.fdc"] = hashlib.sha256(
             (root / "board_clocks.fdc").read_bytes()).hexdigest()
     rtl = [relative for _, relative in staged if relative.suffix in (".sv", ".v", ".vp")]
@@ -546,7 +575,7 @@ def main():
                                  core_issue_width=2 if scoreboard else 1, scoreboard=scoreboard,
                                  scoreboard_config=manifest if scoreboard else None,
                                  soc_system=scoreboard,
-                                 board_clock_profile=args.board_clock_profile)]
+                                 board_clock_profile=args.board_clock_profile,npu_enable=args.npu_enable)]
     (root / "compile.tcl").write_text("\n".join(commands) + "\n", encoding="utf-8")
     (root / "synthesize.tcl").write_text(SYNTHESIZE_COMMANDS, encoding="utf-8")
     shutil.copyfile(repo / "scripts/pango/implement.tcl", root / "implement.tcl")

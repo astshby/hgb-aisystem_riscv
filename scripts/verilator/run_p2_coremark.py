@@ -469,7 +469,7 @@ SOFTWARE_SOURCES = [Path(p) for p in (
     *('benchmark/coremark/vendor/coremark/' + name for name in
       ('core_list_join.c', 'core_main.c', 'core_matrix.c', 'core_state.c', 'core_util.c')))]
 SOFTWARE_INPUTS = SOFTWARE_SOURCES + [Path(p) for p in (
-    'benchmark/p2/core_portme.h', 'benchmark/coremark/port/core_portme.h',
+    'benchmark/p2/core_portme.h', 'benchmark/p2/npu_background.h', 'benchmark/coremark/port/core_portme.h',
     'benchmark/p2/link_soc_coremark_ddr.ld', 'benchmark/bsp/benchmark_runtime.h',
     'benchmark/coremark/vendor/coremark/coremark.h', 'benchmark/coremark/vendor/coremark/LICENSE.md',
     'scripts/verilator/verilog_hex_to_mem.py', 'scripts/verilator/run_p2_coremark.py')]
@@ -502,7 +502,7 @@ def verify_hashes(base, hashes):
 
 
 def build_image(args, layer, mode, tools, frozen):
-    output = frozen / f'{layer}-{mode}'
+    output = frozen / f'{"npu_" if getattr(args,"npu",False) else ""}{layer}-{mode}'
     output.mkdir()
     source_root = frozen / 'source'
     warm, background = LAYERS[layer]
@@ -518,6 +518,8 @@ def build_image(args, layer, mode, tools, frozen):
         '-DP2_TIMER_MODE=' + str(int(args.timer_mode == 'legacy')), '-DP2_INTERVAL_PS=' + str(args.irq_period_us * 1000000),
         '-Wl,--build-id=none,--no-relax', '-Wl,-T,' + str(source_root / 'benchmark/p2/link_soc_coremark_ddr.ld'),
         '-Wl,-Map,' + str(output / 'program.map'), *[str(source_root / p) for p in SOFTWARE_SOURCES], '-o', str(elf)]
+    if getattr(args, 'npu', False):
+        command.insert(1, '-DP2_NPU=1')
     run(command, output / 'build.log')
     if subprocess.check_output([tools + 'nm', '-u', str(elf)], text=True).strip():
         raise ValueError('unresolved ELF symbols')
@@ -601,7 +603,7 @@ def load_frozen(path):
 
 
 def rtl_sources():
-    return {str(p): sha(p) for pattern in ('vsrc/**/*.sv', 'vsrc/**/*.svh', 'vsrc/**/*.vh',
+    return {str(p): sha(p) for pattern in ('vsrc/**/*.sv', 'vsrc/**/*.svh', 'vsrc/**/*.vh', 'third_party/yolo_npu128/**/*.sv',
                                           'tb/soc/*.sv', 'tb/soc/*.svh', 'tb/common/*.sv',
                                           'tb/common/*.svh', 'tb/common/*.vh', 'tb/benchmark/*.sv', 'scripts/*.f',
                                           'scripts/verilator/p2_core_config.sh',

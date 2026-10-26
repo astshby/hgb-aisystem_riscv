@@ -2,7 +2,122 @@
 
 > 写作约束：[skills/regulation.md](../../../skills/regulation.md)。本文记录工具、流程、约束和结果，不把工具 Fmax 写成板上频率。
 
-## 当前基线
+当前开发基线固定为 `baseline-rv32-soc-npu-20261027`，采用下面 `aaf63f9` 的系统
+地址优化及 ROB16/四平台/NPU 配置；`e1598be` 只作为本地比较。发布快照与选定
+测量源逐文件匹配，本次冻结未新增 RTL 或重跑 PDS。核级 104.7120 MHz 仍属于
+继承的 `6cb7535` Core+TCM 测量；当前整机为 89.3096 MHz，未布局布线。
+
+## AXI 地址递增候选（2026-10-26，aaf63f9）
+
+`soc/tcm-stream-address@aaf63f9` 在 `6cb7535` 上只调整 scalar AXI 从口的 beat 地址
+保存与递增边界，原请求/响应拍数不变。完整 SoC+NPU 使用相同 C1 时钟、ROB16、
+冻结 2 次 TCM 固件和同份 DDR IP；标准综合估计如下：
+
+| 域 | 目标 MHz | 6cb7535 Fmax MHz | 地址递增 Fmax MHz | 新 WNS ns |
+|---|---:|---:|---:|---:|
+| Core | 100 | 87.3057 | 89.3096 | −1.197 |
+| SYS | 80 | 83.8997 | 83.8926 | +0.580 |
+| DDR user | 125 | 144.7387 | 144.6969 | +1.089 |
+| periph | 25 | 89.2698 | 89.0076 | +28.765 |
+| NPU | 100 | 106.9633 | 112.3343 | +1.098 |
+
+资源从 71,811 LUT/66,815 FF 改为 71,659 LUT/66,825 FF：LUT −152、FF +10
+（+0.015%），DRM/APM 保持 162.5/86，0 latch。Core/NPU 分别提高 2.295%/5.021%；
+其他域的估计上限略降，均仍高于既定工作目标。四层 CoreMark 的 24 项镜像、周期和
+CRC 与 `6cb7535` 一致。Core/package 90 份源文件未改，核级 104.7120 MHz 仍属于
+下节 `6cb7535` 的 Core+TCM 综合，不能当作本轮整机频率。
+
+新 Core 最差 Store valid→地址/字节覆盖→双口请求选择→Load state，18 层、扇出 44，
+数据延迟 10.711 ns。SYS 为读返回轮询指针到另一指针，15 层、扇出 434；NPU 为
+MMIO 地址到 weight 写使能，13 层、扇出 34。原始 DDR→SYS/periph→SYS setup
+−6.063/−3.072 ns、SYS→DDR hold −4.770 ns、DDR→PHY1 hold −1.138 ns，DDR 同域
+hold −0.006 ns/3 端点仍保留；NPU 同域 hold +0.408 ns。CDC/PHY/I/O 仍待物理流程。
+
+原生工程 `$PDS_WORK_ROOT/work/soc-tcm-stream-20261026/pointer-a/`，综合启动前
+物理/提交余量 11.322/7.237 GiB；综合动作耗时 28 分 52 秒、工具池峰值 4432 MB。
+摘要与对照在 `logs/soc-tcm-stream-20261026/{synthesis,synthesis-comparison}.json`；
+仿真收据在 `build/soc-tcm-stream/20261026-a/`。未运行 P&R，布线 Fmax/WNS/未布通数未测。
+
+`soc/tcm-local-decode@e1598be` 再复用现有 TCM 专用译码，双宽回归及 24 项 CoreMark
+同周期/CRC 通过。组合工程 `local-decode-a/` 标准综合完成：Core/SYS/DDR-user/periph/NPU
+为 90.9835/83.6400/144.7178/95.4563/111.7568 MHz，Core WNS −0.991 ns。
+72,265 LUT/66,824 FF/162.5 DRM/86 APM，0 latch；比地址单项多 606 LUT、少 1 FF，
+LUT 高于 `6cb7535` 454，不符合 LUT 减少门槛，未采用。
+Core 最差 Store valid→转发/选择→整数 IQ packet，17 层、扇出 49。启动前物理/提交
+9.738/6.402 GiB；综合动作 14 分 10 秒、峰值 4398 MB。摘要在
+`logs/soc-tcm-decode-20261026/synthesis.json`；选定版本继续为地址递增单项。
+
+## ROB16 联合候选标准综合（2026-10-26）
+
+`core/lsu-shared-age-rob16` 采用 Load 分配沿提前请求、共享年龄矩阵、第二数据口只读
+载荷裁剪、MDU FU 路由和 ROB16。正常 ALU/Load/DSP 流水保持 8/10/10；C 尚未实现。
+Windows PDS 使用标准综合，Core+TCM 与完整 SoC+NPU 各自配对仿真源哈希和参数。
+
+| 配置/域 | 目标 MHz | 同域综合 Fmax MHz | WNS ns |
+|---|---:|---:|---:|
+| Core+TCM / Core | 100 | 104.7120 | +0.450 |
+| SoC+NPU / Core | 100 | 87.3057 | −1.454 |
+| SoC+NPU / SYS | 80 | 83.8997 | +0.581 |
+| SoC+NPU / DDR user | 125 | 144.7387 | +1.091 |
+| SoC+NPU / periph | 25 | 89.2698 | +28.798 |
+| SoC+NPU / NPU | 100 | 106.9633 | +0.651 |
+
+Core+TCM 为 26,400 LUT/19,663 FF/32 DRM36K/4 APM，比原同顶层基线分别少
+5,483 LUT、6,092 FF；DRM/APM 不变。最差 ISS packet→恢复/发射反馈→整数 IQ 数据口，
+18 层、扇出 32。真实 TCM 短测为 3.012983/2.994267 CoreMark/MHz，64 次对照为
+3.015015/2.996395；原基线 64 次为 2.724261/2.698377，使用相同 ELF/HEX。
+
+完整 SoC+NPU 为 71,811 LUT/66,815 FF/162.5 DRM36K/86 APM，比初始 NPU 接入版少
+7,517 LUT、6,331 FF，DRM/APM 不变。NPU AXI/CDC/设备子树为
+7,751 LUT/11,179 FF/126.5 DRM/82 APM。完整组 Core 最差已转到 AXI `write_q[14]`
+经地址计算、TCM 译码/bank 仲裁到 BRAM ADDRA，20 层、扇出 51；估计数据延迟
+11.039 ns，其中逻辑 2.184 ns、连线 8.855 ns。核级频率不能代替完整组频率。
+SYS 最差为复位释放→B 返回队列 CE，17 层、扇出 1942；NPU 为 MMIO 地址→bias
+写使能，13 层、扇出 34。SYS 比初始 NPU 版低 0.0070 MHz，仍高于 80 MHz 目标。
+
+原始 DDR→SYS setup −6.063 ns、periph→SYS −3.355 ns、SYS→DDR hold −4.680 ns、
+DDR→PHY1 hold −1.138 ns，以及 DDR 同域 hold −0.006 ns/3 端点均保留。
+NPU 同域 hold +0.408 ns；SYS→NPU/NPU→SYS setup +1.174/+1.194 ns，
+hold +0.093/+0.179 ns。CDC 物理绑定、Gray skew、PHY 和 I/O 尚待物理流程验收；
+没有用 false path 隐藏真实同步路径。
+
+原生工程位于 `$PDS_WORK_ROOT/work/core-tcm-20261026/`：`admit-rob16-b/` 与
+`rob16-soc-npu-b/`。启动前 Windows 物理/提交余量分别为 11.011/7.444 GiB、
+11.992/7.141 GiB；合体综合工具池峰值 4389 MB。75 个 DDR IP 输入逐字节匹配初始
+NPU 工程，源码配对记录为 `logs/npu-integration-20261026/rob16-source-pairing.json`。
+该目录的 `core-tcm-rob16-synthesis.json`、`soc-npu-rob16-synthesis.json` 保存报告
+和输入哈希。未运行 P&R，布线 Fmax、布线 WNS、未布通数和合体上板均未测。
+
+## NPU 初始接入标准综合（2026-10-26，b16a026）
+
+`soc/npu128-five-domain` 在 `main@a84ab1a` 上加入固定 YOLO `47ffb55` 的 128-MAC
+核与 AXI/CDC。第五域采用 GPLL CLKOUT3、800 MHz VCO /8、独立 BUFG；前四域频率
+保持不变。`--platform soc_npu` 使用与仿真配对的 Core/TCM 固件、完整 DDR IP 和
+NPU 源码哈希，原始参数及命令保存在 `benchmark.json`。
+
+| 域 | 目标 MHz | 同域综合 Fmax MHz | WNS ns |
+|---|---:|---:|---:|
+| Core | 100 | 84.4309 | −1.844 |
+| SYS | 80 | 83.9067 | +0.582 |
+| DDR user | 125 | 144.7387 | +1.091 |
+| periph | 25 | 85.2806 | +28.274 |
+| NPU | 100 | 105.7753 | +0.546 |
+
+总资源 79,328 LUT/73,146 FF/162.5 DRM36K/86 APM，0 latch。相对下文完整 DDR 基线
+增加 12,062 LUT/12,513 FF/126.5 DRM/82 APM；NPU AXI/CDC/设备子树为
+7,752 LUT/11,179 FF/126.5 DRM/82 APM。全局总线和 DMA 接入成本包含在总差值中。
+Core 最差 ISS→恢复→取指→TCM 数据口，16 层、扇出 75；NPU 最差
+MMIO request_addr_q→weight_data_q/CE，13 层、扇出 34。NPU 同域 hold +0.408 ns。
+原始跨域报告仍有 DDR→SYS setup −6.063 ns、periph→SYS −3.355 ns、SYS→DDR
+hold −4.680 ns，DDR→PHY1 hold −1.138 ns；没有用例外隐藏这些端点。
+新 NPU FIFO 的物理端点绑定与既有 CDC/PHY/I/O 检查须在物理阶段完成。
+
+标准 Windows PDS 综合成功，工具池峰值 4683 MB；启动前物理/提交余量均 ≥6 GiB。
+工程位于 `$PDS_WORK_ROOT/work/npu-integration-20261026/soc_npu/`，摘要在
+`logs/npu-integration-20261026/soc_npu-synthesis.json`。未运行 P&R，布线 Fmax、
+未布通数、bitstream 和合体上板未测。上游独立 NPU 板测结果不替代本工程验收。
+
+## 上一基线（2026-10-25）
 
 `baseline-rv32-soc-20261025` 固定当前 Core/SoC，统一测量入口为
 `prepare_benchmark.py`，配置来自 `scripts/benchmark_platforms.json`。三组标准综合

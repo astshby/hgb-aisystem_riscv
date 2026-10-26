@@ -2,7 +2,80 @@
 
 > 写作约束：[skills/regulation.md](../../../skills/regulation.md)。本文记录哪些改动真正改变了周期或频率，哪些只是结构变化。
 
-2026-10-23 当前分支 `soc/p2-p3-clock-study`，B20在B19 `0501f10` 上推进P2/P3步骤1–3。
+2026-10-27 已确认 `baseline-rv32-soc-npu-20261027` 为新开发基线，固定
+`ec85d36` 的选定代码树和下面的地址递增单项。后续从新标签建立用途分支，
+继续按 CoreMark/MHz、同配置频率和 LUT/FF 联合取舍；未采用实验保留在本地。
+
+2026-10-26 系统路径候选分两步保存：`soc/tcm-stream-address@aaf63f9` 在 AXI 地址
+接纳时保存 beat 起址，当前 beat 完成后递增；请求路径只加字内偏移，去掉每次按编号
+移位再加起址的计算。原握手和访问拍数保持。双宽 AXI 12/14 PASS、完整双宽回归、
+四层功能各 4 PASS；24 项 CoreMark 的镜像、周期和 CRC 与 `6cb7535` 一致。
+标准综合整机 Core 从 87.3057 提高到 89.3096 MHz，NPU 从 106.9633 提高到
+112.3343 MHz；71,659 LUT/66,825 FF，LUT −152、FF +10，DRM/APM 不变。
+SYS/DDR/periph 的估计上限略降，仍高于 80/125/25 MHz 目标。
+
+新最差已转到 Store valid→逐字节转发覆盖→双口请求选择→Load state，18 层、扇出 44。
+后续应检查地址重叠判断能否在已有分配边界保存，覆盖同拍分配、槽重用及恢复；
+不能通过额外等待 Store 消失来换时序。`soc/tcm-local-decode@e1598be` 再复用现有
+TCM 专用资格译码，省去系统口的外设编码与权限汇合；保留非法 DTCM 请求的应答
+owner，使错误载荷及拍数与旧实现相同。双宽各 14,176 地址检查及完整回归通过，
+24 项 CoreMark 仍同周期/CRC。组合标准综合为 90.9835 MHz、72,265 LUT/66,824 FF，
+比地址单项多 606 LUT、少 1 FF；LUT 高于 `6cb7535`，未采用。选定版本为
+`soc/tcm-stream-address@aaf63f9`，两个分支及报告均保留。
+Core/package 的 90 份源文件与 `6cb7535` 相同，流水仍为 8/10/10；C 尚未实现。
+
+当前容量候选为 `core/lsu-shared-age-rob16`：同镜像 TCM 为 3.012983/2.994267，
+标准综合 104.7120 MHz、WNS +0.450 ns、26,400 LUT/19,663 FF/32 DRM/4 APM。
+四平台短测 24 PASS，双宽功能各 4 PASS；旧 M0 固定 64 次为 3.526520/3.507011。
+相对原基线各平台成绩提高，资源下降；相对下述 ROB32 实验仍有吞吐成本，容量对照保留。
+真实 TCM 的 64 次同镜像对照为 3.015015/2.996395，原基线为 2.724261/2.698377；
+performance +10.673%，validation 仍略低于 3，计时区约 0.21 秒。双宽完整回归和各
+6 项容量检查通过。完整 SoC+NPU 综合 Core 为 87.3057 MHz，最差 AXI 地址计算→TCM
+仲裁→BRAM ADDRA；NPU 为 106.9633 MHz，总计 71,811 LUT/66,815 FF/162.5 DRM/86 APM。
+下一项应在 AXI→TCM 路径预备地址/许可，保留 bank 仲裁边界，并检查持续 burst 吞吐；
+核内增级和 C 扩展各自对照，最长正常路径 ≤12，联合性能及资源符合门槛后再组合。
+完整回归和五域结果见[项目介绍](../PROJECT_INTRO.md)。
+
+2026-10-26 共享年龄/只读第二口候选为 `core/lsu-shared-age-rob32`，保持 ROB32。
+LQ/SQ 在分配沿共享相对年龄矩阵，槽重用更新对应关系；第二数据口固定写控制/载荷为 0。
+双宽 LSU 专项各 4 PASS，并用独立环形距离检查所有存活项的年龄，覆盖回卷、同拍分配、
+部分 offer 与取消。TCM 双模式周期保持 663,533/668,234，即 3.014168/2.992964。
+标准综合 `admit-readonly-b` 为 100.4016 MHz、WNS +0.040 ns，32,736 LUT、25,572 FF、
+32 DRM、4 APM、0 latch。最差 ISS→恢复/发射反馈→ISS，20 层、扇出 64。
+LUT 比原基线多 853，尚未通过资源门槛；该组合尚未单独重跑完整回归和四平台矩阵。
+该次原生输入在 `$PDS_WORK_ROOT/work/core-tcm-20261026/admit-readonly-b/`，
+仿真与定向快照在 `build/core-tcm-experiments/20261026-admit-readonly-b/`。
+PDS 对矩阵 typedef 需完整 `core_config_pkg` 参数限定名；前次编译错误日志保留。
+
+前一候选为 `core/lsu-admit-request`，基于 NPU 完成点
+`soc/npu128-five-domain@b16a026`；`main@a84ab1a` 与旧基线保持。LQ 分配沿可直接提交
+无冲突 Load，CPU memory adapter 的请求寄存队列仍保留。遇到背压时由刚分配的 LQ 槽
+持有地址和完整 ID；Store/MMIO 授权不变。MDU 操作数按 ISS 的 FU 类型选择，资格仍由
+实际发射/异常逻辑授权，正常 ALU/Load/DSP 为 8/10/10 级。允许的上限为 12，C 尚未实现。
+
+投机读的 DDR 范围按实际 512 MiB 窗口判断，窗口外访问等 ROB 队头授权。提前请求暴露了
+MRET 后错误路径的负指针访问；修复后片上背景测试的 CPU 高地址读为 0。
+GCC 16.1.0、O2、rv32im_zicsr、2000 B、2 次迭代，原冻结镜像的真实 Core+TCM
+performance/validation 为 663,533/668,234 拍，即 3.014168/2.992964 CoreMark/MHz。
+四平台 24 项短测通过；NPU 工作场景为 1.579361/1.567543，包含软件输出服务开销。
+旧 M0 一周期 TB 内存的固定 64 次镜像单列：18,131,124/18,247,806 拍，performance
+3.529842。两个存储模型的得分不能互换，短测试也不是正式十秒 CoreMark 成绩。
+
+窗口修复前的 `admit-b` 标准综合为 98.6096 MHz、WNS −0.141 ns，33,005 LUT、
+25,539 FF、32 DRM、4 APM；原真实 TCM 基线为 96.8523 MHz、31,883 LUT、25,755 FF。
+该候选 LUT 增加且不足 100 MHz，尚未采用；窗口修复后的 RTL 尚缺匹配综合。下一项
+保存 LQ/SQ 相对年龄，降低完成选择路径的重复比较，隔离快照的双模式周期不变。
+双宽回归完成：`make test` 各 82 PASS/2 SKIP，Core ISA 为 58/78 PASS（各 2 SKIP），
+SoC ISA 为 59/79 PASS（各 1 SKIP），整机各 5 PASS，smoke 各 1 PASS；
+四平台功能各 4 PASS，LSU 专项各 4 PASS。RV64 不跑 CoreMark/PDS。
+未做新布局布线。证据位于 `build/core-lsu-admit/20261026-d/`、
+`logs/core-lsu-admit-20261026-d/` 与 `logs/npu-integration-20261026/`；冻结源码、
+镜像/日志哈希及命令由构建收据保存。原生报告在
+`$PDS_WORK_ROOT/work/core-tcm-20261026/`，本地生成物未随 Git 发布。
+
+以下保留 P2/P3 和 P1 历史结果，按各自版本与编译参数阅读。
+
+2026-10-23 历史分支 `soc/p2-p3-clock-study`，B20在B19 `0501f10` 上推进P2/P3步骤1–3。
 Core的84个RTL/包文件保持P1，8/10/10级、ROB32/int8/mem4与预测/转发配置不变。
 当前生产RTL为 `1a4f8fa`；主要结果见[项目介绍](../PROJECT_INTRO.md)。本轮没有PDS，
 独立时钟候选的物理时序与85MHz下限仍待验证。

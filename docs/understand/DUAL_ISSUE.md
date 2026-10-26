@@ -2,7 +2,33 @@
 
 > 写作约束：[skills/regulation.md](../../../skills/regulation.md)。本文描述当前 scoreboard 后端及旧控制组边界。
 
-当前分支为 `soc/p2-p1-integration`，基于已合入 P1 的 `origin/main@91e33f7`。
+当前 `core/lsu-shared-age-rob16` 将 ROB 调为 16 项，其余 int8/mem4、LQ4/SQ4、
+双发射/双退休和 8/10/10 流水结构保持。`p1_core_config.sh` 与统一测量配置同时选择
+ROB16，旧基线及下述 ROB32 分支保留；性能/资源成本按同镜像分别记录。
+双宽完整回归、各 4 项 LSU 检查和各 6 项容量检查通过；容量检查包含环形年龄回卷、
+重命名、恢复、双退休、异常及 IRQ。允许后续正常流水 ≤12，C 扩展尚未实现。
+
+共享年龄候选 `core/lsu-shared-age-rob32` 继续保持以下流水和容量。LQ/SQ 分配沿保存
+共同存活项的相对年龄，一对项只存一个方向；槽重用更新对应行/列，同拍新项直接比较。
+LQ/SQ 与外层请求/完成仲裁复用该矩阵。第二数据口只能发 Load，显式固定写字段为零。
+`lsu_age_checker` 用独立环形距离检查存活项；双宽四项 LSU 测试均通过。
+性能与资源结果见[优化学习](OPTIMIZATION.md)，暂未作为 main 基线。
+
+此前提前请求分支为 `core/lsu-admit-request`，起点 `soc/npu128-five-domain@b16a026`，
+保留 ROB32、int8/mem4、LQ4/SQ4、双发射/双退休、Tournament、RAS0、OOO0、转发模式 3。
+正常 ALU/Load/DSP 路径仍为 8/10/10 级；允许上限 12，尚未加入 C 扩展。
+
+本轮只改 Load 提交等待和 MDU 操作数选择。Load 在分配沿无冲突时即可展示请求；
+未握手的请求在同一分配沿锁定 LQ owner，后续载荷保持。冲突、部分 Store 覆盖、
+MMIO 及窗口外读仍由原队列处理。窗口外读等队头授权，取消读的响应只排空。
+Load 不保存无用写载荷。MDU 数据选择使用已寄存 FU 类型，实际有效位仍经过原先
+发射许可，避免分支/CSR 分类进入 DSP 数据多路器。新 TB 覆盖分配与接纳同沿、
+双口、背压、恢复、同拍 Store 转发、MMIO、部分 offer、旧 owner 和 DDR 窗口边界；
+RV32/RV64 各 7 类检查通过。结果与物理待办见[优化学习](OPTIMIZATION.md)。
+
+以下为历史 P1 集成与优化记录，参数不代表当前实验配置。
+
+历史集成分支为 `soc/p2-p1-integration`，基于已合入 P1 的 `origin/main@91e33f7`。
 P2 在 `baseline/p2-before-p1-20261023@f2b33b4` 完整保存；集成的 84 个 Core/包文件
 与 main 一致，76 个 P2 SoC 文件与保存点一致，未借集成修改 Core RTL。
 当前选择 ROB32、独立 int8/mem4、有限整数乱序、转发模式 3、Tournament/RAS；

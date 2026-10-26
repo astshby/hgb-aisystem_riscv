@@ -2,6 +2,7 @@
 // Description: Two-buffer copy engine with one unified AXI master for Flash, TCM and DDR.
 module dma_axi_master #(
     parameter int DDR_BYTES = 0,
+    parameter bit NPU_ENABLE = 0,
     parameter int FLASH_BYTES = 0
 ) (
     input logic clk, rst,
@@ -22,7 +23,7 @@ module dma_axi_master #(
     block_types_pkg::block_r_t rd_data;
     block_types_pkg::block_w_t wr_data;
     block_types_pkg::block_b_t wr_rsp;
-    dma_block_engine #(.DDR_BYTES(DDR_BYTES), .FLASH_BYTES(FLASH_BYTES), .WIDE_ENABLE(1), .UNIFIED_BUS(1)) u_engine (
+    dma_block_engine #(.DDR_BYTES(DDR_BYTES), .FLASH_BYTES(FLASH_BYTES), .NPU_ENABLE(NPU_ENABLE), .WIDE_ENABLE(1), .UNIFIED_BUS(1)) u_engine (
         .clk, .rst, .start_valid, .start_src, .start_dst, .start_length,
         .busy, .finish_valid, .finish_error, .finish_code, .finish_bytes, .finish_addr,
         .req_valid, .req_ready, .request, .rsp_valid, .rsp_ready, .response,

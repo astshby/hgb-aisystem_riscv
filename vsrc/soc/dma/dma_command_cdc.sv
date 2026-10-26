@@ -2,6 +2,7 @@
 // Description: Atomic DMA command/result mailboxes; peripheral BUSY covers the complete cross-domain transaction.
 module dma_command_cdc #(
     parameter int DDR_BYTES = 0,
+    parameter bit NPU_ENABLE = 0,
     parameter int FLASH_BYTES = 0
 ) (
     input logic clk_sys, rst_sys, clk_periph, rst_periph,
@@ -31,7 +32,7 @@ module dma_command_cdc #(
         .in_valid(start_valid), .in_ready(command_ready), .in_data(command_in),
         .out_valid(command_valid), .out_ready(!engine_busy), .out_data(command_out));
     assign command_accept = command_valid && !engine_busy;
-    dma_axi_master #(.DDR_BYTES(DDR_BYTES), .FLASH_BYTES(FLASH_BYTES)) u_master (
+    dma_axi_master #(.DDR_BYTES(DDR_BYTES), .FLASH_BYTES(FLASH_BYTES), .NPU_ENABLE(NPU_ENABLE)) u_master (
         .clk(clk_sys), .rst(rst_sys), .start_valid(command_accept), .start_src(command_out.src),
         .start_dst(command_out.dst), .start_length(command_out.length), .busy(engine_busy),
         .finish_valid, .finish_error(result_in.error), .finish_code(result_in.code),

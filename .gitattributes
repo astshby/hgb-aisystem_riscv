@@ -1,2 +1,5 @@
 # 官方 CoreMark 快照逐字节保留，包括上游已有的行尾空白。
 benchmark/coremark/vendor/coremark/** -whitespace
+
+# Pinned dependency hashes describe upstream bytes, including line endings.
+third_party/yolo_npu128/** -text

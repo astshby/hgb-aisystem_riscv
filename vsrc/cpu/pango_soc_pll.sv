@@ -1,17 +1,19 @@
 // Module: pango_soc_pll
 // Description: Static LOGOS2 GPLL profiles for the Core, system and peripheral domains.
 module pango_soc_pll #(
-    parameter int unsigned CLOCK_PROFILE = 1
+    parameter int unsigned CLOCK_PROFILE = 1,
+    parameter bit NPU_ENABLE = 0
 ) (
     input logic ref_clk,
     input logic reset_n,
     output wire clk_core,
     output wire clk_sys,
     output wire clk_periph,
+    output wire clk_npu,
     output wire locked
 );
     localparam int unsigned SYS_DIV = CLOCK_PROFILE == 4 ? 8 : 10;
-    wire pll_core, pll_sys, pll_periph;
+    wire pll_core, pll_sys, pll_periph, pll_npu;
 
     // 125 / 5 = 25 MHz PFD；25 * 4 * 8 = 800 MHz VCO。
     // CLKOUTF 内反馈，ODIV=8/10/32 对应 100/80/25 MHz；C4 仅将 SYS 改为 /8。
@@ -31,7 +33,7 @@ module pango_soc_pll #(
         .CLKIN1(ref_clk), .CLKIN2(1'b0), .CLKIN_SEL(1'b0), .CLKFB(1'b0),
         .RST(!reset_n), .PLL_PWD(1'b0),
         .CLKOUT0(pll_core), .CLKOUT1(pll_sys), .CLKOUT2(pll_periph), .LOCK(locked),
-        .CLKOUT0N(), .CLKOUT1N(), .CLKOUT2N(), .CLKOUT3(), .CLKOUT3N(),
+        .CLKOUT0N(), .CLKOUT1N(), .CLKOUT2N(), .CLKOUT3(pll_npu), .CLKOUT3N(),
         .CLKOUT4(), .CLKOUT5(), .CLKOUT6(), .CLKOUTF(), .CLKOUTFN(), .DPS_DONE(),
         .DPS_CLK(1'b0), .DPS_EN(1'b0), .DPS_DIR(1'b0),
         .CLKOUT0_SYN(1'b0), .CLKOUT1_SYN(1'b0), .CLKOUT2_SYN(1'b0),
@@ -43,6 +45,12 @@ module pango_soc_pll #(
     GTP_CLKBUFG u_core_clock (.CLKIN(pll_core), .CLKOUT(clk_core));
     GTP_CLKBUFG u_sys_clock (.CLKIN(pll_sys), .CLKOUT(clk_sys));
     GTP_CLKBUFG u_periph_clock (.CLKIN(pll_periph), .CLKOUT(clk_periph));
+    // 独立输出 /8=100 MHz；保留域边界，Core 后续改分频不要求 NPU 跟随。
+    if (NPU_ENABLE) begin : g_npu_clock
+        GTP_CLKBUFG u_clock (.CLKIN(pll_npu), .CLKOUT(clk_npu));
+    end else begin : g_no_npu_clock
+        assign clk_npu = 1'b0;
+    end
 
     initial begin
         assert (CLOCK_PROFILE == 1 || CLOCK_PROFILE == 4)

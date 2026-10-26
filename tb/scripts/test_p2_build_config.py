@@ -26,8 +26,8 @@ FIELDS = ('backend', 'issue', 'retire', 'mul', 'div', 'predictor', 'ras', 'split
 P0 = ('scoreboard', '2', '16', '0', '1', '0', '0', '0', '8', '4', '0', '0',
       'm0d1-p0r0q16i2-scoreboard')
 # p1_core_config.sh 当前已选择 RAS0/OOO0；历史 P1 配置不覆盖当前入口。
-P1 = ('scoreboard', '2', '32', '0', '1', '1', '0', '1', '8', '4', '0', '3',
-      'm0d1-p1r0q32i2-scoreboard-s1j8m4-f3')
+P1 = ('scoreboard', '2', '16', '0', '1', '1', '0', '1', '8', '4', '0', '3',
+      'm0d1-p1r0q16i2-scoreboard-s1j8m4-f3')
 
 
 class P2MakeConfigurationTests(unittest.TestCase):

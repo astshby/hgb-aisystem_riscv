@@ -28,6 +28,9 @@
 #ifndef P2_BACKGROUND
 #define P2_BACKGROUND 0
 #endif
+#ifndef P2_NPU
+#define P2_NPU 0
+#endif
 #if VALIDATION_RUN
 volatile ee_s32 seed1_volatile = 0x3415;
 volatile ee_s32 seed2_volatile = 0x3415;
@@ -153,6 +156,10 @@ static TCM_FN void dma_collect(unsigned restart)
     }
 }
 
+#if P2_NPU
+#include "npu_background.h"
+#endif
+
 void TCM_FN p2_timer_interrupt(void)
 {
     uintptr_t cause;
@@ -165,6 +172,9 @@ void TCM_FN p2_timer_interrupt(void)
     late_total_ticks += lateness;
     if (lateness > late_max_ticks) late_max_ticks = (uint32_t)lateness;
     dma_collect(background_active);
+#if P2_NPU
+    npu_collect(background_active);
+#endif
     if (timer_mode == 1) {
         // 显式旧对照：处理完成后按固定 peripheral tick 相对重设。
         timer_deadline = timer_now() + LEGACY_TIMER_TICKS;
@@ -209,6 +219,9 @@ void TCM_FN p2_start_time(void)
         timer_set(timer_deadline);
         __asm__ volatile("csrw mie, %0" :: "r"((uintptr_t)128));
     }
+#if P2_NPU
+    npu_start();
+#endif
     p2_roi_state = 1;
     irq_begin = irq_count;
     start_cycle = read_cycle();
@@ -221,6 +234,12 @@ void TCM_FN p2_stop_time(void)
     stop_cycle = read_cycle();
     irq_end = irq_count;
     p2_roi_state = 2;
+#if P2_NPU
+    npu_roi_tasks = npu_tasks;
+    npu_roi_vectors = npu_vectors;
+    for (unsigned i = 0; npu_running && i < 10000; i++) npu_collect(0);
+    if (npu_running || !npu_roi_tasks || !npu_roi_vectors) fail(95);
+#endif
     if (background_mode) {
         background_active = 0;
         timer_set(~(uint64_t)0);
@@ -250,6 +269,9 @@ void portable_init(core_portable *portable, int *argc, char *argv[])
     (void)argc; (void)argv;
     work = (core_results *)((unsigned char *)portable - offsetof(core_results, port));
     portable->portable_id = 1;
+#if P2_NPU
+    npu_prepare();
+#endif
     if (p2_platform[0] != 0x50324346u || p2_platform[1] != 1 ||
         p2_platform[2] == 0 || p2_platform[2] > 1000000u || p2_platform[3] > 4) fail(86);
     if (timer_mode > 1 || requested_interval_ps == 0) fail(87);
@@ -281,4 +303,8 @@ void portable_fini(core_portable *portable)
     ee_printf("P2_IRQ start=%lu stop=%lu roi=%lu\n", irq_begin, irq_end, irq_end - irq_begin);
     ee_printf("P2_TICKS high=%lu low=%lu\n", (ee_u32)(get_time() >> 32), (ee_u32)get_time());
     portable->portable_id = 0;
+#if P2_NPU
+    ee_printf("NPU_BACKGROUND tasks=%lu vectors=%lu roi_tasks=%lu roi_vectors=%lu errors=%lu\n",
+        npu_tasks, npu_vectors, npu_roi_tasks, npu_roi_vectors, errors);
+#endif
 }

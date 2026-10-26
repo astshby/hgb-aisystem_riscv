@@ -2,6 +2,135 @@
 
 > 写作约束：[skills/regulation.md](../../skills/regulation.md)。本文给项目目录、参数、环境、仿真和 FPGA 的当前状态，不把规划写成已实现。
 
+2026-10-27 用户确认新开发基线为 **`baseline-rv32-soc-npu-20261027`**：采用
+`ec85d36` 的代码树，包含 `aaf63f9` 地址递增，保留 ROB16/四平台/第五 NPU 时钟域。
+本次以单个汇总提交发布选定快照，原阶段提交和比较分支保留在开发者本地；下文的
+`aaf63f9`、`e1598be`、`6cb7535` 用于关联本机原始测量，并非本次上传的实验分支。
+GitHub 交付代码、配置、测试和报告摘要；原始 ELF/HEX、日志、PDS/IP 工程仍在本地，
+新环境按文中命令重建，不能直接逐字重放旧生成物。旧基线 `baseline-rv32-soc-20261025`
+保留。本次冻结只更新基线说明，生产 RTL、软件和测试与选定快照一致。
+
+2026-10-27 系统路径继续优化后选择 `soc/tcm-stream-address@aaf63f9`，Core/package
+90 份源文件与 `6cb7535` 相同，正常 ALU/Load/DSP 仍为 8/10/10，C 尚未实现。
+AXI 从口保存当前 beat 起址，在 beat 完成时递增，请求路径省去编号移位和一次加法。
+24 项四层短 CoreMark 的 ELF/HEX、周期和 CRC 均与下述 `6cb7535` 结果一致。
+两项当前模型也各重放真实 TCM 64 次，21,227,090/21,358,999 拍，
+3.015015/2.996395 CoreMark/MHz；与原候选同镜像/CRC/周期。结果在各自
+`build/{soc-tcm-stream,soc-tcm-decode}/20261026-long64/results/`，正式十秒成绩仍未测得。
+
+| 完整 SoC+NPU 域 | 目标 MHz | 当前综合 Fmax MHz | WNS ns |
+|---|---:|---:|---:|
+| Core | 100 | 89.3096 | −1.197 |
+| SYS | 80 | 83.8926 | +0.580 |
+| DDR user | 125 | 144.6969 | +1.089 |
+| periph | 25 | 89.0076 | +28.765 |
+| NPU | 100 | 112.3343 | +1.098 |
+
+总资源 71,659 LUT/66,825 FF/162.5 DRM/86 APM，0 latch。相对 `6cb7535`，Core/NPU
+估计频率 +2.295%/+5.021%，LUT −152、FF +10（+0.015%）；其他域估计上限略降，
+仍高于对应目标。Core 最差已转到 Store valid→转发覆盖→双口选择→Load state，
+18 层、扇出 44。100 MHz 的整机 Core 目标尚未满足；CDC/PHY/I/O 仍需物理验收。
+
+比较分支 `soc/tcm-local-decode@e1598be` 复用专用 TCM 译码，同样通过完整仿真，
+Core 达 90.9835 MHz；但总 LUT 72,265，比选定单项多 606、高于 `6cb7535` 454，
+因此未采用。两分支和报告保留。双宽回归：`make test` 各 82 PASS/2 SKIP，Core ISA
+58/78 PASS、各 2 SKIP，SoC ISA 59/79 PASS、各 1 SKIP，整机各 5 PASS，smoke 各
+1 PASS；AXI 为 12/14 PASS、无 SKIP，四层功能各 4 PASS。专用译码另有双宽各
+14,176 个地址/权限检查通过。RV64 不测 CoreMark/PDS，本轮未运行 P&R。
+
+两项证据分别在 `build/{soc-tcm-stream,soc-tcm-decode}/20261026-a/` 和
+`logs/{soc-tcm-stream,soc-tcm-decode}-20261026/`；模型和源码收据逐一匹配各自提交。
+原生工程在 `$PDS_WORK_ROOT/work/soc-tcm-stream-20261026/{pointer-a,local-decode-a}/`，
+两次启动前物理/提交余量均 ≥6 GiB。原始镜像、日志和 PDS 报告未随 Git 发布。
+核级 Core+TCM 的 104.7120 MHz 仍引用下面 `6cb7535` 的综合结果，当前两项未重跑
+核级综合；第二、三层也未补测本轮综合，不能使用旧分支频率替代。
+
+以下为本轮继承的 `6cb7535` 联合候选及原基线数据；各项按标明的版本阅读。
+
+2026-10-26 的联合候选为 `core/lsu-shared-age-rob16`，保留 `main@a84ab1a` 和 ROB32
+比较分支。采用分配沿提前提交 Load、共享年龄矩阵、只读第二口写载荷裁剪和 MDU FU
+直接路由，仿真/综合入口共同选择 ROB16、int8/mem4、LQ4/SQ4、RAS0、OOO0、forward3。
+结构仍按 ALU/Load/DSP 的 8/10/10 级记录，减少的是分配后的请求等待，未新增 C 扩展。
+
+真实 Core+TCM 标准综合为 **104.7120 MHz、WNS +0.450 ns**，26,400 LUT、19,663 FF、
+32 DRM、4 APM、0 latch。相对原真实 TCM 基线：频率 +8.115%、LUT −17.197%、FF −23.654%。
+同一 GCC 16.1.0、O2、rv32im_zicsr、2000 B、2 次迭代冻结镜像的结果如下：
+
+| 场景 | performance 周期 / CoreMark/MHz | validation 周期 / CoreMark/MHz |
+|---|---|---|
+| 四组各自 TCM 驻留 | 663,794 / 3.012983 | 667,943 / 2.994267 |
+| 片上 TCM + DMA/IRQ | 766,375 / 2.609688 | 773,010 / 2.587289 |
+| DDR cold | 836,970 / 2.389572 | 842,413 / 2.374132 |
+| DDR warm | 831,765 / 2.404525 | 837,329 / 2.388547 |
+| DDR + DMA/IRQ | 957,051 / 2.089753 | 964,263 / 2.074123 |
+| DDR + DMA/IRQ + NPU | 1,316,595 / 1.519070 | 1,327,930 / 1.506103 |
+
+四平台共 24 PASS，Core+TCM performance 比原基线提高 10.564%；validation 为
+2.994267，尚不足 3。以上为短仿真，未构成正式十秒 CoreMark 成绩。旧 M0 一周期
+TB 存储另列：固定 64 次 18,148,201/18,249,159 拍，3.526520/3.507011 CoreMark/MHz。
+ROB16 相对提前请求的 ROB32 候选略损失 TCM/M0 吞吐，NPU 背景成绩也低于该分支的
+1.579361；与原基线及 NPU 初始接入版本比较，各场景均提高。保留两种容量供后续选择。
+
+真实 TCM 另做同镜像 64 次对照，保持 O2、2000 B 及相同软硬件接口：
+
+| 版本 | performance 周期 / 每 MHz | validation 周期 / 每 MHz |
+|---|---|---|
+| 原 ROB32 基线 | 23,492,612 / 2.724261 | 23,717,958 / 2.698377 |
+| 当前 ROB16 候选 | 21,227,090 / 3.015015 | 21,358,999 / 2.996395 |
+
+performance 提高 10.673%，validation 提高 11.044%。两版本 ELF/HEX 哈希相同，旧基线
+使用已保存且验过哈希的仿真器。候选计时区约 0.212/0.214 秒，仍未满足正式十秒规则；
+validation 仍不足 3。该结果与上面的 2 次迭代、旧 M0 一周期存储结果分别记录。
+
+双宽四平台功能各 4 PASS，LSU 定向各 4 PASS，配置/暂存工具 117 PASS；完整双宽
+回归通过：`make test` 各 82 PASS/2 SKIP，Core ISA 为 58/78 PASS（各 2 SKIP），
+SoC ISA 为 59/79 PASS（各 1 SKIP），整机各 5 PASS，smoke 各 1 PASS。ROB16 容量专项
+各 6 PASS，覆盖年龄回卷、重命名、恢复、退休和异常/IRQ。RV64 不运行 CoreMark/PDS。
+
+完整 SoC+NPU 匹配标准综合也已完成：Core/SYS/DDR-user/periph/NPU 同域 Fmax 为
+**87.3057/83.8997/144.7387/89.2698/106.9633 MHz**，目标仍为 100/80/125/25/100 MHz。
+资源为 71,811 LUT、66,815 FF、162.5 DRM、86 APM、0 latch。Core 最差为 AXI 写地址
+生成→TCM 译码/仲裁→BRAM ADDRA，20 层、扇出 51，100 MHz 下 WNS −1.454 ns；
+核级 104.7120 MHz 不能作为整机频率。原 CDC 端点绑定、DDR/PHY hold 和 I/O 待办
+继续保留。NPU 实际工作短测在 ROI 内完成 32/33 个任务、核对 131/132 个输出向量，
+错误 0；包含 CPU Timer 服务成本。详细五域表见[FPGA 适配](fpga/FPGA_ADAPTATION.md)。
+
+未做本轮布局布线。证据在 `build/core-lsu-rob16/20261026-a/`、
+`logs/core-lsu-rob16-20261026/` 和 `logs/npu-integration-20261026/`，
+原生核级工程 `$PDS_WORK_ROOT/work/core-tcm-20261026/admit-rob16-b/`；源文件、参数、
+ELF/HEX、命令和日志哈希由收据保存。合体工程为同根 `rob16-soc-npu-b/`，核级和合体
+摘要分别为 `core-tcm-rob16-synthesis.json`、`soc-npu-rob16-synthesis.json`。64 次
+镜像/结果在 `build/core-lsu-rob16/20261026-long64/`，旧基线结果在同根
+`20261026-long64-baseline/`。本地生成物未随 Git 发布。
+
+以下 NPU 初始接入与 2026-10-25 基线结果按各自版本阅读。
+
+2026-10-26 新分支 `soc/npu128-five-domain` 从下面的固定基线继续，加入第四组
+`soc_npu`，Core 保持原样。NPU 引用 YOLO-accelerate `47ffb55` 的 128-MAC/分级 MMIO，
+通过 AXI/CDC 独立挂载，初始第五域为 100 MHz，原四域仍为 100/80/125/25 MHz。
+RV32/RV64 的 CPU 配置、DDR→DMA→NPU 装载及结果读回、两组有符号卷积通过；
+跨域专项各 4 PASS，覆盖同频、100/125/约 90 MHz NPU、背压、字节选通和协调复位。
+
+第四组短 CoreMark 双模式 10 PASS：NPU 空闲的 TCM/cold/warm/DDR DMA 场景与原基线
+周期完全相同。额外 NPU+DDR DMA/IRQ 场景 performance/validation 分别为
+1,388,742/1,403,362 周期、1.440152/1.425149 CoreMark/MHz；计时区内分别完成
+34/35 个驻留 4×1、Ci8/Co16 卷积任务，核对 138/140 个输出向量，无数值错误。
+该场景包含 CPU 在 Timer 中断里轮询、核对并释放输出槽的开销；NPU 没有直接 IRQ。
+AXI 仿真 RAM 仍不含 DDR3 PHY/刷新时延，不将此分数称为板上推理吞吐。
+NPU 80/125 MHz 两模式另有 4 PASS，performance 为 1.429957/1.445360；小任务的
+收益主要受 Timer 轮询服务限制，先保留独立 100 MHz，125 MHz 不作物理频率承诺。
+合体标准综合完成：Core/SYS/DDR/periph/NPU 分别为
+84.4309/83.9067/144.7387/85.2806/105.7753 MHz，NPU 在 100 MHz 目标下 WNS +0.546 ns。
+总资源 79,328 LUT/73,146 FF/162.5 DRM/86 APM；0 latch。未做合体布局布线，原
+CDC、PHY hold、I/O delay 待办保留，详细结果见 [FPGA 适配](fpga/FPGA_ADAPTATION.md)。
+
+新授权的候选允许最长正常流水 ≤12、可试 C 扩展，真实 Core+TCM 目标为
+CoreMark/MHz >3 与标准综合 >100 MHz。两项指标及 LUT/FF/DRM/APM 同配置比较；
+当前正式 Core 尚未增加流水或 C 扩展。隔离候选虽达 3.026465/MHz，但标准综合
+81.4067 MHz、LUT +90，未采纳。旧 M0 64 次镜像已重放，周期仍为
+20,307,247/20,452,186，3.151584/MHz；双宽功能合计 222/262 PASS、各 5 SKIP，
+工具 187 PASS；本轮没有 RV64 CoreMark。原三组完整数据与固定基线如下。
+
 2026-10-25 最新开发基线为 `baseline-rv32-soc-20261025`，测量实现来自
 `bench/unified-coremark-three-platforms@7449fe7`、Core 来自 E0u `9a7edd1`。
 基线补齐已用于原生综合的 C1/C4 暂存脚本、参数核验和配套测试，三套可运行平台
