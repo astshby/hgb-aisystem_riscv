@@ -7,7 +7,7 @@ module soc_top #(
     parameter int unsigned SOC_PROFILE = soc_config_pkg::SOC_PROFILE_FULL,
     parameter int unsigned DDR_BYTES = 0,
     parameter bit MM3_ACCEL_ENABLE = 1'b0,
-    parameter int unsigned MM3_MAC_LANES = 16,
+    parameter int unsigned MM3_MAC_LANES = mm3_config_pkg::MM3_GEMV_LANES,
     parameter bit DMA_WIDE_ENABLE = 1'b0,
     parameter bit DMA_BLOCK_ENABLE = 1'b0,
     parameter bit CACHE_BLOCK_ENABLE = 1'b0,

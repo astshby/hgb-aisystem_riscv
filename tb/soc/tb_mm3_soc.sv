@@ -1,6 +1,7 @@
 // Module: tb_mm3_soc
 // Description: Runs a bare-metal C image and passively observes console and tohost Stores.
 module tb_mm3_soc #(
+    parameter bit OP_PROGRAM = 1'b0,
     parameter int unsigned DDR_BYTES = 128*1024*1024,
     parameter int unsigned DDR_MODEL_BYTES = DDR_BYTES,
     parameter logic [31:0] CLOCK_HZ = 50000000,
@@ -146,6 +147,7 @@ module tb_mm3_soc #(
         );
     end
     string data_path, model_path, tokenizer_path, result_path;
+    string op_image,op_commands,op_ranges,op_control;
     int backend = 0, mode = 0, case_index = 0, trace_mode = 0, allocation_fail = 0, expected_exit = 0;
     logic observed_store;
     xlen_t observed_addr, observed_data;
@@ -216,6 +218,24 @@ module tb_mm3_soc #(
         for (int i=0;i<4;i++) v[i*8 +:8] = g_external.u_external.mem[(offset+32'(i))/DBUS_BYTES][((offset+32'(i))%DBUS_BYTES)*8 +:8];
         return v;
     endfunction
+    function automatic logic[31:0] mm3_trace_word(input logic[31:0] address);
+        return get_word(address-32'h80000000);
+    endfunction
+`include "tb/unit/mm3/mm3_trace_tasks.svh"
+    if(OP_PROGRAM&&MM3_ACCEL_ENABLE)begin:g_op_trace
+        bit previous_busy;
+        int unsigned command_index;
+        always @(posedge clk)begin
+            if(rst)begin previous_busy<=0;command_index<=0;end
+            else begin
+                previous_busy<=dut.g_mm3_accel.u_accel.busy;
+                if(previous_busy&&!dut.g_mm3_accel.u_accel.busy)begin
+                    mm3_trace_command(command_index,32'h80410000+command_index*128);
+                    command_index<=command_index+1;
+                end
+            end
+        end
+    end
     task automatic set_word(input int unsigned offset,input logic [31:0] value);
         for(int i=0;i<4;i++) set_byte(offset+32'(i),value[i*8 +:8]);
     endtask
@@ -251,6 +271,17 @@ module tb_mm3_soc #(
         for(int i=0;i<8;i++)$fwrite(fd,"%c",8'(get_word('h00401000+9*4+32'(i/4)*4) >> (8*(i%4))));
         $fclose(fd);
     endtask
+    task automatic dump_operator_program;
+        int fd;logic[31:0] address,bytes,num;
+        fd=$fopen(result_path,"wb");if(!fd)$fatal(1,"open result");
+        num=get_word('h00400114);if(num>mm3_config_pkg::MM3_MAX_COMMANDS)$fatal(1,"range count");
+        for(int r=0;r<int'(num);r++)begin
+            address=get_word('h00420000+32'(r)*8);bytes=get_word('h00420004+32'(r)*8);
+            if(address<32'h80000000||64'(address)+64'(bytes)>64'h80000000+DDR_MODEL_BYTES)$fatal(1,"range bounds");
+            for(int i=0;i<int'(bytes);i++)$fwrite(fd,"%c",8'(get_word((address+32'(i)-32'h80000000)&32'hfffffffc)>>(8*((address+32'(i))%4))));
+        end
+        $fclose(fd);
+    endtask
     initial begin
         uart_loopback=0;gpio_loopback=0;
         if(!$value$plusargs("IMEM=%s",imem_path) || !$value$plusargs("DATA=%s",data_path) ||
@@ -268,7 +299,10 @@ module tb_mm3_soc #(
         $readmemh(imem_path,dut.u_itcm.mem);
 `endif
         load_bytes(data_path,0);
-        if(mode!=0&&mode!=4)begin
+        if(OP_PROGRAM)begin
+            if(!$value$plusargs("IMAGE=%s",op_image)||!$value$plusargs("COMMANDS=%s",op_commands)||!$value$plusargs("RANGES=%s",op_ranges)||!$value$plusargs("CONTROL=%s",op_control))$fatal(1,"missing operator fixtures");
+            load_bytes(op_image,'h01000000);load_bytes(op_commands,'h00410000);load_bytes(op_ranges,'h00420000);load_bytes(op_control,'h00400100);
+        end else if(mode!=0&&mode!=4)begin
             if(!$value$plusargs("MODEL=%s",model_path) || !$value$plusargs("TOKENIZER=%s",tokenizer_path))$fatal(1,"missing model assets");
             load_bytes(model_path,'h01000000);load_bytes(tokenizer_path,'h05000000);
         end
@@ -289,6 +323,7 @@ module tb_mm3_soc #(
                         else $fatal(1,"missing real DMA/accelerator overlap");
                     $display("PASS MM3_CONCURRENT dma=%0d accel=%0d overlap=%0d",dma_commands,accel_commands,shared_overlap);
                 end
+                if(OP_PROGRAM)begin dump_operator_program();$display("PASS MM3_LAYER_SOC RV%0d cycles=%0d",XLEN,cycles);$finish;end
                 dump_bytes(result_path,'h00401000,512);dump_values();
                 if(trace_mode!=0)dump_bytes({result_path,".trace"},'h00410000,get_word('h00401000+120*4));
                 $display("PASS MM3_SOC RV%0d backend=%0d mode=%0d case=%0d cycles=%0d",XLEN,backend,mode,case_index,cycles);

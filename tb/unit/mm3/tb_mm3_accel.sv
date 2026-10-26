@@ -1,6 +1,6 @@
 // Module: tb_mm3_accel
 // Description: MMIO, AXI backpressure and exact real-size GEMV comparison against standalone C.
-module tb_mm3_accel #(parameter int unsigned MAC_LANES = 16);
+module tb_mm3_accel #(parameter int unsigned MAC_LANES = mm3_config_pkg::MM3_GEMV_LANES);
     timeunit 1ns;
     timeprecision 1ps;
     import core_config_pkg::*;
@@ -40,7 +40,7 @@ module tb_mm3_accel #(parameter int unsigned MAC_LANES = 16);
     logic checking = 0;
     always #5 clk = ~clk;
     always @(posedge clk) cycles <= cycles+1;
-    mm3_accel #(.DDR_BYTES(8*1024*1024),.MAC_LANES(MAC_LANES)) dut (.*);
+    mm3_gemv_accel #(.DDR_BYTES(8*1024*1024),.MAC_LANES(MAC_LANES)) dut (.busy_out(), .*);
     block_to_axi #(.DDR_BYTES(8*1024*1024)) bridge (.*);
     axi_block_memory_model #(.BYTES(8*1024*1024)) memory (.*);
     function automatic logic [31:0] get32();

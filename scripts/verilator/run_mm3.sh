@@ -16,7 +16,7 @@ export CCACHE_DIR="${CCACHE_DIR:-$PWD/build/ccache}" CCACHE_TEMPDIR="${CCACHE_TE
 mkdir -p "$CCACHE_DIR" "$CCACHE_TEMPDIR"
 action="${1:-unit}"; xlen="${2:-32}"
 [[ "$xlen" =~ ^(32|64)$ ]] || { echo 'XLEN must be 32 or 64' >&2; exit 2; }
-lanes="${MM3_MAC_LANES:-16}"; cap="${MM3_SIM_SEQ_LEN:-64}"; new="${MM3_SIM_NEW_TOKENS:-2}"
+lanes="${MM3_MAC_LANES:-$(awk '$2=="MM3_GEMV_LANES"{print $3}' vsrc/soc/mm3/mm3_config.h)}"; cap="${MM3_SIM_SEQ_LEN:-64}"; new="${MM3_SIM_NEW_TOKENS:-2}"
 max_cycles="${MM3_MAX_CYCLES:-1000000000000}"; jobs="${JOBS:-4}"
 case_jobs="${MM3_CASE_JOBS:-1}"; sim_jobs="${MM3_SIM_PARALLEL:-2}"
 [[ "$case_jobs" =~ ^[1-8]$ && "$sim_jobs" =~ ^[12]$ ]] || exit 2
@@ -37,7 +37,7 @@ sources=("$runtime/src/integer_math.c" "$runtime/src/integer_ops.c")
 if [[ "$action" == unit ]]; then
  "$hostcc" -std=c11 -O2 -I"$runtime/include" tb/unit/mm3/fixed_reference.c "${sources[0]}" -o "$build/fixed-reference"
  "$build/fixed-reference" > "$build/fixed.txt"
- "$verilator" --binary --timing --assert -Wall -Wno-fatal -j "$jobs" --top-module tb_mm3_fixed --Mdir "$build/fixed" vsrc/soc/mm3/mm3_fixed_pkg.sv vsrc/soc/mm3/mm3_fixed_math.sv tb/unit/mm3/tb_mm3_fixed.sv > "$log/fixed-build.log" 2>&1
+ "$verilator" --binary --timing --assert -Wall -Wno-fatal -j "$jobs" --top-module tb_mm3_fixed --Mdir "$build/fixed" vsrc/soc/mm3/common/mm3_fixed_pkg.sv vsrc/soc/mm3/common/mm3_fixed_math.sv tb/unit/mm3/tb_mm3_fixed.sv > "$log/fixed-build.log" 2>&1
  "$build/fixed/Vtb_mm3_fixed" +FIXTURE="$build/fixed.txt" | tee "$log/fixed.log"
  "$hostcc" -std=c11 -O2 -I"$runtime/include" tb/unit/mm3/gemv_reference.c "${sources[@]}" -o "$build/gemv-reference"
  "$build/gemv-reference" "$build/gemv.bin"

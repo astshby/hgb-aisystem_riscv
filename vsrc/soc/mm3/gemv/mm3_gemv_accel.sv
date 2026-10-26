@@ -1,10 +1,11 @@
-// Module: mm3_accel
+// Module: mm3_gemv_accel
 // Description: MMIO W8A16 GEMV with exact integer scales, vector-wide requantization and DDR block DMA.
-module mm3_accel #(
+module mm3_gemv_accel #(
     parameter int unsigned DDR_BYTES = 128*1024*1024,
-    parameter int unsigned MAC_LANES = 16
+    parameter int unsigned MAC_LANES = mm3_config_pkg::MM3_GEMV_LANES
 ) (
     input logic clk, rst,
+    output logic busy_out,
     input logic req_valid,
     output logic req_ready,
     input bus_types_pkg::bus_req_t request,
@@ -67,6 +68,7 @@ module mm3_accel #(
     logic [63:0] range_start [5], range_end [5];
     logic bad_config, overlap;
     assign busy = state_q != IDLE;
+    assign busy_out = busy;
     assign width_bytes = cfg[9] != 0 ? 4 : 2;
     mmio_endpoint u_mmio (.*);
     mm3_reader u_reader (

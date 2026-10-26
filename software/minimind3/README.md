@@ -1,6 +1,6 @@
 # MiniMind-3：FP32 与全整数 C 推理
 
-本目录仅保留 C FP32 原模型和 `w8a16_int` 全整数推理。普通编译、分词、生成均无需 Python、PyTorch 或 CUDA。默认单轮对话、关闭思考、贪心选择 Token。
+宿主生成工程保留 C FP32 原模型和 `w8a16_int` 全整数推理；`operators/` 另提供硬件算子参考与驱动。普通编译、分词、生成均无需 Python、PyTorch 或 CUDA。默认单轮对话、关闭思考、贪心选择 Token。
 
 从仓库根目录执行：
 
@@ -13,6 +13,107 @@ make -j4 PRECISION=w8a16_int
 ```
 
 不指定 `PRECISION` 时为 `fp32`。`main.c` 顶部的 `prompt` 保留为 `hello, how are you?`；修改后重新 `make` 即可。命令行 `--prompt` 优先。
+
+## 整数算子扩展交付（2026-10-27）
+
+**本轮状态：实现及静态检查完成，功能仿真待运行。** 本节对应 `codex/mm3-integer-operators`，基点 `cbf5a035a21570a24c9885e45543e7023b55ba28`。下面的命令入口已写入；本轮没有运行参考数值计算、任何功能仿真、综合、时序或上板。历史 GEMV 结果不代表新增算子通过。
+
+### 本轮做了什么
+
+- 将 RTL 拆为 `vsrc/soc/mm3/{common,gemv,gemm,ew_add,ew_mul,rmsnorm,rope,softmax,swiglu,kv_cache,attention,top}/`。原 GEMV 算法移到 `gemv/mm3_gemv_accel.sv`，旧寄存器和共享 DDR 出口继续保留；新 `top/mm3_accel.sv` 仲裁旧 GEMV 与描述符算子命令。
+- 新增默认 **8×8 寄存器化脉动 GEMM**，支持 QK 的 INT16×INT16、转置 B，以及 PV 的 UINT16×INT32，INT64 累加；支持分块、输入元素步长和非整除尾部。默认 GEMV 仍为 16 路，向量算子 8 路。
+- 新增整数 ADD/MUL、RoPE、Softmax、融合 SwiGLU、KV 读写和 GQA Attention 调度；Attention 的 QK/PV 共用上述真实 GEMM，不由宿主代算。
+- RMSNorm 新增平方规约树、512 项 LUT 和两次 Newton 倒平方根；阶段间有真实寄存器。常量工具同时生成可综合 case ROM 与 C 表，不依赖 DW 或 `$readmemh` 初始化计算 ROM。
+- `software/minimind3/operators/` 提供 128 字节命令 ABI、整数 C 软件参考、MMIO/Cache 驱动和裸机单层入口。新后端按命令分发，独立于旧 `IRuntime`；原宿主推理、默认提示词、原有 FP32/全整数运算保留。
+- `scripts/verilator/mm3_integer_reference.py` 为独立 Python 整数参考，不依赖 PyTorch；`mm3_fixture_ops.py` 从锁定参数抽取单层夹具，`mm3_compare_ops.py` 做严格字节比较。生成结果仅供比较，后级计算使用前级 DUT 实际输出。
+- 新增 CPU-free BFM 算子链测试台和真实 P1 CPU＋Cache＋MMIO/DMA 入口。默认均为第 0 层、Token ID 1、位置 0、无历史 KV；另有长度 4 的 Attention 用例。二者没有执行 LM Head、完整八层或文本生成。
+
+### 唯一配置源
+
+修改 [`vsrc/soc/mm3/mm3_config.h`](../../vsrc/soc/mm3/mm3_config.h)，再运行根目录 `make mm3-config`。注释为中文，宏必须写成十进制整数；SV 包和 C/RTL 常量表由脚本生成，不手工编辑。
+
+| 宏 | 默认 | 含义与约束 |
+|---|---:|---|
+| `MM3_GEMV_LANES` | 16 | 1/2/4/8/16/32；旧入口仍允许显式 `MM3_MAC_LANES` 覆盖 |
+| `MM3_GEMM_ROWS/COLS` | 8/8 | 脉动 PE 行列数，允许 1..16 |
+| `MM3_VEC_LANES` | 8 | 平方规约/向量乘法的组宽，1/2/4/8/16 |
+| `MM3_MAX_VECTOR` | 2432 | 新向量算子容量；旧 GEMV 仍可输出 6400 行 Head |
+| `MM3_NORM_MAX_LEN` | 768 | Norm 容量及离线长度倒数表上限 |
+| `MM3_SEQ_CAP` | 64 | 硬件 KV/Attention 容量，和宿主 `MAX_SEQ_LEN` 分开 |
+| `MM3_GEMM_MAX_M/N/K` | 16/96/96 | 缓冲容量；N/K 必须覆盖 96 和上下文容量 |
+| `MM3_DDR_BYTES` | 134217728 | 默认 128 MiB；与本次测试的 DDR 地址窗口一致 |
+| `MM3_RSQRT_LUT_BITS/ITERS` | 8/2 | 默认两区各 256 项、两次迭代；允许 bits=4..10、iters=1..3 |
+| `MM3_TEST_LAYER/POSITION` | 0/0 | 第一版夹具固定第一层、位置零；其他值会拒绝 |
+| `MM3_TEST_TOKEN_ID` | 1 | 可改为 0..6399 的输入 Token，不进行分词 |
+| `MM3_TEST_ATTN_LEN` | 4 | 独立 Attention 长度，2..上下文容量 |
+| `MM3_MAX_COMMANDS` | 256 | 单层命令/比较区域容量，最多 512 |
+| `MM3_TIMEOUT_CYCLES` | 50000000 | 测试台及 CPU 每命令超时保护；周期计数为 64 位 |
+
+768、2432、96、8 个 Q 头、4 个 KV 头、6400 词表是锁定模型维度，不是并行度。脚本检查这些值，不能只改头文件来改变已有权重。例：将 GEMM 改成 4×8，仅修改 `MM3_GEMM_ROWS`，重新生成配置后运行测试；若上下文改为 128，`MM3_GEMM_MAX_N/K` 也至少改为 128，重新评估片上缓冲与仿真资源。
+
+生成的 `build/mm3-ops/config/config.json` 保存完整配置及头文件 SHA256；构建目录使用前 16 位摘要。当前默认摘要 `ac60559d357f5ce9`。代码变化由 Make/Verilator 重建；运行产物另有唯一目录，配置变化不会混用旧目录。
+
+### 你来运行的入口
+
+从仓库根目录执行，先保证完整 Verilator 安装的 driver 位于 PATH；`VERILATOR_ROOT` 必须指向与 driver 同版本的安装目录。仅有 `verilator_bin` 不够。RISC-V 默认从 PATH 找 `riscv64-unknown-elf-*`，也可用 `RISCV_TOOL_ROOT` 指向工具 bin 目录；`HOST_CC`、`VERILATOR`、`JOBS` 可覆盖工具和内部编译并行度。
+
+```sh
+# 只生成配置/ROM；不会计算模型
+make mm3-config
+# 只做语法、编译、整数对象/ELF 审计和 RTL lint；不启动仿真
+make mm3-static-check
+
+# 以下才会计算数值或运行仿真，由你自行执行
+make mm3-ref
+make mm3-op-test OP=rmsnorm
+make mm3-op-test OP=all
+make mm3-attn-test
+make mm3-layer-test
+make mm3-layer-test TRACE=1 JOBS=4
+make mm3-layer-soc XLEN=32 TRACE=1 JOBS=4
+```
+
+`OP=all` 依次运行 add、mul、rmsnorm、rope、softmax、swiglu、gemm、kv；旧 GEMV 单元入口仍为 `make mm3-accel-unit XLEN=32`。`JOBS` 控制 Verilator 编译，不把一个模型分解为并行仿真。
+
+`mm3-ref` 先生成 Python 结果，再执行宿主 C，整数向量、尺度与 KV 的原始字节一致才继续。所有 RTL 入口也先做此预校验，公共准备失败会立即退出，不继续运行 RTL。`mm3-layer-soc` 在预校验夹具上启动真实 RISC-V 驱动，无需再做全模型 CRC 和分词。宿主只预装初始输入/权重、生成参考和收集结果；没有 DPI 数学或宿主推理替代 DUT。
+
+默认单层链：输入 Norm → Q/K/V 三个 Linear → 每头 Q/K Norm → RoPE → KV 写入 → Attention → O Linear → 残差 → Norm → Gate/Up → 融合 SwiGLU → Down → 残差。最终比较 768 个 INT16、输出 `IScale`、新增 K/V 和逐头尺度。GEMM 小用例包含转置、输入行填充步长、UINT16 概率和非整除尾部；Softmax 含均匀/单点/不均匀；向量含全零、正负极值和尾部。BFM 含响应反压稳定性、忙时重启拒绝、DONE/ERROR 保持与清除、非法零长度和输出邻接填充检查。上述是**待执行用例范围**，不是通过结果。
+
+运行目录和定位：
+
+- 构建/夹具：`build/mm3-ops/<摘要>/`、`fixtures/<case>/`；首次数值参考需要现有 `c_runtime/assets/model_w8a16_int.bin` 和 `integer_manifest.json`，会检查完整 SHA/长度，不重新量化。
+- 独立运行：`build/mm3-ops/<摘要>/runs/<UTC>-<PID>-<case>-<route>/`。保留初始 image、命令、比较区域、Python expected、C 日志/报告、实际输出、`simulation.log`、配置、提交和源码逐文件 SHA；CPU 路径另保留裸机 ELF。
+- 默认比较结果：`actual.report.json`，严格一致才有 `PASS MM3_COMPARE`。测试台自己的 `PASS MM3_PROGRAM/MM3_LAYER_SOC` 仅表示程序/协议完成，必须同时检查比较器。
+- `TRACE=1`：每命令完成后保存 `trace/op-NNN.bin`，与 `expected-op-NNN.bin` 对比，在报告中列出不一致命令；宿主 C 同时写入 `c-trace/op-NNN.bin` 作同样比较。即使算子覆盖写同一块 DDR，也在覆盖前取样。默认不保存这些中间快照。
+- `fixture.json` 的 `norm_vs_legacy`：用相同输入比较新 NR 与旧平方根算法，记录恢复真实值后的最大绝对误差、RMSE；不要求旧算法逐位一致。C/新 Python/RTL 之间仍要求整数/尺度严格一致。该字段在你运行参考前没有实测值。
+- 静态日志：`logs/mm3-ops/<摘要>/`；完成的测试另有 `logs/mm3-ops/latest-<case>-<route>-rv<宽度>` 链接。原有 `logs/mm3/` 与完整模型长回归入口保留，不自动调用。
+
+### 本轮实际检查和未验收项
+
+本轮仅运行配置/常量生成、Python `py_compile`、Shell `bash -n`、C 编译、RTL lint 和 Verilator C++ 模型的**编译**，未执行生成的模型。实际工具为 Python 3.12.3、GCC 13.3.0、RISC-V GCC 13.2.0、Verilator 5.044（`v5.044-52-g7e7b6d7fb`）。
+
+| 实际命令/检查 | 本轮结果 | 证据 |
+|---|---|---|
+| `make mm3-config` / 生成文件 `--check` | 完成 | `common/mm3_config_pkg.sv`、`common/mm3_tables_pkg.sv`、`operators/mm3_tables.h` |
+| `make mm3-static-check`：Shell/Python 语法、宿主参考/驱动编译 | 通过，未运行参考 | `host-build.log`、`static-report.json` |
+| RV32/RV64 裸机 ELF、整数算子对象编译及反汇编审计 | 通过，无浮点指令/软浮点调用，未执行 ELF | `cpu-rv*-build.log`、`operators-rv*.dump`、`*-unresolved.txt` |
+| 新算子链与旧 GEMV 单元 RV32/RV64 lint | 通过 | `lint-program-rv*.log`、`lint-legacy-unit-rv*.log` |
+| 真实 P1 SoC RV32/RV64，设备关闭/开启 lint 对照 | 新增结构警告 0；基线有 10 处结构警告，未消除 | `lint-soc-rv*-enable*.log`；检查 LATCH/MULTIDRIVEN/UNOPTFLAT/ALWCOMBORDER |
+| RV32 独立链 Verilator `--cc` 及生成 C++ 编译 | 完成；只生成/编译库，未启动仿真 | `codegen-rv32.log`、`codegen-cxx-build.log` |
+| C/Python 数值、RTL 功能、反压/错误用例、单层误差/周期 | **待你运行** | 下表预留 |
+| 综合、布局布线、时序、面积、功耗、上板 | **未执行** | 没有结果，不继承 hn_lab 的验收结论 |
+
+复现记录以 `logs/mm3-ops/<摘要>/static-report.json` 为准，包含检查时提交、工作区 dirty 状态、工具版本、配置、源码逐文件 SHA 和两个 ELF SHA。`git rev-parse HEAD` 可查看交付提交；报告在提交前生成时 `commit` 是基点，须同时使用其源码 SHA，不能误认为只检查了旧代码。整数参数本轮仅做文件校验：64,929,156 字节，SHA256 `48a892f78228d3b3f5d4a89f8cbeaa70e44384ee180fa493f53a7ba04e777b56`，源 revision `f92512d4cd6142fa9acc0d6022375049a8974bf6`。未导出或运行模型。
+
+| 待用户执行 | 整数/尺度一致 | 新 Norm 相对旧版 max_abs / RMSE | 周期 | 日志/结论 |
+|---|---|---|---|---|
+| C / 独立 Python | 待运行 | 待运行 | — | 待填写 |
+| RMSNorm / 其他单算子 | 待运行 | 待运行 | 待运行 | 待填写 |
+| 长度 4 Attention | 待运行 | — | 待运行 | 待填写 |
+| 单 Token 第 0 层独立 RTL 链 | 待运行 | 待运行 | 待运行 | 待填写 |
+| RV32 真实 CPU＋驱动单层 | 待运行 | 待运行 | 待运行 | 待填写 |
+
+当前版本没有新算子的数值通过证据，不能据此宣称精度、周期加速或时序满足目标。详细格式、算法和连接见 [SoC 算子设计](../../docs/understand/SOC_SYSTEM.md#整数算子扩展2026-10-27)。
 
 ## 配置与装载
 

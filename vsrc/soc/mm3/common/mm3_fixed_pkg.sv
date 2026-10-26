@@ -68,4 +68,19 @@ package mm3_fixed_pkg;
         if (a.e >= 0) return a.e >= 63 ? v != 0 : v > (lim >> a.e);
         return round128({64'b0,v}, 32'(-a.e)) > lim;
     endfunction
+    function automatic fixed_t add_fixed(input fixed_t a,b);
+        logic signed [31:0] e;
+        logic [63:0] av,bv;
+        if(a.v==0)return b;
+        if(b.v==0)return a;
+        e=a.e>b.e?a.e:b.e;
+        av=round128({64'b0,magnitude(a.v)},32'(e-a.e));
+        bv=round128({64'b0,magnitude(b.v)},32'(e-b.e));
+        return make_fixed((a.v<0?-$signed(av):$signed(av))+(b.v<0?-$signed(bv):$signed(bv)),e);
+    endfunction
+    function automatic logic signed [31:0] integer32(input fixed_t a);
+        logic [63:0] v;
+        v=integer_mag(a,1);
+        return a.v<0?-$signed(32'(v)):$signed(32'(v));
+    endfunction
 endpackage
