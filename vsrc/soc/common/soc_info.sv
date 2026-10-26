@@ -2,7 +2,7 @@
 // Description: Identification, capacity registers and asynchronous data-cache maintenance commands.
 module soc_info #(
     parameter int unsigned SOC_PROFILE = soc_config_pkg::SOC_PROFILE_FULL,
-    parameter logic [14:0] PRESENT = soc_config_pkg::SOC_FULL_PRESENT,
+    parameter logic [15:0] PRESENT = soc_config_pkg::SOC_FULL_PRESENT,
     parameter logic [31:0] CLOCK_HZ = 50000000,
     parameter bit DCACHE_ENABLE = 1'b1,
     parameter int unsigned DCACHE_BYTES = 4096,
@@ -47,7 +47,7 @@ module soc_info #(
             12'h030: read_data = {27'b0, cache_error, cache_fatal, (cache_error != cache_pkg::CACHE_OK), cache_busy};
             12'h034: read_data = 32'(cache_fault_addr);
             // 新增只读发现接口；既有容量、时钟与 Cache 维护寄存器保持原 ABI。
-            12'h038: read_data = {17'b0, PRESENT};
+            12'h038: read_data = {16'b0, PRESENT};
             12'h03c: read_data = {soc_config_pkg::SOC_DISCOVERY_ABI, 8'b0, 8'(SOC_PROFILE)};
             default: access_error = 1'b1;
         endcase

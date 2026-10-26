@@ -21,6 +21,7 @@ P1 使用 `source scripts/verilator/p1_core_config.sh`，选择 ROB32、int8/mem
 - 2 路 I$/D$，WB/WA D$，FENCE.I、维护命令、DMA 所有权交接。
 - DMA legacy 和两块 128B 双槽引擎，256 位 DDR 口，读写可重叠。
 - 标准 AXI 与 Pango 原生 DDR 桥；RT-Thread BSP、UART loader、CoreMark。
+- 可选 MiniMind W8A16 Linear 加速器与同 ELF 软件/硬件 Verilator 对比，默认关闭；入口及验收边界见 `software/minimind3/README.md`。
 
 ## 当前状态
 

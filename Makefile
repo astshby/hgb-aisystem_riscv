@@ -196,3 +196,14 @@ loader-soc-test:
 	bash scripts/loader/test_soc.sh $(XLEN)
 uart-rt-thread-test:
 	bash scripts/loader/test_rt_thread.sh $(XLEN)
+
+# MiniMind uses real RTL CPU cycles for both backends, with a shared ELF.
+.PHONY: mm3-accel-unit mm3-accel-soc mm3-benchmark mm3-model-compare
+mm3-accel-unit:
+	VERILATOR="$(VERILATOR)" bash scripts/verilator/run_mm3.sh unit $(XLEN)
+mm3-accel-soc:
+	VERILATOR="$(VERILATOR)" bash scripts/verilator/run_mm3.sh soc $(XLEN)
+mm3-benchmark:
+	VERILATOR="$(VERILATOR)" bash scripts/verilator/run_mm3.sh benchmark $(XLEN)
+mm3-model-compare:
+	VERILATOR="$(VERILATOR)" bash scripts/verilator/run_mm3.sh model $(XLEN)

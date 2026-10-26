@@ -6,6 +6,8 @@ module soc_top #(
     parameter bit LOCAL_TCM_ENABLE = 1'b0,
     parameter int unsigned SOC_PROFILE = soc_config_pkg::SOC_PROFILE_FULL,
     parameter int unsigned DDR_BYTES = 0,
+    parameter bit MM3_ACCEL_ENABLE = 1'b0,
+    parameter int unsigned MM3_MAC_LANES = 16,
     parameter bit DMA_WIDE_ENABLE = 1'b0,
     parameter bit DMA_BLOCK_ENABLE = 1'b0,
     parameter bit CACHE_BLOCK_ENABLE = 1'b0,
@@ -82,10 +84,10 @@ module soc_top #(
     import soc_addr_pkg::*;
     import bus_types_pkg::*;
     // 全局能力表只在此派生；后续热路屏蔽 fabric 目标不能改变软件看到的物理设备。
-    localparam logic [14:0] DEVICE_PRESENT =
+    localparam logic [15:0] DEVICE_PRESENT =
         (SOC_PROFILE == soc_config_pkg::SOC_PROFILE_LITE ?
          soc_config_pkg::SOC_LITE_PRESENT : soc_config_pkg::SOC_FULL_PRESENT) |
-        (DDR_BYTES != 0 ? 15'h4000 : 15'h0000);
+        (DDR_BYTES != 0 ? 16'h4000 : 16'h0000) | (MM3_ACCEL_ENABLE ? 16'h8000 : 16'h0000);
 `ifdef CORE_SCOREBOARD
     localparam bit NATIVE_MEMORY = 1;
 `else
@@ -93,8 +95,8 @@ module soc_top #(
 `endif
     // 新后端由原生 bank 路由拥有 TCM；物理能力发现仍保留两个窗口。
     // 物理能力发现保留两个 TCM；仅局部路由开启时从慢 fabric 的译码中移除。
-    localparam logic [14:0] SLOW_PRESENT =
-        DEVICE_PRESENT & ((LOCAL_TCM_ENABLE || NATIVE_MEMORY) ? 15'h7ff3 : 15'h7fff);
+    localparam logic [15:0] SLOW_PRESENT =
+        DEVICE_PRESENT & ((LOCAL_TCM_ENABLE || NATIVE_MEMORY) ? 16'hfff3 : 16'hffff);
     logic irq_software, irq_timer, irq_external;
     logic device_irq_software, device_irq_timer, device_irq_external;
     logic imem_req_valid, imem_req_ready, imem_rsp_valid, imem_rsp_ready, imem_rsp_error, imem_rsp_error_1;
@@ -137,11 +139,11 @@ module soc_top #(
     xlen_t cache_fault_addr, maint_fault_addr, backend_fault_addr;
     logic maint_req_valid, maint_req_ready, maint_rsp_valid, maint_rsp_ready, cache_fault_valid;
     logic fence_i_commit;
-    logic [14:0] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready;
+    logic [15:0] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready;
     logic ddr_slot_ready;
-    bus_req_t s_request [15];
-    bus_rsp_t s_response [15];
-    bus_error_e s_error [15];
+    bus_req_t s_request [16];
+    bus_rsp_t s_response [16];
+    bus_error_e s_error [16];
 
     logic dma_cpu_req_valid, dma_cpu_req_ready, dma_cpu_rsp_valid, dma_cpu_rsp_ready;
     bus_req_t dma_cpu_request;
@@ -383,6 +385,22 @@ module soc_top #(
         .rsp_ready(tcm_rsp_ready[1]), .response(tcm_response[1])
     );
 `endif
+    // 原 DMA 与加速器共享块出口；关闭功能时保留原 DMA 的直接接线。
+    logic [1:0] mm3_c_rd_cmd_valid;
+    logic [1:0] mm3_c_rd_cmd_ready;
+    block_types_pkg::block_cmd_t mm3_c_rd_cmd [2];
+    logic [1:0] mm3_c_rd_valid;
+    logic [1:0] mm3_c_rd_ready;
+    block_types_pkg::block_r_t mm3_c_rd_data [2];
+    logic [1:0] mm3_c_wr_cmd_valid;
+    logic [1:0] mm3_c_wr_cmd_ready;
+    block_types_pkg::block_cmd_t mm3_c_wr_cmd [2];
+    logic [1:0] mm3_c_wr_valid;
+    logic [1:0] mm3_c_wr_ready;
+    block_types_pkg::block_w_t mm3_c_wr_data [2];
+    logic [1:0] mm3_c_wr_rsp_valid;
+    logic [1:0] mm3_c_wr_rsp_ready;
+    block_types_pkg::block_b_t mm3_c_wr_rsp [2];
     soc_peripherals #(.DDR_BYTES(DDR_BYTES), .DMA_WIDE_ENABLE(DMA_WIDE_ENABLE),
                       .DMA_BLOCK_ENABLE(DMA_BLOCK_ENABLE), .CLOCK_HZ(CLOCK_HZ),
                       .SOC_PROFILE(SOC_PROFILE), .PRESENT(DEVICE_PRESENT),
@@ -390,11 +408,11 @@ module soc_top #(
                       .DCACHE_LINE_BYTES(DCACHE_LINE_BYTES),
                       .UART_DIVISOR(UART_DIVISOR)) u_peripherals (
         .clk, .rst, .uart_rx, .uart_tx, .gpio_in, .gpio_out, .gpio_oe,
-        .dma_block_rd_cmd_valid, .dma_block_rd_cmd_ready, .dma_block_rd_cmd,
-        .dma_block_rd_valid, .dma_block_rd_ready, .dma_block_rd_data,
-        .dma_block_wr_cmd_valid, .dma_block_wr_cmd_ready, .dma_block_wr_cmd,
-        .dma_block_wr_valid, .dma_block_wr_ready, .dma_block_wr_data,
-        .dma_block_wr_rsp_valid, .dma_block_wr_rsp_ready, .dma_block_wr_rsp,
+        .dma_block_rd_cmd_valid(mm3_c_rd_cmd_valid[0]), .dma_block_rd_cmd_ready(mm3_c_rd_cmd_ready[0]), .dma_block_rd_cmd(mm3_c_rd_cmd[0]),
+        .dma_block_rd_valid(mm3_c_rd_valid[0]), .dma_block_rd_ready(mm3_c_rd_ready[0]), .dma_block_rd_data(mm3_c_rd_data[0]),
+        .dma_block_wr_cmd_valid(mm3_c_wr_cmd_valid[0]), .dma_block_wr_cmd_ready(mm3_c_wr_cmd_ready[0]), .dma_block_wr_cmd(mm3_c_wr_cmd[0]),
+        .dma_block_wr_valid(mm3_c_wr_valid[0]), .dma_block_wr_ready(mm3_c_wr_ready[0]), .dma_block_wr_data(mm3_c_wr_data[0]),
+        .dma_block_wr_rsp_valid(mm3_c_wr_rsp_valid[0]), .dma_block_wr_rsp_ready(mm3_c_wr_rsp_ready[0]), .dma_block_wr_rsp(mm3_c_wr_rsp[0]),
         .irq_software(device_irq_software), .irq_timer(device_irq_timer), .irq_external(device_irq_external),
         .cache_command_valid, .cache_command,
         .cache_command_ready, .cache_busy, .cache_fatal, .cache_error, .cache_fault_addr,
@@ -407,6 +425,71 @@ module soc_top #(
         .s_request(s_request[4:13]), .s_rsp_valid(s_rsp_valid[13:4]),
         .s_rsp_ready(s_rsp_ready[13:4]), .s_response(s_response[4:13])
     );
+    if (MM3_ACCEL_ENABLE) begin : g_mm3_accel
+        logic mmio_req_valid, mmio_req_ready, mmio_rsp_valid, mmio_rsp_ready;
+        bus_req_t mmio_request;
+        bus_rsp_t mmio_response;
+        bus_transaction_register u_boundary (
+            .clk, .rst, .s_req_valid(s_req_valid[15]), .s_req_ready(s_req_ready[15]), .s_request(s_request[15]),
+            .s_rsp_valid(s_rsp_valid[15]), .s_rsp_ready(s_rsp_ready[15]), .s_response(s_response[15]),
+            .m_req_valid(mmio_req_valid), .m_req_ready(mmio_req_ready), .m_request(mmio_request),
+            .m_rsp_valid(mmio_rsp_valid), .m_rsp_ready(mmio_rsp_ready), .m_response(mmio_response)
+        );
+        mm3_accel #(.DDR_BYTES(DDR_BYTES), .MAC_LANES(MM3_MAC_LANES)) u_accel (
+            .clk, .rst, .req_valid(mmio_req_valid), .req_ready(mmio_req_ready), .request(mmio_request),
+            .rsp_valid(mmio_rsp_valid), .rsp_ready(mmio_rsp_ready), .response(mmio_response),
+            .rd_cmd_valid(mm3_c_rd_cmd_valid[1]), .rd_cmd_ready(mm3_c_rd_cmd_ready[1]), .rd_cmd(mm3_c_rd_cmd[1]),
+            .rd_valid(mm3_c_rd_valid[1]), .rd_ready(mm3_c_rd_ready[1]), .rd_data(mm3_c_rd_data[1]),
+            .wr_cmd_valid(mm3_c_wr_cmd_valid[1]), .wr_cmd_ready(mm3_c_wr_cmd_ready[1]), .wr_cmd(mm3_c_wr_cmd[1]),
+            .wr_valid(mm3_c_wr_valid[1]), .wr_ready(mm3_c_wr_ready[1]), .wr_data(mm3_c_wr_data[1]),
+            .wr_rsp_valid(mm3_c_wr_rsp_valid[1]), .wr_rsp_ready(mm3_c_wr_rsp_ready[1]), .wr_rsp(mm3_c_wr_rsp[1])
+        );
+        block_arbiter #(.CLIENTS(2)) u_dma_share (
+            .clk, .rst,
+            .c_rd_cmd_valid(mm3_c_rd_cmd_valid), .c_rd_cmd_ready(mm3_c_rd_cmd_ready), .c_rd_cmd(mm3_c_rd_cmd),
+            .c_rd_valid(mm3_c_rd_valid), .c_rd_ready(mm3_c_rd_ready), .c_rd_data(mm3_c_rd_data),
+            .c_wr_cmd_valid(mm3_c_wr_cmd_valid), .c_wr_cmd_ready(mm3_c_wr_cmd_ready), .c_wr_cmd(mm3_c_wr_cmd),
+            .c_wr_valid(mm3_c_wr_valid), .c_wr_ready(mm3_c_wr_ready), .c_wr_data(mm3_c_wr_data),
+            .c_wr_rsp_valid(mm3_c_wr_rsp_valid), .c_wr_rsp_ready(mm3_c_wr_rsp_ready), .c_wr_rsp(mm3_c_wr_rsp),
+            .rd_cmd_valid(dma_block_rd_cmd_valid), .rd_cmd_ready(dma_block_rd_cmd_ready), .rd_cmd(dma_block_rd_cmd),
+            .rd_valid(dma_block_rd_valid), .rd_ready(dma_block_rd_ready), .rd_data(dma_block_rd_data),
+            .wr_cmd_valid(dma_block_wr_cmd_valid), .wr_cmd_ready(dma_block_wr_cmd_ready), .wr_cmd(dma_block_wr_cmd),
+            .wr_valid(dma_block_wr_valid), .wr_ready(dma_block_wr_ready), .wr_data(dma_block_wr_data),
+            .wr_rsp_valid(dma_block_wr_rsp_valid), .wr_rsp_ready(dma_block_wr_rsp_ready), .wr_rsp(dma_block_wr_rsp)
+        );
+    end else begin : g_no_mm3_accel
+        assign s_req_ready[15] = 0; assign s_rsp_valid[15] = 0; assign s_response[15] = '0;
+        assign mm3_c_rd_cmd_valid[1] = '0;
+        assign dma_block_rd_cmd_valid = mm3_c_rd_cmd_valid[0];
+        assign mm3_c_rd_cmd_ready[0] = dma_block_rd_cmd_ready;
+        assign mm3_c_rd_cmd_ready[1] = '0;
+        assign mm3_c_rd_cmd[1] = '0;
+        assign dma_block_rd_cmd = mm3_c_rd_cmd[0];
+        assign mm3_c_rd_valid[0] = dma_block_rd_valid;
+        assign mm3_c_rd_valid[1] = '0;
+        assign mm3_c_rd_ready[1] = '0;
+        assign dma_block_rd_ready = mm3_c_rd_ready[0];
+        assign mm3_c_rd_data[0] = dma_block_rd_data;
+        assign mm3_c_rd_data[1] = '0;
+        assign mm3_c_wr_cmd_valid[1] = '0;
+        assign dma_block_wr_cmd_valid = mm3_c_wr_cmd_valid[0];
+        assign mm3_c_wr_cmd_ready[0] = dma_block_wr_cmd_ready;
+        assign mm3_c_wr_cmd_ready[1] = '0;
+        assign mm3_c_wr_cmd[1] = '0;
+        assign dma_block_wr_cmd = mm3_c_wr_cmd[0];
+        assign mm3_c_wr_valid[1] = '0;
+        assign dma_block_wr_valid = mm3_c_wr_valid[0];
+        assign mm3_c_wr_ready[0] = dma_block_wr_ready;
+        assign mm3_c_wr_ready[1] = '0;
+        assign mm3_c_wr_data[1] = '0;
+        assign dma_block_wr_data = mm3_c_wr_data[0];
+        assign mm3_c_wr_rsp_valid[0] = dma_block_wr_rsp_valid;
+        assign mm3_c_wr_rsp_valid[1] = '0;
+        assign mm3_c_wr_rsp_ready[1] = '0;
+        assign dma_block_wr_rsp_ready = mm3_c_wr_rsp_ready[0];
+        assign mm3_c_wr_rsp[0] = dma_block_wr_rsp;
+        assign mm3_c_wr_rsp[1] = '0;
+    end
     // mtime 比较和 IRQ 汇聚先寄存，再参与 Core 的排空/重定向控制。
     irq_register u_irq_register (
         .clk, .rst,

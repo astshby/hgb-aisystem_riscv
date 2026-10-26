@@ -15,11 +15,11 @@ module tb_soc_fabric #(
     logic [1:0] m_req_valid, m_req_ready, m_rsp_valid, m_rsp_ready;
     bus_req_t m_request [2];
     bus_rsp_t m_response [2];
-    logic [14:0] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready, raw_ready;
-    logic [14:0] allow_request;
-    bus_req_t s_request [15];
-    bus_rsp_t s_response [15];
-    bus_error_e s_error [15];
+    logic [15:0] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready, raw_ready;
+    logic [15:0] allow_request;
+    bus_req_t s_request [16];
+    bus_rsp_t s_response [16];
+    bus_error_e s_error [16];
     int accepted [2], completed [2];
     int checks = 0;
     int before0, before1;
@@ -51,7 +51,7 @@ module tb_soc_fabric #(
             .rsp_valid(s_rsp_valid[s]), .rsp_ready(s_rsp_ready[s]), .response(s_response[s])
         );
     end
-    for (genvar s = 4; s < 15; s++) begin : g_absent
+    for (genvar s = 4; s < 16; s++) begin : g_absent
         assign raw_ready[s] = 1'b0;
         assign s_rsp_valid[s] = 1'b0;
         assign s_response[s] = '0;

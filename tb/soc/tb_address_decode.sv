@@ -22,7 +22,7 @@ module tb_address_decode #(
     bus_req_t request;
     bus_target_e target;
     bus_error_e error;
-    region_t regions [14];
+    region_t regions [15];
     int checks = 0;
     logic [63:0] random_q = 64'h7a19_24b3_1357_2468;
 
@@ -94,7 +94,8 @@ module tb_address_decode #(
             '{65'(GPIO2_BASE), MMIO_BYTES, TARGET_GPIO2, 1'b0, 1'b1, 1'b1},
             '{65'(DMA_BASE), MMIO_BYTES, TARGET_DMA, 1'b0, 1'b1, 1'b1},
             '{65'(SOC_BASE), MMIO_BYTES, TARGET_SOC, 1'b0, 1'b1, 1'b1},
-            '{65'(DDR_BASE), DDR_BYTES, TARGET_DDR, 1'b1, 1'b1, 1'b0}
+            '{65'(DDR_BASE), DDR_BYTES, TARGET_DDR, 1'b1, 1'b1, 1'b0},
+            '{65'(MM3_BASE), MMIO_BYTES, TARGET_MM3, 1'b0, 1'b1, 1'b1}
         };
 
         // 每个边界逐字节扫描，组合全部访问大小、读写和取指标志。
@@ -114,9 +115,9 @@ module tb_address_decode #(
         for (int sample = 0; sample < 128; sample++) begin
             random_q = random_q * 64'd6364136223846793005 + 64'd1;
             check_address(random_q);
-            if (regions[sample % 14].bytes != 0)
-                check_address(64'(regions[sample % 14].base) +
-                              random_q % 64'(regions[sample % 14].bytes));
+            if (regions[sample % 15].bytes != 0)
+                check_address(64'(regions[sample % 15].base) +
+                              random_q % 64'(regions[sample % 15].bytes));
         end
         check_address(64'h0000_0000_ffff_fff8);
         check_address(64'h0000_0001_0000_0000);

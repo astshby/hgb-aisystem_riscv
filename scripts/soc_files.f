@@ -47,4 +47,8 @@ vsrc/soc/memory/tcm_dual_bank.sv
 vsrc/soc/cache/dcache_banked.sv
 vsrc/soc/cache/icache_native.sv
 vsrc/soc/memory/scoreboard_soc_memory.sv
+vsrc/soc/mm3/mm3_fixed_pkg.sv
+vsrc/soc/mm3/mm3_fixed_math.sv
+vsrc/soc/mm3/mm3_reader.sv
+vsrc/soc/mm3/mm3_accel.sv
 vsrc/soc/soc_top.sv
