@@ -1,5 +1,7 @@
 #include "integer.h"
+#ifndef MM3_FREESTANDING
 #include <string.h>
+#endif
 #ifdef MODEL_EMBED
 extern const unsigned char mm3_model_start[],mm3_model_end[],mm3_tokenizer_start[],mm3_tokenizer_end[];
 #endif

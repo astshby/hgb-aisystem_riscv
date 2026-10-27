@@ -1,5 +1,7 @@
 #include "integer.h"
+#ifndef MM3_FREESTANDING
 #include <string.h>
+#endif
 static int emit(IRuntime *r,int node,const void *v,unsigned n,int bits,const IScale *s,unsigned groups){if(!r->trace)return 0;uint32_t meta[4]={(unsigned)node,n,(unsigned)bits,groups};if(fwrite(meta,4,4,r->trace)!=4||fwrite(s,sizeof(*s),groups,r->trace)!=groups||fwrite(v,(size_t)bits/8,n,r->trace)!=n)return -1;return 0;}
 int iruntime_init(IRuntime *r,const IModel *m,unsigned capacity){memset(r,0,sizeof(*r));if(!capacity||capacity>m->capacity)return -1;r->model=m;r->capacity=capacity;size_t n=(size_t)8*capacity*384,heads=(size_t)8*capacity*4;r->keys=platform_alloc(n*2);r->values=platform_alloc(n*2);r->ks=platform_alloc(heads*sizeof(IScale));r->vs=platform_alloc(heads*sizeof(IScale));r->scores=platform_alloc((size_t)capacity*4);r->prob=platform_alloc((size_t)capacity*2);r->remainders=platform_alloc((size_t)capacity*8);r->order=platform_alloc((size_t)capacity*sizeof(unsigned));if(!r->keys||!r->values||!r->ks||!r->vs||!r->scores||!r->prob||!r->remainders||!r->order){iruntime_close(r);return -1;}return 0;}
 void iruntime_close(IRuntime *r){platform_free(r->keys);platform_free(r->values);platform_free(r->ks);platform_free(r->vs);platform_free(r->scores);platform_free(r->prob);platform_free(r->remainders);platform_free(r->order);r->keys=r->values=NULL;r->ks=r->vs=NULL;r->scores=NULL;r->prob=NULL;r->remainders=NULL;r->order=NULL;}
