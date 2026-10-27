@@ -190,15 +190,15 @@ module soc_top #(
     import soc_addr_pkg::*;
     import bus_types_pkg::*;
     // 全局能力表只在此派生；后续热路屏蔽 fabric 目标不能改变软件看到的物理设备。
-    localparam logic [14:0] DEVICE_PRESENT =
+    localparam logic [15:0] DEVICE_PRESENT =
         (SOC_PROFILE == soc_config_pkg::SOC_PROFILE_LITE ?
          soc_config_pkg::SOC_LITE_PRESENT : soc_config_pkg::SOC_FULL_PRESENT) |
-        (DDR_BYTES != 0 ? 15'h4000 : 15'h0000);
+        (DDR_BYTES != 0 ? 16'h4000 : 16'h0000);
     localparam bit NATIVE_MEMORY = 0;
     // 新后端由原生 bank 路由拥有 TCM；物理能力发现仍保留两个窗口。
     // 物理能力发现保留两个 TCM；仅局部路由开启时从慢 fabric 的译码中移除。
-    localparam logic [14:0] SLOW_PRESENT =
-        DEVICE_PRESENT & ((LOCAL_TCM_ENABLE || NATIVE_MEMORY) ? 15'h7ff3 : 15'h7fff);
+    localparam logic [15:0] SLOW_PRESENT =
+        DEVICE_PRESENT & ((LOCAL_TCM_ENABLE || NATIVE_MEMORY) ? 16'hfff3 : 16'hffff);
     logic irq_software, irq_timer, irq_external;
     logic device_irq_software, device_irq_timer, device_irq_external;
     logic imem_req_valid, imem_req_ready, imem_rsp_valid, imem_rsp_ready, imem_rsp_error, imem_rsp_error_1;
@@ -241,11 +241,11 @@ module soc_top #(
     xlen_t cache_fault_addr, maint_fault_addr, backend_fault_addr;
     logic maint_req_valid, maint_req_ready, maint_rsp_valid, maint_rsp_ready, cache_fault_valid;
     logic fence_i_commit;
-    logic [14:0] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready;
+    logic [15:0] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready;
     logic ddr_slot_ready;
-    bus_req_t s_request [15];
-    bus_rsp_t s_response [15];
-    bus_error_e s_error [15];
+    bus_req_t s_request [16];
+    bus_rsp_t s_response [16];
+    bus_error_e s_error [16];
 
     logic dma_cpu_req_valid, dma_cpu_req_ready, dma_cpu_rsp_valid, dma_cpu_rsp_ready;
     bus_req_t dma_cpu_request;
@@ -441,6 +441,10 @@ module soc_top #(
         .request(tcm_request[1]), .rsp_valid(tcm_rsp_valid[1]),
         .rsp_ready(tcm_rsp_ready[1]), .response(tcm_response[1])
     );
+    // 公共旧总线编号保留 MM3=15；默认 legacy soc_top 不实例化该设备。
+    assign s_req_ready[15] = 1'b0;
+    assign s_rsp_valid[15] = 1'b0;
+    assign s_response[15] = '0;
     soc_peripherals #(.DDR_BYTES(DDR_BYTES), .DMA_WIDE_ENABLE(DMA_WIDE_ENABLE),
                       .DMA_BLOCK_ENABLE(DMA_BLOCK_ENABLE), .CLOCK_HZ(CLOCK_HZ),
                       .SOC_PROFILE(SOC_PROFILE), .PRESENT(DEVICE_PRESENT),

@@ -8,7 +8,7 @@ package bus_types_pkg;
     typedef enum logic [3:0] {
         TARGET_ERROR, TARGET_ROM, TARGET_ITCM, TARGET_DTCM, TARGET_MTIME,
         TARGET_IRQ, TARGET_UART0, TARGET_UART1, TARGET_TIMER,
-        TARGET_GPIO0, TARGET_GPIO1, TARGET_GPIO2, TARGET_DMA, TARGET_SOC, TARGET_DDR
+        TARGET_GPIO0, TARGET_GPIO1, TARGET_GPIO2, TARGET_DMA, TARGET_SOC, TARGET_DDR, TARGET_MM3
     } bus_target_e;
     typedef struct packed {
         logic write;

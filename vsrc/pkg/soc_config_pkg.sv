@@ -13,7 +13,7 @@ package soc_config_pkg;
     // profile 仅决定实例是否存在，不搬移旧窗口或 IRQ 编号；bit 编号对应 bus_target_e。
     localparam int unsigned SOC_PROFILE_FULL = 0;
     localparam int unsigned SOC_PROFILE_LITE = 1;
-    localparam logic [14:0] SOC_FULL_PRESENT = 15'h3fff;
-    localparam logic [14:0] SOC_LITE_PRESENT = 15'h327f;
+    localparam logic [15:0] SOC_FULL_PRESENT = 16'h3fff;
+    localparam logic [15:0] SOC_LITE_PRESENT = 16'h327f;
     localparam logic [15:0] SOC_DISCOVERY_ABI = 16'd1;
 endpackage

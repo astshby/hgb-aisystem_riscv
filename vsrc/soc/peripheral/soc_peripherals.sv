@@ -5,8 +5,8 @@ module soc_peripherals #(
     parameter bit DMA_WIDE_ENABLE = 1'b0,
     parameter bit DMA_BLOCK_ENABLE = 1'b0,
     parameter int unsigned SOC_PROFILE = soc_config_pkg::SOC_PROFILE_FULL,
-    parameter logic [14:0] PRESENT = soc_config_pkg::SOC_FULL_PRESENT |
-                                    (DDR_BYTES != 0 ? 15'h4000 : 15'h0000),
+    parameter logic [15:0] PRESENT = soc_config_pkg::SOC_FULL_PRESENT |
+                                    (DDR_BYTES != 0 ? 16'h4000 : 16'h0000),
     parameter bit DCACHE_ENABLE = 1'b1,
     parameter int unsigned DCACHE_BYTES = 4096,
     parameter int unsigned DCACHE_LINE_BYTES = 32,
@@ -202,9 +202,9 @@ module soc_peripherals #(
         assert (SOC_PROFILE == soc_config_pkg::SOC_PROFILE_FULL ||
                 SOC_PROFILE == soc_config_pkg::SOC_PROFILE_LITE)
             else $fatal(1, "SOC_PROFILE must be full(0) or lite(1)");
-        assert (PRESENT == ((SOC_PROFILE == soc_config_pkg::SOC_PROFILE_LITE ?
+        assert ((PRESENT & 16'h7fff) == ((SOC_PROFILE == soc_config_pkg::SOC_PROFILE_LITE ?
                             soc_config_pkg::SOC_LITE_PRESENT : soc_config_pkg::SOC_FULL_PRESENT) |
-                           (DDR_BYTES != 0 ? 15'h4000 : 15'h0000)))
+                           (DDR_BYTES != 0 ? 16'h4000 : 16'h0000)))
             else $fatal(1, "profile and physical device mask disagree");
     end
 `endif

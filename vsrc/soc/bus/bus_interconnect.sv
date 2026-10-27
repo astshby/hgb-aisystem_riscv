@@ -2,7 +2,7 @@
 // Description: Parameterized per-target round-robin fabric with one outstanding request per master.
 module bus_interconnect #(
     parameter int unsigned MASTERS = 2,
-    parameter logic [14:0] PRESENT = 15'h000f,
+    parameter logic [15:0] PRESENT = 16'h000f,
     parameter bit DATA_PRIORITY = 1'b0,
     parameter int unsigned DDR_BYTES = 0
 ) (
@@ -13,25 +13,25 @@ module bus_interconnect #(
     output logic [MASTERS-1:0] m_rsp_valid,
     input logic [MASTERS-1:0] m_rsp_ready,
     output bus_types_pkg::bus_rsp_t m_response [MASTERS],
-    output logic [14:0] s_req_valid,
-    input logic [14:0] s_req_ready,
-    output bus_types_pkg::bus_req_t s_request [15],
-    output bus_types_pkg::bus_error_e s_error [15],
-    input logic [14:0] s_rsp_valid,
-    output logic [14:0] s_rsp_ready,
-    input bus_types_pkg::bus_rsp_t s_response [15]
+    output logic [15:0] s_req_valid,
+    input logic [15:0] s_req_ready,
+    output bus_types_pkg::bus_req_t s_request [16],
+    output bus_types_pkg::bus_error_e s_error [16],
+    input logic [15:0] s_rsp_valid,
+    output logic [15:0] s_rsp_ready,
+    input bus_types_pkg::bus_rsp_t s_response [16]
 );
     import bus_types_pkg::*;
     localparam int OWNER_W = $clog2(MASTERS);
     bus_target_e decoded [MASTERS], route [MASTERS];
     bus_error_e decode_error [MASTERS], route_error [MASTERS];
     logic [MASTERS-1:0] pending_q, master_done;
-    logic [14:0] busy_q, locked_q;
-    logic [OWNER_W-1:0] owner_q [15], next_q [15], locked_owner_q [15];
-    logic [14:0] response_done, grant_valid;
-    logic [OWNER_W-1:0] grant_owner [15];
-    logic [MASTERS-1:0] eligible [15];
-    logic [14:0] data_ready, dma_turn;
+    logic [15:0] busy_q, locked_q;
+    logic [OWNER_W-1:0] owner_q [16], next_q [16], locked_owner_q [16];
+    logic [15:0] response_done, grant_valid;
+    logic [OWNER_W-1:0] grant_owner [16];
+    logic [MASTERS-1:0] eligible [16];
+    logic [15:0] data_ready, dma_turn;
 
     for (genvar m = 0; m < MASTERS; m++) begin : g_decode
         address_decode #(.DDR_BYTES(DDR_BYTES)) u_decode (
@@ -53,7 +53,7 @@ module bus_interconnect #(
         m_rsp_valid = '0;
         for (int m = 0; m < MASTERS; m++) m_response[m] = '0;
         s_rsp_ready = '0;
-        for (int s = 0; s < 15; s++) begin
+        for (int s = 0; s < 16; s++) begin
             if (busy_q[s]) begin
                 m_rsp_valid[owner_q[s]] = s_rsp_valid[s];
                 m_response[owner_q[s]] = s_response[s];
@@ -64,7 +64,7 @@ module bus_interconnect #(
     assign response_done = s_rsp_valid & s_rsp_ready;
     assign master_done = m_rsp_valid & m_rsp_ready;
 
-    for (genvar s = 0; s < 15; s++) begin : g_eligibility
+    for (genvar s = 0; s < 16; s++) begin : g_eligibility
         for (genvar m = 0; m < MASTERS; m++) begin : g_master
             // D 与 DMA 在旧响应完成沿可交接，否则连续 D 请求会一直挡住 DMA。
             // 仅涉及 I 的跨 owner 交接隔拍，保留 I-valid 与 D-ready 的组合隔离。
@@ -92,7 +92,7 @@ module bus_interconnect #(
         candidate = 0;
         grant_valid = '0;
         s_req_valid = '0;
-        for (int s = 0; s < 15; s++) begin
+        for (int s = 0; s < 16; s++) begin
             grant_owner[s] = '0;
             s_request[s] = '0;
             s_error[s] = BUS_OK;
@@ -125,7 +125,7 @@ module bus_interconnect #(
         end else begin : g_arbitrated
             always_comb begin
                 m_req_ready[m] = 1'b0;
-                for (int s = 0; s < 15; s++)
+                for (int s = 0; s < 16; s++)
                     if (grant_valid[s] && grant_owner[s] == OWNER_W'(m))
                         m_req_ready[m] = s_req_ready[s];
             end
@@ -138,7 +138,7 @@ module bus_interconnect #(
             pending_q <= '0;
             busy_q <= '0;
             locked_q <= '0;
-            for (int s = 0; s < 15; s++) begin
+            for (int s = 0; s < 16; s++) begin
                 owner_q[s] <= '0;
                 next_q[s] <= '0;
                 locked_owner_q[s] <= '0;
@@ -146,7 +146,7 @@ module bus_interconnect #(
         end else begin
             pending_q <= pending_q & ~master_done;
             busy_q <= busy_q & ~response_done;
-            for (int s = 0; s < 15; s++) begin
+            for (int s = 0; s < 16; s++) begin
                 locked_q[s] <= s_req_valid[s] && !s_req_ready[s];
                 locked_owner_q[s] <= grant_owner[s];
                 if (s_req_valid[s] && s_req_ready[s]) begin

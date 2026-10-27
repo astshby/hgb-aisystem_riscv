@@ -1,5 +1,7 @@
 #include "integer.h"
+#ifndef MM3_FREESTANDING
 #include <string.h>
+#endif
 #ifdef MODEL_EMBED
 extern const unsigned char mm3_model_start[],mm3_model_end[],mm3_tokenizer_start[],mm3_tokenizer_end[];
 #endif
@@ -10,7 +12,17 @@ uint32_t crc32_bytes(const unsigned char *p,size_t n){uint32_t table[256];for(un
 void blob_release(Blob *b){platform_free(b->owned);memset(b,0,sizeof(*b));}
 int blob_load(Blob *b,const char *path,int tok){memset(b,0,sizeof(*b));
 #ifdef MODEL_EMBED
- if(!path){b->data=tok?mm3_tokenizer_start:mm3_model_start;b->size=(size_t)((tok?mm3_tokenizer_end:mm3_model_end)-b->data);return 0;}
+ if(!path){
+#ifdef MM3_FREESTANDING
+  /* Physical DDR addresses are unsigned 32-bit values, including on RV64.
+   * Avoid PC-relative references to far absolute end symbols in the TCM ELF. */
+  b->data=(const unsigned char *)(uintptr_t)(tok?UINT32_C(0x85000000):UINT32_C(0x81000000));
+  b->size=tok?MM3_TOKENIZER_BYTES:MM3_MODEL_BYTES;
+#else
+  b->data=tok?mm3_tokenizer_start:mm3_model_start;b->size=(size_t)((tok?mm3_tokenizer_end:mm3_model_end)-b->data);
+#endif
+  return 0;
+ }
 #else
  if(!path)path=tok?"assets/tokenizer.bin":"assets/model_w8a16_int.bin";
 #endif

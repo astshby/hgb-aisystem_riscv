@@ -17,10 +17,10 @@ module tb_dma_block;
     logic [1:0] m_req_valid, m_req_ready, m_rsp_valid, m_rsp_ready;
     bus_req_t m_request [2];
     bus_rsp_t m_response [2];
-    logic [14:0] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready;
-    bus_req_t s_request [15];
-    bus_rsp_t s_response [15];
-    bus_error_e s_error [15];
+    logic [15:0] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready;
+    bus_req_t s_request [16];
+    bus_rsp_t s_response [16];
+    bus_error_e s_error [16];
     logic wide_req_valid, wide_req_ready, wide_rsp_valid, wide_rsp_ready;
     ddr_req_t wide_request;
     ddr_rsp_t wide_response;
@@ -93,7 +93,7 @@ module tb_dma_block;
     assign m_req_valid[1] = 0;
     assign m_request[1] = '0;
     assign m_rsp_ready[1] = 1;
-    bus_interconnect #(.MASTERS(2), .PRESENT(15'h400d), .DDR_BYTES(BYTES)) local_fabric (
+    bus_interconnect #(.MASTERS(2), .PRESENT(16'h400d), .DDR_BYTES(BYTES)) local_fabric (
         .clk, .rst, .m_req_valid, .m_req_ready, .m_request, .m_rsp_valid, .m_rsp_ready, .m_response,
         .s_req_valid, .s_req_ready, .s_request, .s_error, .s_rsp_valid, .s_rsp_ready, .s_response
     );

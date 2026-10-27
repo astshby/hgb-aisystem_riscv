@@ -44,6 +44,7 @@ CoreMark/Core-MHz、按本次频率计算的仿真每秒成绩和镜像/源哈�
 - 2 路 I$/D$，WB/WA D$，FENCE.I、维护命令、DMA 所有权交接。
 - DMA 两块 128B 双槽引擎与统一 AXI 主口，读写可重叠；legacy 控制组保留。
 - 标准 AXI 与 Pango 原生 DDR 桥；RT-Thread BSP、UART loader、CoreMark。
+- 可选 MiniMind 整数算子：16 路 W8A16 GEMV、8×8 Attention GEMM、Norm/RoPE/Softmax/SwiGLU/KV 及单 Token 单层入口，默认关闭。扩展在合并前通过RV32单算子/单层简测；合并后的 `mm3_soc_compat` 静态检查通过、功能待复验，默认四域 AXI4 SoC 尚未接入该加速器；配置和验收边界见 `software/minimind3/README.md`。
 
 ## 当前状态
 

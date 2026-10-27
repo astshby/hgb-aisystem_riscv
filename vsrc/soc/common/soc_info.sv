@@ -2,7 +2,7 @@
 // Description: Identification, capacity registers and asynchronous data-cache maintenance commands.
 module soc_info #(
     parameter int unsigned SOC_PROFILE = soc_config_pkg::SOC_PROFILE_FULL,
-    parameter logic [14:0] PRESENT = soc_config_pkg::SOC_FULL_PRESENT,
+    parameter logic [15:0] PRESENT = soc_config_pkg::SOC_FULL_PRESENT,
     parameter logic [31:0] CLOCK_HZ = 50000000,
     parameter bit CLOCK_INFO_ENABLE = 1'b0,
     parameter logic [31:0] CORE_CLOCK_HZ = CLOCK_HZ,
@@ -52,7 +52,7 @@ module soc_info #(
             12'h030: read_data = {27'b0, cache_error, cache_fatal, (cache_error != cache_pkg::CACHE_OK), cache_busy};
             12'h034: read_data = 32'(cache_fault_addr);
             // 新增只读发现接口；既有容量、时钟与 Cache 维护寄存器保持原 ABI。
-            12'h038: read_data = {17'b0, PRESENT};
+            12'h038: read_data = {16'b0, PRESENT};
             12'h03c: read_data = {soc_config_pkg::SOC_DISCOVERY_ABI, 7'b0, CLOCK_INFO_ENABLE, 8'(SOC_PROFILE)};
             // 仅在发现 bit8 置位后探测新窗口；旧硬件/BSP 继续使用 +0x04。
             // version=1，低五位依次表示 core/sys/ddr/periph/timer 频率有效。

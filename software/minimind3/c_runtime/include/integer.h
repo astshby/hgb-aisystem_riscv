@@ -25,7 +25,7 @@ typedef struct {
  Blob blob;ITensor linear[57],norm[33];const uint32_t *exp_lut;const uint16_t *sig_lut;const int16_t *rope;
  unsigned capacity;IScale epsilon,invsqrt96;
 } IModel;
-typedef struct {
+typedef struct IRuntime {
  const IModel *model;unsigned capacity,pos;IStats stats;
  int16_t *keys,*values;IScale *ks,*vs;
  int16_t x[768],z[768],q[768],k[384],v[384],a[768],tmp[768],g[2432],u[2432];
@@ -33,6 +33,8 @@ typedef struct {
  int32_t logits[6400],*scores;IScale ls;
  uint16_t *prob;uint64_t *remainders;unsigned *order;
  IFixed work[6400];
+ int (*linear_backend)(struct IRuntime *,int,int16_t *,IScale *,const int16_t *,IScale,int);
+ void *backend_context;
  FILE *trace;
 } IRuntime;
 uint64_t platform_nanoseconds(void);
@@ -42,6 +44,7 @@ int64_t if_integer(IFixed,unsigned,IStats *);int64_t if_quant(IFixed,IScale,unsi
 uint64_t integer_sqrt64(uint64_t);
 void int_pack16(int16_t *,IScale *,const IFixed *,unsigned,IStats *);
 void int_pack32(int32_t *,IScale *,const IFixed *,unsigned,IStats *);
+int int_linear_cpu(IRuntime *,int,int16_t *,IScale *,const int16_t *,IScale,int);
 int int_linear(IRuntime *,int,int16_t *,IScale *,const int16_t *,IScale,int);
 void int_norm(IRuntime *,int16_t *,IScale *,const int16_t *,IScale,const ITensor *,unsigned);
 void int_rope(IRuntime *,int16_t *,IScale *);
@@ -50,5 +53,5 @@ void int_attention(IRuntime *,unsigned);
 void int_swiglu(IRuntime *);
 void int_residual(IRuntime *,int16_t *,IScale *,const int16_t *,IScale,const int16_t *,IScale,unsigned);
 int imodel_open(IModel *,const char *);void imodel_close(IModel *);
-int iruntime_init(IRuntime *,const IModel *,unsigned);void iruntime_close(IRuntime *);int iruntime_step(IRuntime *,int);int iargmax(const int32_t *,unsigned);
+int iruntime_init(IRuntime *,const IModel *,unsigned);void iruntime_close(IRuntime *);int iruntime_step_prefix(IRuntime *,int,unsigned,int);int iruntime_step(IRuntime *,int);int iargmax(const int32_t *,unsigned);
 #endif
