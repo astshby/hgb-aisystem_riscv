@@ -282,6 +282,7 @@ def main():
     parser.add_argument('--iterations',type=int,default=2)
     parser.add_argument('--icache-bytes',type=int)
     parser.add_argument('--dcache-bytes',type=int)
+    parser.add_argument('--dcache-bank-xor-mask',type=int,choices=(0,1,2,3),default=0)
     parser.add_argument('--build-only',action='store_true')
     parser.add_argument('--functional',action='store_true',help='Run boot/TCM/DMA/cache functionality without CoreMark')
     parser.add_argument('--xlen',type=int,choices=(32,64),default=32)
@@ -299,7 +300,7 @@ def main():
     results=[]
     for platform in args.platforms:
         for clock in args.clocks:
-            config=configuration(platform,clock,args.xlen,args.icache_bytes,args.dcache_bytes)
+            config=configuration(platform,clock,args.xlen,args.icache_bytes,args.dcache_bytes,args.dcache_bank_xor_mask)
             binary,receipt=build(config,(args.models.resolve() if args.models else output/'models')/f'{platform}-{clock}-rv{args.xlen}')
             if args.functional:
                 functional(binary,config,output,receipt)

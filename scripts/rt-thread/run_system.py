@@ -27,13 +27,15 @@ def main():
     parser.add_argument('--xlen',type=int,choices=(32,64),default=32)
     parser.add_argument('--icache-bytes',type=int)
     parser.add_argument('--dcache-bytes',type=int)
+    parser.add_argument('--dcache-bank-xor-mask',type=int,choices=(0,1,2,3),default=0)
     args=parser.parse_args();os.chdir(ROOT)
     opt=support.optimization();width=args.xlen
     suffix='' if args.icache_bytes is None and args.dcache_bytes is None else f'-i{args.icache_bytes or 4096}-d{args.dcache_bytes or 4096}'
+    if args.dcache_bank_xor_mask: suffix += f'-h{args.dcache_bank_xor_mask}'
     root=ROOT/f'build/rt-thread/system-rv{width}-{opt}{suffix}';root.mkdir(parents=True,exist_ok=True)
     run(['bash','scripts/rt-thread/build.sh',str(width)],root/'software-build.log',
         env=dict(os.environ,RTTHREAD_BUILD_DIR=str(root)))
-    config=hardware_configuration('none',width,args.icache_bytes,args.dcache_bytes)
+    config=hardware_configuration('none',width,args.icache_bytes,args.dcache_bytes,args.dcache_bank_xor_mask)
     sources=support.rtl_sources()
     digest=hashlib.sha256(json.dumps([config,sources],sort_keys=True).encode()).hexdigest()[:16]
     model=ROOT/f'build/rt-thread/models/{width}-{digest}';binary=model/'Vtb_rt_thread_system'

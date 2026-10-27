@@ -21,13 +21,16 @@ def cache_memory(icache_bytes=None, dcache_bytes=None, bank_xor_mask=0):
     return memory
 
 
-def hardware_configuration(accelerator='none',xlen=32,icache_bytes=None,dcache_bytes=None):
+def hardware_configuration(accelerator='none',xlen=32,icache_bytes=None,dcache_bytes=None,bank_xor_mask=0):
     if accelerator not in ('none','yolo','minimind') or xlen not in (32,64):
         raise ValueError('unsupported hardware selection')
     periods=dict(PROFILE['clock_periods_ps']['target'])
     if accelerator!='none':periods['npu']=10000
-    return dict(accelerator=accelerator,xlen=xlen,
+    result = dict(accelerator=accelerator,xlen=xlen,
                 macros=dict(PROFILE['core_macros'],CORE_XLEN=xlen),
-                memory=cache_memory(icache_bytes,dcache_bytes),periods_ps=periods,
+                memory=cache_memory(icache_bytes,dcache_bytes,bank_xor_mask),periods_ps=periods,
                 frequencies_hz={key:10**12//value for key,value in periods.items()},
                 board_clock_profile=PROFILE['native_board_profiles']['target'])
+    if bank_xor_mask:
+        result['macros']['SOC_DCACHE_BANK_XOR_MASK'] = bank_xor_mask
+    return result
