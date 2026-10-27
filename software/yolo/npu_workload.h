@@ -49,7 +49,27 @@ static int npu_platform_test(void)
         for (unsigned oc = 0; oc < 16; oc++) NPU_REG(0x80 + oc * 4) = oc - 7;
         NPU_REG(0x20) = width | (height << 8) | (8u << 16);
         NPU_REG(0x24) = co | (test ? (1u << 5) | (1u << 7) | (1u << 10) : (1u << 8));
+#if YOLO_DMA_OVERLAP
+        // 提前准备下一批 DDR 数据；启动后让 DMA 和当前卷积同时前进。
+        // DMA 完成只释放该搬运任务，卷积输出仍逐项检查并显式 POP。
+        for (unsigned i=0;i<1024;i++) REG(0x80008000u+i*4)=0x13572468u^i;
+        if (maintain(2)) return 55;
+        REG(0x10030010)=6;
+        REG(0x10030000)=0x80008000;
+        REG(0x10030004)=0x80010000;
+        REG(0x10030008)=4096;
+        REG(0x1003000c)=1;
+#endif
         NPU_REG(8) = 1;
+#if YOLO_DMA_OVERLAP
+        unsigned dma_status=0;
+        for(unsigned wait=0;wait<50000;wait++) {
+            dma_status=REG(0x10030010);
+            if(dma_status&6) break;
+        }
+        if((dma_status&7)!=2 || REG(0x10030014)!=4096 || maintain(3)) return 56;
+        for(unsigned i=0;i<1024;i++) if(REG(0x80010000u+i*4)!=(0x13572468u^i)) return 57;
+#endif
         for (unsigned p = 0; p < width * height; p++) {
             unsigned status = 0;
             for (unsigned wait = 0; wait < 50000; wait++) {

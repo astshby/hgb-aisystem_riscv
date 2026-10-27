@@ -13,11 +13,11 @@ sim_dir="build/verilator/benchmark-rv${xlen}-${config}"
 run_log="logs/benchmark-smoke-rv${xlen}-${config}.log"
 
 bash scripts/verilator/build_benchmark_sim.sh "${xlen}"
-bash scripts/verilator/build_benchmark_image.sh "${xlen}" "${build_dir}" \
-    benchmark/bsp/crt0.S \
-    benchmark/bsp/runtime.c \
-    benchmark/bsp/softarith.c \
-    benchmark/smoke/main.c \
+bash scripts/verilator/build_baremetal_image.sh "${xlen}" "${build_dir}" \
+    software/common/baremetal/crt0.S \
+    software/common/baremetal/runtime.c \
+    software/common/baremetal/softarith.c \
+    software/common/smoke.c \
     >"logs/benchmark-smoke-build-rv${xlen}-${config}.log" 2>&1
 
 tohost_addr="$("${tool_prefix}nm" -n "${build_dir}/program.elf" | awk '$3 == "tohost" { print $1; exit }')"

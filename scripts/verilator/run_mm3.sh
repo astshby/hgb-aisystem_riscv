@@ -15,6 +15,8 @@ fi
 export CCACHE_DIR="${CCACHE_DIR:-$PWD/build/ccache}" CCACHE_TEMPDIR="${CCACHE_TEMPDIR:-$PWD/build/ccache-tmp}"
 mkdir -p "$CCACHE_DIR" "$CCACHE_TEMPDIR"
 action="${1:-unit}"; xlen="${2:-32}"
+opt="${SOFTWARE_OPT:-O3}"
+[[ "$opt" =~ ^(O2|O3|Ofast)$ ]] || exit 2
 [[ "$xlen" =~ ^(32|64)$ ]] || { echo 'XLEN must be 32 or 64' >&2; exit 2; }
 lanes="${MM3_MAC_LANES:-$(awk '$2=="MM3_GEMV_LANES"{print $3}' vsrc/soc/mm3/mm3_config.h)}"; cap="${MM3_SIM_SEQ_LEN:-64}"; new="${MM3_SIM_NEW_TOKENS:-2}"
 max_cycles="${MM3_MAX_CYCLES:-1000000000000}"; jobs="${JOBS:-4}"
@@ -29,8 +31,8 @@ hostcc="${HOST_CC:-gcc}"
 if [[ "${MM3_CORE_PROFILE:-p1}" == p1 ]]; then source scripts/verilator/p1_core_config.sh;
 elif [[ "${MM3_CORE_PROFILE}" != environment ]]; then echo "MM3_CORE_PROFILE must be p1 or environment" >&2; exit 2; fi
 source scripts/verilator/core_build_config.sh
-build="build/mm3/rv${xlen}-${core_build_tag}-l${lanes}-s${cap}-g${new}"
-log="logs/mm3/rv${xlen}-${core_build_tag}-l${lanes}-s${cap}-g${new}"
+build="build/mm3/rv${xlen}-${core_build_tag}-l${lanes}-s${cap}-g${new}-${opt}"
+log="logs/mm3/rv${xlen}-${core_build_tag}-l${lanes}-s${cap}-g${new}-${opt}"
 mkdir -p "$build" "$log"
 runtime=software/minimind3/c_runtime
 sources=("$runtime/src/integer_math.c" "$runtime/src/integer_ops.c")
@@ -56,12 +58,12 @@ model_bytes=$(stat -c %s "$model"); tokenizer_bytes=$(stat -c %s "$tokenizer")
 python3 scripts/verilator/mm3_fixture.py "$model" "$runtime/assets/integer_manifest.json" "$build/mm3_fixture.h"
 # 完整裸机运行库使用本地 stdio/string 与 mm3.h；精简整数头不提供 tokenizer/FILE 定义。
 "${tool}gcc" -march="rv${xlen}im_zicsr_zifencei" -mabi="$([[ $xlen == 32 ]] && echo ilp32 || echo lp64)" -mcmodel=medany -mno-relax \
- -std=c11 -O3 -g -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-common -fno-pie -fno-tree-loop-distribute-patterns -mstrict-align -fno-fast-math -ffp-contract=off \
+ -std=c11 -"$opt" -g -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-common -fno-pie -fno-tree-loop-distribute-patterns -mstrict-align -fno-fast-math -ffp-contract=off \
  -nostdlib -nostartfiles -static -no-pie -DMODEL_EMBED -DMM3_MODEL_BYTES="$model_bytes" -DMM3_TOKENIZER_BYTES="$tokenizer_bytes" -DMAX_SEQ_LEN="$cap" -DMM3_SIM_NEW_TOKENS="$new" \
- -I"$build" -Isoftware/minimind3/baremetal/include -I"$runtime/include" -Ibenchmark/bsp \
+ -I"$build" -Isoftware/minimind3/baremetal/include -I"$runtime/include" -Isoftware/common/baremetal \
  -Wl,--build-id=none,--no-relax,-T,software/minimind3/baremetal/link.ld,-Map,"$build/program.map" \
  -Wl,--defsym,mm3_model_end=$((0x81000000+model_bytes)),--defsym,mm3_tokenizer_end=$((0x85000000+tokenizer_bytes)) \
- benchmark/bsp/crt0.S benchmark/bsp/runtime.c software/minimind3/baremetal/platform.c software/minimind3/baremetal/accel.c software/minimind3/baremetal/main.c \
+ software/common/baremetal/crt0.S software/common/baremetal/runtime.c software/minimind3/baremetal/platform.c software/minimind3/baremetal/accel.c software/minimind3/baremetal/main.c \
  "${sources[@]}" "$runtime/src/integer_model.c" "$runtime/src/integer_io.c" "$runtime/src/tokenizer.c" -lgcc -o "$build/program.elf" > "$log/software-build.log" 2>&1
 "${tool}size" "$build/program.elf"
 "${tool}nm" -u "$build/program.elf" > "$log/unresolved.txt"; [[ ! -s "$log/unresolved.txt" ]]
@@ -69,18 +71,19 @@ python3 scripts/verilator/mm3_fixture.py "$model" "$runtime/assets/integer_manif
 if grep -Eq '\b(f(add|sub|mul|div|sqrt|cvt|mv|sgnj|min|max|eq|lt|le|class)\.|fl[wd]\b|fs[wd]\b)|__(add|sub|mul|div|float|fix|extend|trunc).*(sf|df)' "$log/program.dump"; then echo 'FAIL floating-point ELF' >&2; exit 1; fi
 "${tool}objcopy" -O verilog --verilog-data-width 1 --only-section=.text "$build/program.elf" "$build/imem.vhex"
 python3 scripts/verilator/verilog_hex_to_mem.py "$build/imem.vhex" "$build/imem.hex" --word-bytes "$((xlen/8))" --depth "$((65536/(xlen/8)))" --base 0x01000000
+printf "@0\n0\n" > "$build/dmem.hex"
 "${tool}objcopy" -O binary --only-section=.data "$build/program.elf" "$build/data.bin"
 tohost=$("${tool}nm" -n "$build/program.elf" | awk '$3=="tohost"{print $1}')
 console=$("${tool}nm" -n "$build/program.elf" | awk '$3=="sim_console"{print $1}')
 "$verilator" --binary --timing --assert -Wall -Wno-fatal -j "$jobs" -CFLAGS -O2 \
  -DCORE_XLEN="$xlen" -DCORE_MUL_IMPL="${MUL_IMPL:-0}" -DCORE_DIV_IMPL="${DIV_IMPL:-1}" "${core_microarch_flags[@]}" \
- --top-module tb_mm3_soc --Mdir "$build/soc" -f scripts/soc_files.f tb/soc/axi_block_memory_model.sv tb/common/store_result_monitor.sv tb/soc/tb_mm3_soc.sv \
- -GMM3_MAC_LANES="$lanes" -GDMA_WIDE_ENABLE=1 -GDMA_BLOCK_ENABLE=1 -GCACHE_BLOCK_ENABLE=1 > "$log/soc-build.log" 2>&1
+ --top-module tb_mm3_system --Mdir "$build/soc" -f scripts/soc_files.f tb/common/store_result_monitor.sv tb/soc/axi_system_memory_model.sv tb/soc/spi_flash_model.sv tb/soc/tb_soc_system.sv tb/soc/tb_mm3_system.sv \
+ -GMM3_MAC_LANES="$lanes" > "$log/soc-build.log" 2>&1
 # Compare fresh lint diagnostics with exactly the same harness and accelerator disabled.
 for enabled in 0 1; do
  "$verilator" --lint-only --timing -Wall -Wno-fatal -DCORE_XLEN="$xlen" -DCORE_MUL_IMPL="${MUL_IMPL:-0}" -DCORE_DIV_IMPL="${DIV_IMPL:-1}" "${core_microarch_flags[@]}" \
-  --top-module tb_mm3_soc -f scripts/soc_files.f tb/soc/axi_block_memory_model.sv tb/common/store_result_monitor.sv tb/soc/tb_mm3_soc.sv \
-  -GMM3_ACCEL_ENABLE="$enabled" -GMM3_MAC_LANES="$lanes" -GDMA_WIDE_ENABLE=1 -GDMA_BLOCK_ENABLE=1 -GCACHE_BLOCK_ENABLE=1 > "$log/lint-enable${enabled}.log" 2>&1
+  --top-module tb_mm3_system -f scripts/soc_files.f tb/common/store_result_monitor.sv tb/soc/axi_system_memory_model.sv tb/soc/spi_flash_model.sv tb/soc/tb_soc_system.sv tb/soc/tb_mm3_system.sv \
+  -GMM3_ACCEL_ENABLE="$enabled" -GMM3_MAC_LANES="$lanes" > "$log/lint-enable${enabled}.log" 2>&1
 done
 python3 - "$log/lint-enable0.log" "$log/lint-enable1.log" <<'LINT'
 import pathlib,re,sys
@@ -94,16 +97,16 @@ extra=new-old
 if extra: raise SystemExit('FAIL new structural warnings:\n'+'\n'.join(map(str,sorted(extra))))
 print(f'PASS MM3_LINT no new structural warning locations; {len(old & new)} baseline locations recorded')
 LINT
-"$hostcc" -std=c11 -O3 -DMAX_SEQ_LEN="$cap" -DMM3_SIM_NEW_TOKENS="$new" -I"$runtime/include" \
+"$hostcc" -std=c11 -"$opt" -DMAX_SEQ_LEN="$cap" -DMM3_SIM_NEW_TOKENS="$new" -I"$runtime/include" \
  tb/unit/mm3/host_reference.c "${sources[@]}" "$runtime/src/integer_model.c" "$runtime/src/integer_io.c" "$runtime/src/tokenizer.c" "$runtime/src/platform_integer.c" -o "$build/host-reference"
 # Freeze run artifacts and keep each invocation's outputs separate from the compile cache.
 cache="$build"
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 build="$cache/runs/$run_id"; log="$log/$run_id"
 mkdir -p "$build" "$log"
-cp "$cache/program.elf" "$cache/imem.hex" "$cache/data.bin" "$cache/mm3_fixture.h" "$build/"
+cp "$cache/program.elf" "$cache/imem.hex" "$cache/dmem.hex" "$cache/data.bin" "$cache/mm3_fixture.h" "$build/"
 cp scripts/verilator/mm3_report.py "$build/mm3_report.py"
-cp "$cache/soc/Vtb_mm3_soc" "$build/simulator"
+cp "$cache/soc/Vtb_mm3_system" "$build/simulator"
 cp "$cache/host-reference" "$build/host-reference"
 cp "${log%/*}"/{software-build.log,soc-build.log,lint-enable0.log,lint-enable1.log,program.dump} "$log/"
 export MM3_RISCV_CC="${tool}gcc"
@@ -120,7 +123,7 @@ for name in sorted(set(paths)):
 archive.close()
 meta={'riscv_gcc':subprocess.check_output([os.environ['MM3_RISCV_CC'],'--version'],text=True).splitlines()[0],'verilator':subprocess.check_output([os.environ.get('VERILATOR','verilator'),'--version'],text=True).strip(),'commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(), 'source_sha256':h.hexdigest(),
  'xlen':int(sys.argv[2]),'core_config':sys.argv[3],'mac_lanes':int(sys.argv[4]),'sequence_capacity':int(sys.argv[5]),'new_tokens':int(sys.argv[6]),
- 'assets':{p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in sys.argv[7:]},'ddr_model':'axi_block_memory_model:128MiB:deterministic backpressure',
+ 'assets':{p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in sys.argv[7:]},'ddr_model':'axi_system_memory_model:128MiB:five domains','clocks_hz':dict(core=100000000,sys=80000000,ddr=125000000,periph=25000000,npu=100000000),'optimization':os.environ.get('SOFTWARE_OPT','O2'),
  'elf_sha256':hashlib.sha256((build/'program.elf').read_bytes()).hexdigest()}
 (build/'metadata.json').write_text(json.dumps(meta,indent=2)+'\n')
 META
@@ -138,7 +141,7 @@ run_pair(){
  local pids=() failed=0
  for backend in 0 1; do
   local name="m${mode}-c${index}-t${trace}-b${backend}"
-  stdbuf -oL "$build/simulator" +IMEM="$build/imem.hex" +DATA="$build/data.bin" +MODEL="$model" +TOKENIZER="$tokenizer" \
+  stdbuf -oL "$build/simulator" +IMEM="$build/imem.hex" +DMEM="$build/dmem.hex" +DATA="$build/data.bin" +MODEL="$model" +TOKENIZER="$tokenizer" \
    +TOHOST="$tohost" +CONSOLE="$console" +BACKEND="$backend" +MODE="$mode" +CASE="$index" +TRACE="$trace" \
    +MAX_CYCLES="$max_cycles" +RESULT="$build/$name.bin" > "$log/$name.log" 2>&1 &
   pids+=("$!")
@@ -153,7 +156,7 @@ case "$action" in
  soc) run_pair 0 0 0; run_pair 4 0 0
  for fault in 1:3 2:3 3:4 5:4; do
   allocation="${fault%:*}"; expected="${fault#*:}"
-  stdbuf -oL "$build/simulator" +IMEM="$build/imem.hex" +DATA="$build/data.bin" +TOHOST="$tohost" +CONSOLE="$console" \
+  stdbuf -oL "$build/simulator" +IMEM="$build/imem.hex" +DMEM="$build/dmem.hex" +DATA="$build/data.bin" +TOHOST="$tohost" +CONSOLE="$console" \
    +BACKEND=1 +MODE=0 +ALLOC_FAIL="$allocation" +EXPECTED_EXIT="$expected" +MAX_CYCLES=2000000 +RESULT="$build/alloc.bin" > "$log/alloc${allocation}.log" 2>&1
   grep 'PASS MM3_EXPECTED_FAILURE' "$log/alloc${allocation}.log"
  done ;;

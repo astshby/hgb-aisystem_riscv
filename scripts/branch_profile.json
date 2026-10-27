@@ -1,0 +1,7 @@
+{
+  "variant": "all",
+  "default_accelerator": "none",
+  "accelerators": ["yolo", "minimind"],
+  "coremark": true,
+  "rt_thread": true
+}

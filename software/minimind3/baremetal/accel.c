@@ -5,7 +5,10 @@
 #include <string.h>
 #include "benchmark_runtime.h"
 #include "../../../tb/cache/cache_maintenance.h"
-#define REG(i) (*(volatile uint32_t *)(uintptr_t)(0x10050000u+(i)))
+#ifndef MM3_MMIO_BASE
+#define MM3_MMIO_BASE 0x20000000u
+#endif
+#define REG(i) (*(volatile uint32_t *)(uintptr_t)(MM3_MMIO_BASE+(i)))
 static int16_t *input;
 static int32_t *output;
 static IScale *output_scale;

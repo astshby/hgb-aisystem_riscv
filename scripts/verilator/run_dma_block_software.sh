@@ -26,10 +26,10 @@ fi
 if grep -Eq '(%Warning-(UNOPTFLAT|LATCH|MULTIDRIVEN|ALWCOMBORDER)|%Error)' "$build_log"; then
     grep -E '(%Warning-(UNOPTFLAT|LATCH|MULTIDRIVEN|ALWCOMBORDER)|%Error)' "$build_log"; exit 1;
 fi
-if ! bash scripts/verilator/build_benchmark_image.sh "$xlen" "$image_dir" \
+if ! bash scripts/verilator/build_baremetal_image.sh "$xlen" "$image_dir" \
     -march="rv${xlen}im_zicsr_zifencei" -Wall -Wextra -Werror \
-    benchmark/bsp/crt0.S tb/soc/dma_block_smoke.c \
-    benchmark/bsp/runtime.c benchmark/bsp/softarith.c \
+    software/common/baremetal/crt0.S tb/soc/dma_block_smoke.c \
+    software/common/baremetal/runtime.c software/common/baremetal/softarith.c \
     >"logs/soc-dma-block-build-rv${xlen}-${config}.log" 2>&1; then
     tail -n 35 "logs/soc-dma-block-build-rv${xlen}-${config}.log"; exit 1;
 fi

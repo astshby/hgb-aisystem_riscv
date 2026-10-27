@@ -5,7 +5,10 @@
 #ifdef __riscv
 #include "benchmark_runtime.h"
 #include "../../../tb/cache/cache_maintenance.h"
-#define REG(o) (*(volatile uint32_t *)(uintptr_t)(0x10050000u+(o)))
+#ifndef MM3_MMIO_BASE
+#define MM3_MMIO_BASE 0x20000000u
+#endif
+#define REG(o) (*(volatile uint32_t *)(uintptr_t)(MM3_MMIO_BASE+(o)))
 int mm3_mmio_submit(void *context,const MM3Command *c){
  (void)context;
  if(!c||c->magic!=MM3_CMD_MAGIC||((uintptr_t)c&63)||c->op>MM3_OP_ATTENTION)return -1;

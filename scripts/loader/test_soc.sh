@@ -40,11 +40,6 @@ verilator "${core_microarch_flags[@]}" -Wall -Wno-fatal --assert --timing --bina
 extra_args=()
 log="logs/uart-loader-rv$xlen-${core_build_tag}-p$soc_profile-ltcm$local_tcm.log"
 max_cycles=2000000
-if [[ -n "${LOADER_PACKET:-}" ]]; then
-    extra_args=(+RT_IMAGE +HOT_BYTES="${LOADER_HOT_BYTES:?}")
-    log="logs/uart-rt-${RT_COREMARK_MODE:-performance}-rv$xlen-${core_build_tag}-p$soc_profile-ltcm$local_tcm.log"
-    max_cycles=100000000
-fi
 "$sim/Vtb_uart_loader" +IMEM="$out/imem.hex" +DMEM="$out/dmem.hex" \
     +TOHOST="${LOADER_TOHOST:-01100000}" +CONSOLE="${LOADER_CONSOLE:-01100008}" \
     +TEST=uart-loader +MAX_CYCLES="$max_cycles" \

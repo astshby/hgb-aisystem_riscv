@@ -4,12 +4,12 @@ set -euo pipefail
 xlen="$1"
 output_dir="$2"
 shift 2
-opt="${SOFTWARE_OPT:-O2}"
+opt="${SOFTWARE_OPT:-O3}"
 case "$opt" in O2|O3|Ofast) ;; *) echo "SOFTWARE_OPT must be O2, O3 or Ofast" >&2; exit 2;; esac
 
 tool_root="${RISCV_TOOL_ROOT:?set RISCV_TOOL_ROOT to the toolchain bin directory}"
 tool_prefix="${tool_root}/riscv64-unknown-elf-"
-linker=benchmark/bsp/link.ld
+linker=software/common/baremetal/link.ld
 imem_base=0
 dmem_base=0
 imem_word_bytes=4
@@ -26,7 +26,7 @@ else
     mabi="lp64"
 fi
 if [[ "${SOC_DDR:-0}" == "1" ]]; then
-    linker=benchmark/bsp/link_soc_ddr.ld
+    linker=software/common/baremetal/link_soc_ddr.ld
     imem_base=0x01000000
     dmem_base=0x01100000
     imem_word_bytes=$((xlen / 8))
@@ -35,7 +35,7 @@ if [[ "${SOC_DDR:-0}" == "1" ]]; then
     ddr_base=0x80000000
     ddr_bytes="${SOC_DDR_MODEL_BYTES:-65536}"
 elif [[ "${SOC:-0}" == "1" ]]; then
-    linker=benchmark/bsp/link_soc.ld
+    linker=software/common/baremetal/link_soc.ld
     imem_base=0x01000000
     dmem_base=0x01100000
     imem_word_bytes=$((xlen / 8))
@@ -51,14 +51,14 @@ mkdir -p "${output_dir}"
     -std=gnu99 "-$opt" -DHGB_OPT_LEVEL=\"-$opt\" -g -ffreestanding -fno-builtin -fno-common \
     -fno-pie -fno-tree-loop-distribute-patterns -mstrict-align \
     -nostdlib -nostartfiles -static -no-pie \
-    -I benchmark/bsp \
+    -I software/common/baremetal \
     -Wl,--build-id=none,--no-relax -Wl,-T,"${linker}" \
     -Wl,-Map,"${output_dir}/program.map" \
     "$@" -o "${output_dir}/program.elf"
 
 if [[ -n "$("${tool_prefix}nm" -u "${output_dir}/program.elf")" ]]; then
     "${tool_prefix}nm" -u "${output_dir}/program.elf"
-    echo "FAIL benchmark image has unresolved symbols"
+    echo "FAIL bare-metal image has unresolved symbols"
     exit 1
 fi
 

@@ -64,7 +64,7 @@ def elf_segments(path):
     packet(xlen,entry,segments)
     return xlen,entry,segments
 
-def send(port, baud, prefix, blocks, runs=1):
+def send(port, baud, prefix, blocks):
     import serial  # Only serial transfer needs pyserial; packet generation has no external dependencies.
     with serial.Serial(port,baud,timeout=15,write_timeout=15,dsrdtr=False,rtscts=False) as uart:
         uart.dtr=False
@@ -85,18 +85,9 @@ def send(port, baud, prefix, blocks, runs=1):
             ack(b"\x06")
         ack(b"\x07")
         print("PASS loader published and read back image; application log follows")
-        line=b""
-        requested=1
         while True:
             data=uart.read(1)
-            if data:
-                print(data.decode("ascii",errors="replace"),end="",flush=True)
-                line+=data
-                if data==b"\n":
-                    if line.startswith(b"COREMARK READY run=") and requested<runs:
-                        uart.write(b"r")
-                        requested+=1
-                    line=b""
+            if data: print(data.decode("ascii",errors="replace"),end="",flush=True)
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
@@ -104,9 +95,7 @@ def main():
     parser.add_argument("--output",type=Path,required=True)
     parser.add_argument("--port")
     parser.add_argument("--baud",type=int,default=115200)
-    parser.add_argument("--runs",type=int,default=1,help="request this many resident CoreMark runs; keep logging afterward")
     args=parser.parse_args()
-    if args.runs<1: parser.error("--runs must be positive")
     xlen,entry,segments=elf_segments(args.elf)
     prefix,blocks=packet(xlen,entry,segments)
     wire=prefix+b"".join(b+struct.pack("<I",crc(b)) for b in blocks)
@@ -118,6 +107,6 @@ def main():
         "segments":[{"address":hex(a),"bytes":len(d),"execute":f,"crc":hex(crc(d))}
                     for a,f,d in segments]},indent=2)+"\n")
     print(f"PASS packet RV{xlen}: {len(segments)} segments, {len(wire)} wire bytes")
-    if args.port: send(args.port,args.baud,prefix,blocks,args.runs)
+    if args.port: send(args.port,args.baud,prefix,blocks)
 
 if __name__=="__main__": main()

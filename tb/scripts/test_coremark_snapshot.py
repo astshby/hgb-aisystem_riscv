@@ -67,7 +67,7 @@ if bad == 'mutate': image.write_text(image.read_text() + '00\\n')
 print(text, end='')
 ''')
         # Replay may build RTL, but neither the image builder nor calibration is reachable.
-        (scripts / "build_benchmark_image.sh").write_text("touch software-build-was-called\nexit 99\n")
+        (scripts / "build_baremetal_image.sh").write_text("touch software-build-was-called\nexit 99\n")
         (scripts / "build_benchmark_sim.sh").write_text(
             'touch rtl-build-was-called\nmkdir -p "build/verilator/benchmark-rv$1-m0d1"\n'
             'cp simulator "build/verilator/benchmark-rv$1-m0d1/Vtb_benchmark"\n')

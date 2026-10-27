@@ -15,10 +15,10 @@ spec = importlib.util.spec_from_file_location('p2_coremark', ROOT / 'scripts/ver
 p2 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(p2)
 SOURCES = [Path(name) for name in (
-    'tb/software/p2_load_diagnostic.c', 'benchmark/bsp/crt0.S', 'benchmark/bsp/runtime.c',
-    'benchmark/bsp/softarith.c', 'benchmark/bsp/benchmark_runtime.h', 'benchmark/bsp/link_soc.ld',
+    'tb/software/p2_load_diagnostic.c', 'software/common/baremetal/crt0.S', 'software/common/baremetal/runtime.c',
+    'software/common/baremetal/softarith.c', 'software/common/baremetal/benchmark_runtime.h', 'software/common/baremetal/link_soc.ld',
     'software/common/soc_clocks.h', 'software/common/soc_capabilities.h',
-    'scripts/verilator/build_benchmark_image.sh', 'scripts/verilator/verilog_hex_to_mem.py',
+    'scripts/verilator/build_baremetal_image.sh', 'scripts/verilator/verilog_hex_to_mem.py',
     'scripts/verilator/run_p2_load_diagnostic.py')]
 
 
@@ -41,9 +41,9 @@ def _images_locked(root, xlen, mode, tools):
         return directory, manifest
     directory.mkdir(parents=True, exist_ok=False)
     sources = p2.copy_sources(SOURCES, directory / 'source')
-    command = ['bash', 'scripts/verilator/build_benchmark_image.sh', str(xlen), str(directory),
+    command = ['bash', 'scripts/verilator/build_baremetal_image.sh', str(xlen), str(directory),
                '-Wall', '-Wextra', '-Werror', '-DP2_DIAGNOSTIC_IRQ_ONLY=' + str(int(mode == 'irq_only')),
-               'benchmark/bsp/crt0.S', 'benchmark/bsp/runtime.c', 'benchmark/bsp/softarith.c',
+               'software/common/baremetal/crt0.S', 'software/common/baremetal/runtime.c', 'software/common/baremetal/softarith.c',
                'tb/software/p2_load_diagnostic.c']
     environment = {**os.environ, 'SOC': '1', 'SOC_DDR': '0', 'RISCV_TOOL_ROOT': str(tools)}
     with (directory / 'build.log').open('x') as log:

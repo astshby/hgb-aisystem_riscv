@@ -2,7 +2,15 @@
 # Module: run_mm3_ops
 # Description: Static checks are separate from all numerical references and simulations.
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+if [[ -n "${MM3_OPS_PROJECT_ROOT:-}" ]]; then cd "$MM3_OPS_PROJECT_ROOT"; else cd "$(dirname "$0")/../.."; fi
+# Bash reads incrementally; preserve the exact runner throughout long simulations.
+if [[ "${MM3_OPS_RUNNER_FROZEN:-0}" != 1 ]]; then
+ mkdir -p build/mm3-ops/runners
+ snapshot=$(mktemp "$PWD/build/mm3-ops/runners/run-XXXXXXXX.sh")
+ cp "$0" "$snapshot"
+ export MM3_OPS_PROJECT_ROOT="$PWD" MM3_OPS_RUNNER_FROZEN=1
+ exec bash "$snapshot" "$@"
+fi
 action="${1:-static}";xlen="${2:-32}";op="${OP:-rmsnorm}";jobs="${JOBS:-4}";trace="${TRACE:-0}"
 [[ "$trace" == 0 || "$trace" == 1 ]] || exit 2
 trace_flags=();[[ "$trace" == 0 ]] || trace_flags=(--trace)
@@ -20,17 +28,17 @@ mkdir -p "$CCACHE_DIR" "$CCACHE_TEMPDIR"
 cc="${HOST_CC:-gcc}";verilator="${VERILATOR:-verilator}"
 if [[ -n "${RISCV_TOOL_ROOT:-}" ]];then tool="$RISCV_TOOL_ROOT/riscv64-unknown-elf-";else tool=riscv64-unknown-elf-;fi
 csources=("$ops/mm3_ops.c" "$runtime/src/integer_math.c" "$runtime/src/integer_ops.c" "$runtime/src/integer_model.c" "$runtime/src/integer_io.c")
-cflags=(-std=c11 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -I"$runtime/include" -I"$ops")
+cflags=(-std=c11 -"${SOFTWARE_OPT:-O3}" -Wall -Wextra -Werror -Wno-misleading-indentation -I"$runtime/include" -I"$ops")
 compile_host(){
  "$cc" "${cflags[@]}" "$ops/mm3_reference_main.c" "${csources[@]}" "$runtime/src/platform_integer.c" -o "$build/reference" > "$logs/host-build.log" 2>&1
  "$cc" "${cflags[@]}" -c "$ops/mm3_driver.c" -o "$build/host-driver.o" >> "$logs/host-build.log" 2>&1
 }
 compile_cpu(){
  local width="$1";local abi=ilp32;[[ "$width" == 32 ]] || abi=lp64
- "${tool}gcc" "${cflags[@]}" -O3 -march="rv${width}im_zicsr_zifencei" -mabi="$abi" -mcmodel=medany -mno-relax \
+ "${tool}gcc" "${cflags[@]}" -march="rv${width}im_zicsr_zifencei" -mabi="$abi" -mcmodel=medany -mno-relax \
   -ffreestanding -fno-builtin -fno-common -fno-pie -ffunction-sections -fdata-sections -fno-tree-loop-distribute-patterns -mstrict-align -nostdlib -nostartfiles -static -no-pie \
-  -Isoftware/minimind3/baremetal/include -Ibenchmark/bsp -Wl,--gc-sections,--build-id=none,--no-relax,-T,software/minimind3/baremetal/link.ld,-Map,"$build/layer-rv$width.map" \
-  benchmark/bsp/crt0.S benchmark/bsp/runtime.c software/minimind3/baremetal/platform.c "$ops/mm3_layer_main.c" "$ops/mm3_driver.c" "${csources[@]}" -lgcc -o "$build/layer-rv$width.elf" > "$logs/cpu-rv$width-build.log" 2>&1
+  -Isoftware/minimind3/baremetal/include -Isoftware/common/baremetal -Wl,--gc-sections,--build-id=none,--no-relax,-T,software/minimind3/baremetal/link.ld,-Map,"$build/layer-rv$width.map" \
+  software/common/baremetal/crt0.S software/common/baremetal/runtime.c software/minimind3/baremetal/platform.c "$ops/mm3_layer_main.c" "$ops/mm3_driver.c" "${csources[@]}" -lgcc -o "$build/layer-rv$width.elf" > "$logs/cpu-rv$width-build.log" 2>&1
  "${tool}objdump" -d "$build/layer-rv$width.elf" > "$logs/cpu-rv$width.dump"
  "${tool}nm" -u "$build/layer-rv$width.elf" > "$logs/cpu-rv$width-unresolved.txt";[[ ! -s "$logs/cpu-rv$width-unresolved.txt" ]]
  python3 scripts/verilator/mm3_audit.py no-float "$logs/cpu-rv$width.dump"
@@ -58,7 +66,7 @@ FILES
   "$verilator" --lint-only --timing --assert -Wall -Wno-fatal -DCORE_XLEN="$width" -f scripts/soc_files.f tb/soc/axi_block_memory_model.sv tb/unit/mm3/tb_mm3_program.sv --top-module tb_mm3_program > "$logs/lint-program-rv$width.log" 2>&1
   python3 scripts/verilator/mm3_audit.py structure "$logs/lint-program-rv$width.log"
   for enabled in 0 1;do
-   "$verilator" --lint-only --timing --assert -Wall -Wno-fatal -DCORE_XLEN="$width" -DCORE_MUL_IMPL=0 -DCORE_DIV_IMPL=1 "${core_microarch_flags[@]}" -f scripts/soc_files.f tb/soc/axi_block_memory_model.sv tb/common/store_result_monitor.sv tb/soc/tb_mm3_soc.sv tb/soc/tb_mm3_layer_soc.sv --top-module tb_mm3_layer_soc -GACCEL_ENABLE="$enabled" > "$logs/lint-soc-rv$width-enable$enabled.log" 2>&1
+   "$verilator" --lint-only --timing --assert -Wall -Wno-fatal -DCORE_XLEN="$width" -DCORE_MUL_IMPL=0 -DCORE_DIV_IMPL=1 "${core_microarch_flags[@]}" -f scripts/soc_files.f tb/common/store_result_monitor.sv tb/soc/axi_system_memory_model.sv tb/soc/spi_flash_model.sv tb/soc/tb_soc_system.sv tb/soc/tb_mm3_system.sv --top-module tb_mm3_system -GOP_PROGRAM=1 -GMM3_ACCEL_ENABLE="$enabled" > "$logs/lint-soc-rv$width-enable$enabled.log" 2>&1
   done
  done
  python3 - "$logs" "$build" "${tool}gcc" <<'CHECK'
@@ -118,8 +126,9 @@ REPRO
   python3 scripts/verilator/verilog_hex_to_mem.py "$run/imem.vhex" "$run/imem.hex" --word-bytes "$((xlen/8))" --depth "$((65536/(xlen/8)))" --base 0x01000000
   "${tool}objcopy" -O binary --only-section=.data "$build/layer-rv$xlen.elf" "$run/data.bin"
   tohost=$("${tool}nm" -n "$build/layer-rv$xlen.elf" | awk '$3=="tohost"{print $1}');console=$("${tool}nm" -n "$build/layer-rv$xlen.elf" | awk '$3=="sim_console"{print $1}')
-  "$verilator" --binary --timing --assert -Wall -Wno-fatal -j "$jobs" -CFLAGS -O2 -DCORE_XLEN="$xlen" -DCORE_MUL_IMPL=0 -DCORE_DIV_IMPL=1 "${core_microarch_flags[@]}" -f scripts/soc_files.f tb/soc/axi_block_memory_model.sv tb/common/store_result_monitor.sv tb/soc/tb_mm3_soc.sv tb/soc/tb_mm3_layer_soc.sv --top-module tb_mm3_layer_soc --Mdir "$build/soc-rv$xlen" > "$logs/soc-rv$xlen-build.log" 2>&1
-  "$build/soc-rv$xlen/Vtb_mm3_layer_soc" +IMEM="$run/imem.hex" +DATA="$run/data.bin" +TOHOST="$tohost" +CONSOLE="$console" +IMAGE="$run/image.bin" +COMMANDS="$run/commands.bin" +RANGES="$run/ranges.bin" +CONTROL="$run/control.bin" +MAX_CYCLES="$timeout" +RESULT="$run/actual.bin" "${trace_args[@]}" > "$run/simulation.log" 2>&1
+  "$verilator" --binary --timing --assert -Wall -Wno-fatal -j "$jobs" -CFLAGS -O2 -DCORE_XLEN="$xlen" -DCORE_MUL_IMPL=0 -DCORE_DIV_IMPL=1 "${core_microarch_flags[@]}" -f scripts/soc_files.f tb/common/store_result_monitor.sv tb/soc/axi_system_memory_model.sv tb/soc/spi_flash_model.sv tb/soc/tb_soc_system.sv tb/soc/tb_mm3_system.sv --top-module tb_mm3_system -GOP_PROGRAM=1 --Mdir "$build/soc-rv$xlen" > "$logs/soc-rv$xlen-build.log" 2>&1
+  printf "@0\n0\n" > "$run/dmem.hex"
+  stdbuf -oL "$build/soc-rv$xlen/Vtb_mm3_system" +DMEM="$run/dmem.hex" +IMEM="$run/imem.hex" +DATA="$run/data.bin" +TOHOST="$tohost" +CONSOLE="$console" +IMAGE="$run/image.bin" +COMMANDS="$run/commands.bin" +RANGES="$run/ranges.bin" +CONTROL="$run/control.bin" +MAX_CYCLES="$timeout" +RESULT="$run/actual.bin" "${trace_args[@]}" > "$run/simulation.log" 2>&1
  fi
  if [[ "$route" == soc ]];then cp "$build/layer-rv$xlen.elf" "$run/";fi
  python3 scripts/verilator/mm3_compare_ops.py "$run" "$run/actual.bin" --label "$route-rv$xlen"

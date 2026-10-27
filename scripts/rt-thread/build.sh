@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 xlen="${1:-32}"
 case "$xlen" in 32) abi=ilp32;; 64) abi=lp64;; *) echo 'XLEN must be 32 or 64' >&2; exit 2;; esac
-opt="${SOFTWARE_OPT:-O2}"
+opt="${SOFTWARE_OPT:-O3}"
 case "$opt" in O2|O3|Ofast) ;; *) echo 'SOFTWARE_OPT must be O2, O3 or Ofast' >&2; exit 2;; esac
 rt="${RTTHREAD_ROOT:-build/rt-thread-v5.2.2}"
 revision=ddf52e2cdd977f14fc04035c88672ac204aec713
@@ -29,7 +29,7 @@ done
 for f in kerrno kstdio kstring rt_vsnprintf_tiny; do sources+=("$rt/src/klibc/$f.c"); done
 sources+=("$rt/components/drivers/core/device.c" "$rt/components/drivers/ipc/completion_up.c"
     "$rt/components/drivers/ipc/completion_comm.c" "$rt/components/drivers/serial/dev_serial.c"
-    "$rt/components/drivers/pin/dev_pin.c" benchmark/bsp/softarith.c)
+    "$rt/components/drivers/pin/dev_pin.c" software/common/baremetal/softarith.c)
 objects=()
 for src in "${sources[@]}"; do
     obj="$out/$(basename "${src%.*}").o"

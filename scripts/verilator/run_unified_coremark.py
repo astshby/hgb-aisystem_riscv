@@ -43,8 +43,8 @@ def freeze(bundle, iterations, modes):
         return manifest
     bundle.mkdir(parents=True)
     inputs = set(p2.SOFTWARE_INPUTS) | {Path(p) for p in TCM_SOURCES} | {
-        Path('benchmark/bsp/link_soc.ld'), Path('benchmark/p2/link_soc_coremark_tcm.ld'),
-        Path('scripts/verilator/build_benchmark_image.sh')}
+        Path('software/common/baremetal/link_soc.ld'), Path('benchmark/p2/link_soc_coremark_tcm.ld'),
+        Path('scripts/verilator/build_baremetal_image.sh')}
     hashes = p2.copy_sources(sorted(inputs), bundle / 'source')
     tools = str(Path(os.environ['RISCV_TOOL_ROOT']) / 'riscv64-unknown-elf-')
     images = []
@@ -56,14 +56,14 @@ def freeze(bundle, iterations, modes):
             flags = ['-Ibenchmark/coremark/port', '-Ibenchmark/coremark/vendor/coremark',
                      f'-DITERATIONS={iterations}', '-DTOTAL_DATA_SIZE=2000', f'-D{mode.upper()}_RUN=1']
             if scenario == 'tcm':
-                command = ['bash', 'scripts/verilator/build_benchmark_image.sh', '32', str(out),
+                command = ['bash', 'scripts/verilator/build_baremetal_image.sh', '32', str(out),
                            *flags, '-DMEM_LOCATION="ITCM code and DTCM static data/stack"', *TCM_SOURCES]
                 run(command, out / 'build.log', source, dict(os.environ, SOC='1', SOC_DDR='0'))
             else:
                 command = [tools+'gcc', '-march=rv32im_zicsr', '-mabi=ilp32', '-mcmodel=medany',
                     '-mno-relax', '-std=gnu99', '-'+p2.optimization(), '-DHGB_OPT_LEVEL="-'+p2.optimization()+'"', '-g', '-ffreestanding', '-fno-builtin', '-fno-common',
                     '-fno-pie', '-fno-tree-loop-distribute-patterns', '-mstrict-align', '-nostdlib', '-nostartfiles',
-                    '-static', '-no-pie', '-Ibenchmark/p2', '-Ibenchmark/bsp', *flags,
+                    '-static', '-no-pie', '-Ibenchmark/p2', '-Isoftware/common/baremetal', *flags,
                     '-DP2_TCM=1', '-DP2_WARM=0', '-DP2_BACKGROUND=1', '-DP2_TIMER_MODE=0',
                     '-DP2_INTERVAL_PS=100000000', '-DDMA_SOURCE=0x01108000u', '-DDMA_DESTINATION=0x01008000u',
                     '-Wl,--build-id=none,--no-relax', '-Wl,-T,benchmark/p2/link_soc_coremark_tcm.ld',
@@ -110,7 +110,7 @@ def build(config, root):
     top=config['sim_top']
     binary=root/('V'+top)
     sources=p2.rtl_sources()
-    sources.update({p:sha(ROOT/p) for p in ('scripts/benchmark_config.py','scripts/benchmark_platforms.json',
+    sources.update({p:sha(ROOT/p) for p in ('scripts/benchmark_config.py','scripts/benchmark_platforms.json','scripts/hardware_profile.json','scripts/hardware_config.py',
                                            'scripts/verilator/run_unified_coremark.py')})
     if binary.exists():
         receipt=json.loads((root/'build.json').read_text())
@@ -240,9 +240,9 @@ def functional(binary, config, output, receipt):
     name=f'{config["platform"]}-{config["clock"]}-rv{config["xlen"]}'
     image=output/'functional'/name
     image.mkdir(parents=True,exist_ok=True)
-    sources=['benchmark/bsp/crt0.S','benchmark/bsp/runtime.c','benchmark/bsp/softarith.c',
-             'benchmark/smoke/main.c' if config['platform']=='core_tcm' else 'tb/software/benchmark_platform.c']
-    command=['bash','scripts/verilator/build_benchmark_image.sh',str(config['xlen']),str(image),
+    sources=['software/common/baremetal/crt0.S','software/common/baremetal/runtime.c','software/common/baremetal/softarith.c',
+             'software/common/smoke.c' if config['platform']=='core_tcm' else 'tb/software/benchmark_platform.c']
+    command=['bash','scripts/verilator/build_baremetal_image.sh',str(config['xlen']),str(image),
              f'-DBENCH_DDR={int(bool(config["ddr_bytes"]))}',f'-DBENCH_NPU={config.get("npu_enable",0)}',*sources]
     build_command=shlex.join(command)
     run(command,image/'build.log',env=dict(os.environ,SOC='1',SOC_DDR='0'))
@@ -261,7 +261,7 @@ def functional(binary, config, output, receipt):
         image_build_command=build_command,source_commit=receipt['source_commit'],source_branch=receipt['source_branch'],
         binary_sha256=receipt['binary_sha256'],image_sha256={p.name:sha(p) for p in image.glob('*.hex')},
         elf_sha256=sha(image/'program.elf'),source_sha256={s:sha(ROOT/s) for s in
-            sources + (['tb/software/npu_platform.h'] if config.get('npu_enable') else [])},
+            sources + (['software/yolo/npu_workload.h'] if config.get('npu_enable') else [])},
         log_sha256=sha(image/'run.log'),status='PASS'))
     print('PASS paired functional '+name,flush=True)
 

@@ -114,7 +114,7 @@ def stage(output, config, bundle, sim_receipt, ip_dir=None):
         '-File [file join $bench_root memory_gate.ps1] -LogDirectory [file join $bench_root memory] -Phase synthesis]\n'
         'source [file join $bench_root compile.tcl]\nset_option max_threads 1\n'
         'synthesize -ads -selected_syn_tool_opt 2 -max_path 100 -nworst 3 -report_logic_level_distribution -report_exception TRUE\n')
-    for name in ('benchmark_config.py','benchmark_platforms.json'):
+    for name in ('benchmark_config.py','benchmark_platforms.json','hardware_config.py','hardware_profile.json'):
         shutil.copyfile(ROOT/'scripts'/name,output/name)
     shutil.copyfile(sim_receipt,output/'simulation-build.json')
     manifest=dict(schema=1,config=config,firmware=image,firmware_manifest_sha256=sha(bundle/'manifest.json'),

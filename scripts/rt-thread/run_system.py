@@ -11,8 +11,9 @@ import sys
 
 ROOT=Path(__file__).resolve().parents[2]
 sys.path[:0]=[str(ROOT/'scripts'),str(ROOT/'scripts/verilator')]
-from benchmark_config import configuration,sha
-import run_p2_coremark as p2
+from hardware_config import hardware_configuration
+from sim_support import sha
+import sim_support as support
 
 
 def run(command,log,cwd=ROOT,env=None):
@@ -25,17 +26,17 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--xlen',type=int,choices=(32,64),default=32)
     args=parser.parse_args();os.chdir(ROOT)
-    opt=p2.optimization();width=args.xlen
+    opt=support.optimization();width=args.xlen
     root=ROOT/f'build/rt-thread/system-rv{width}-{opt}';root.mkdir(parents=True,exist_ok=True)
     run(['bash','scripts/rt-thread/build.sh',str(width)],root/'software-build.log')
-    config=configuration('soc_ddr',xlen=width)
-    sources=p2.rtl_sources()
+    config=hardware_configuration('none',width)
+    sources=support.rtl_sources()
     digest=hashlib.sha256(json.dumps([config,sources],sort_keys=True).encode()).hexdigest()[:16]
     model=ROOT/f'build/rt-thread/models/{width}-{digest}';binary=model/'Vtb_rt_thread_system'
     env=dict(os.environ,CCACHE_DIR=str(ROOT/'build/ccache'),CCACHE_TEMPDIR=str(ROOT/'build/ccache-tmp'))
     if not binary.exists():
         model.mkdir(parents=True,exist_ok=True)
-        p2.copy_sources([Path(p) for p in sources],model/'source')
+        support.copy_sources([Path(p) for p in sources],model/'source')
         command=['verilator','--binary','--timing','--assert','-Wall','-Wno-fatal','-j','2','-CFLAGS','-O1',
                  *[f'-D{k}={v}' for k,v in config['macros'].items()],'-f','scripts/system_files.f',
                  'tb/common/store_result_monitor.sv','tb/soc/axi_system_memory_model.sv',
@@ -43,7 +44,7 @@ def main():
                  '--top-module','tb_rt_thread_system','-Mdir',str(model)]
         run(command,model/'build.log',model/'source',env)
         (model/'build.json').write_text(json.dumps(dict(config=config,command=command,source_sha256=sources,binary_sha256=sha(binary)),indent=2)+'\n')
-    symbols=p2.symbols_from_nm((root/'program.nm').read_text())
+    symbols=support.symbols_from_nm((root/'program.nm').read_text())
     command=[str(binary),f'+IMEM={root}/imem.hex',f'+DMEM={root}/dmem.hex',f'+DDR={root}/ddr.hex',
              f'+TOHOST={symbols["tohost"]:x}',f'+CONSOLE={symbols["sim_console"]:x}',
              '+UART_LOOPBACK','+GPIO_LOOPBACK','+TEST=rt-thread','+MAX_CYCLES=30000000']
