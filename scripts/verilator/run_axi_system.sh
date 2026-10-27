@@ -13,7 +13,7 @@ for spec in 5000:5000:8:0 5000:6250:8:0 6250:4000:8:0 4274:5376:8:0 5000:5000:2:
     out="build/p2/$name-$p2_core_build_tag"
     mkdir -p "$out"
     verilator --binary --assert --timing -Wall -Wno-fatal -j 2 -DCORE_XLEN="$xlen" "${p2_core_flags[@]}" \
-        -f scripts/rtl_files.f -f scripts/axi_files.f vsrc/cpu/pango_block_bridge.sv tb/soc/axi_native_memory_model.sv tb/soc/axi_system_memory_model.sv tb/soc/tb_axi_system_fabric.sv \
+        -f scripts/rtl_files.f -f scripts/axi_files.f vsrc/cpu/pango_block_bridge.sv tb/soc/axi_native_memory_model.sv tb/soc/axi_system_memory_model.sv tb/soc/axi_system_fabric_reference.sv tb/soc/tb_axi_system_fabric.sv \
         --top-module tb_axi_system_fabric -GSYS_HALF_PS="$sh" -GTARGET_HALF_PS="$th" -GCDC_DEPTH="$depth" -GNATIVE_DDR="$native" \
         -Mdir "$out" >"${log_root}/$name.build.log" 2>&1 || { tail -30 "${log_root}/$name.build.log"; exit 1; }
     if rg '%(Error|Warning-(LATCH|UNOPTFLAT|MULTIDRIVEN|ALWCOMBORDER))' "${log_root}/$name.build.log"; then exit 1; fi

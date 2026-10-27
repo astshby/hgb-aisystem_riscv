@@ -14,12 +14,51 @@ module tb_axi_system_fabric #(
     initial begin #1700ps; forever #(TARGET_HALF_PS * 1ps) device_clk = !device_clk; end
     axi_req_t m_req [4], s_req [7], device_req [7];
     axi_rsp_t m_rsp [4], s_rsp [7], device_rsp [7];
+    axi_req_t reference_s_req [7];
+    axi_rsp_t reference_m_rsp [4];
     logic [3:0] done = 0;
     int cycles = 0;
     int early_completions = 0;
     logic slow_stall;
     assign slow_stall = cycles < 200;
     axi_system_fabric #(.DDR_BYTES(65536), .FLASH_BYTES(65536), .NPU_BYTES(65536)) dut (.*);
+    axi_system_fabric_reference #(.DDR_BYTES(65536), .FLASH_BYTES(65536), .NPU_BYTES(65536)) reference_dut (
+        .clk, .rst, .m_req, .m_rsp(reference_m_rsp), .s_req(reference_s_req), .s_rsp
+    );
+    // 同一组合法 AXI 激励逐拍比较全部接口，覆盖仲裁次序和每条通道的反压行为。
+    always @(posedge clk) if (!rst) begin
+        for (int m = 0; m < 4; m++)
+            assert (m_rsp[m] == reference_m_rsp[m]) else $fatal(1, "fabric master cycle mismatch m=%0d", m);
+        for (int t = 0; t < 7; t++)
+            assert (s_req[t] == reference_s_req[t]) else $fatal(1, "fabric target cycle mismatch t=%0d", t);
+    end
+    initial begin
+        logic [6:0] expected;
+        int index;
+        for (int first = 0; first < 7; first++) begin
+            for (int mask = 0; mask < 128; mask++) begin
+                expected = '0;
+                for (int offset = 0; offset < 7; offset++) begin
+                    index = (first+offset)%7;
+                    if (expected == 0 && (mask & (1 << index))) expected[index] = 1;
+                end
+                assert (dut.choose_target(7'(mask), 3'(first)) == expected)
+                    else $fatal(1, "target grant order mask=%0d first=%0d", mask, first);
+            end
+        end
+        for (int first = 0; first < 4; first++) begin
+            for (int mask = 0; mask < 16; mask++) begin
+                expected = '0;
+                for (int offset = 0; offset < 4; offset++) begin
+                    index = (first+offset)%4;
+                    if (expected == 0 && (mask & (1 << index))) expected[index] = 1;
+                end
+                assert (dut.choose_master(4'(mask), 2'(first)) == expected[3:0])
+                    else $fatal(1, "master grant order mask=%0d first=%0d", mask, first);
+            end
+        end
+        $display("PASS fabric grants exhaustive cases=960");
+    end
     for (genvar t = 0; t < 7; t++) begin : g_target
         axi_clock_bridge #(.DEPTH(CDC_DEPTH)) u_cdc (.s_clk(clk), .s_rst(rst), .m_clk(device_clk), .m_rst(rst),
             .s_req(s_req[t]), .s_rsp(s_rsp[t]), .m_req(device_req[t]), .m_rsp(device_rsp[t]));
