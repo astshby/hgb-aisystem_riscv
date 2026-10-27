@@ -32,7 +32,7 @@ CPU 提交地址/长度/方向、启动、核对完成和处理 Cache 所有权�
 
 `make check XLEN=32|64` 运行通用功能、scoreboard、ISA、SoC、五组时钟、AXI 和 C smoke。
 `make loader-host-test` 与 `make loader-soc-test XLEN=32|64` 检查下载协议和 UART 实际引脚。
-各应用用 `make score`、`make rt-thread`、`make yolo`、`make minimind`；分支裁剪后仅保留适用入口。
+本分支应用入口以 `make help` 为准。
 软件默认 O3，用 `SOFTWARE_OPT=O2|O3|Ofast` 覆盖。Ofast 本轮没有稳定额外收益，未设为默认。
 
 ## CoreMark 口径
@@ -70,18 +70,7 @@ DTCM 保留观测区和机器异常栈。TB 为仿真预装 DDR 镜像，板上�
 O3 双宽实际运行通过：RV32/RV64 为 2,765,395/2,774,072 TB 周期，39 次 trap，
 DDR 退休计数均超过 260 万，I$/D$ 命中和 DMA 热代码搬运均被检查。它们是功能时间，不能换算 CoreMark。
 
-## 加速器与 FPGA 边界
+## FPGA 边界
 
-YOLO 使用固定 128-MAC 上游，双宽两个卷积与 4096 B DDR DMA 数据核对通过，
-83 个 MAC 工作沿中 28 个与 DMA 在途重叠。RV32/RV64 O3 为 418,831/423,561 TB 周期，
-RV32 Ofast 与 O3 相同。完整 YOLOX 尚未验证。
-
-MiniMind 迁入同一五域系统，100 MHz 域中的算子通过独立 AXI 主口访问共享 DDR；
-CPU 控制窗口为 `0x20000000`。双宽单层 38 命令与参考字节一致，
-RV32/RV64 为 4,680,438/4,678,859 TB 周期，各 59,857 次外部主口读命令。
-完整运行库每宽 4 次正常及 4 次预期错误通过，包含 CPU/加速器对照与 32 KiB DMA 并发。
-本轮未运行完整八层、多 Token 或语言质量测试。
-
-标准综合按五种实际硬件分别测资源和域内 Fmax，不将核级最高值用作完整系统频率。
-本轮没有 P&R、bitstream 或板级结果。原生综合与内存检查位于 `$PDS_WORK_ROOT/work/four-branches-20261027/`。
-CDC/PHY/I/O 的原始跨域报告与域内路径分别呈现，不用 false path 隐藏真实同步路径。
+本树无加速器。三层硬件标准综合分别测资源、域内 Fmax/WNS 和最差路径。
+本轮没有 P&R、bitstream 或板级结果；CDC/PHY/I/O 的原始报告仍需后续处理。

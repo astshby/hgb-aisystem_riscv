@@ -47,32 +47,7 @@ vsrc/soc/memory/tcm_dual_bank.sv
 vsrc/soc/cache/dcache_banked.sv
 vsrc/soc/cache/icache_native.sv
 vsrc/soc/memory/scoreboard_soc_memory.sv
-vsrc/soc/mm3/common/mm3_config_pkg.sv
-vsrc/soc/mm3/common/mm3_tables_pkg.sv
-vsrc/soc/mm3/common/mm3_fixed_pkg.sv
-vsrc/soc/mm3/common/mm3_fixed_math.sv
-vsrc/soc/mm3/common/mm3_reader.sv
-vsrc/soc/mm3/common/mm3_udiv.sv
-vsrc/soc/mm3/common/mm3_mul_lanes.sv
-vsrc/soc/mm3/common/mm3_pack.sv
-vsrc/soc/mm3/ew_add/mm3_ew_add.sv
-vsrc/soc/mm3/ew_mul/mm3_ew_mul.sv
-vsrc/soc/mm3/rope/mm3_rope_lane.sv
-vsrc/soc/mm3/swiglu/mm3_sigmoid.sv
-vsrc/soc/mm3/common/mm3_vector.sv
-vsrc/soc/mm3/rmsnorm/mm3_rsqrt.sv
-vsrc/soc/mm3/rmsnorm/mm3_reduce.sv
-vsrc/soc/mm3/rmsnorm/mm3_rmsnorm.sv
-vsrc/soc/mm3/softmax/mm3_softmax.sv
-vsrc/soc/mm3/gemm/mm3_gemm_pe.sv
-vsrc/soc/mm3/gemm/mm3_gemm.sv
-vsrc/soc/mm3/kv_cache/mm3_kv_cache.sv
-vsrc/soc/mm3/attention/mm3_attention.sv
-vsrc/soc/mm3/gemv/mm3_gemv_accel.sv
-vsrc/soc/mm3/top/mm3_ops_engine.sv
-vsrc/soc/mm3/top/mm3_accel.sv
 -f scripts/axi_files.f
-vsrc/soc/mm3/top/mm3_axi_subsystem.sv
 vsrc/soc/bus/axi_to_axil.sv
 vsrc/soc/bus/axil_clock_bridge.sv
 vsrc/soc/bus/axil_to_bus.sv
@@ -87,4 +62,3 @@ vsrc/soc/flash/spi_flash_reader.sv
 vsrc/soc/flash/flash_axi_target.sv
 vsrc/soc/soc_system.sv
 vsrc/soc/soc_top.sv
--f scripts/npu_files.f

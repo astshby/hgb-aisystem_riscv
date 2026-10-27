@@ -429,34 +429,8 @@ module tb_soc_system #(
             $clog2(dut.u_memory.u_dcache.LINE_BYTES),dut.u_memory.u_dcache.BANK_BIT-1);
     end
 
-    initial assert (!(NPU_ENABLE && MM3_ENABLE)) else $fatal(1,"select one accelerator");
-    if (NPU_ENABLE) begin : g_npu
-        assign external_req='0;
-        logic clk_npu=0, rst_npu;
-        longint unsigned roi_cycles=0, roi_busy=0, roi_starts=0, roi_outputs=0;
-        always #(NPU_PERIOD_PS * 0.5ps) clk_npu=~clk_npu;
-        soc_reset_controller u_reset (.reset_async,.clk_core(clk_npu),.clk_sys,.clk_ddr,.clk_periph,
-            .rst_core(rst_npu),.rst_sys(),.rst_ddr(),.rst_periph());
-        npu_axi_target u_npu (.clk_sys,.rst_sys(dut.rst_sys),.clk_npu,.rst_npu,
-            .axi_req(npu_req),.axi_rsp(npu_rsp));
-        initial $display("NPU_HARDWARE enabled=1 period_ps=%0d implementation=128mac mmio_abi=65536",NPU_PERIOD_PS);
-        always @(posedge clk_npu) if (!rst_npu && p2_roi_enable && p2_roi_phase==1) begin
-            roi_cycles++;
-            if (u_npu.u_device.core_busy) roi_busy++;
-            if (u_npu.u_device.start_commit_q) roi_starts++;
-            if (u_npu.u_device.output_push) roi_outputs++;
-        end
-        final $display("NPU_ACTIVITY roi_cycles=%0d busy=%0d starts=%0d outputs=%0d",roi_cycles,roi_busy,roi_starts,roi_outputs);
-    end else if (MM3_ENABLE) begin : g_mm3
-        logic clk_npu=0, rst_npu;
-        initial begin #3700ps; forever #(NPU_PERIOD_PS * 0.5ps) clk_npu=~clk_npu; end
-        soc_reset_controller u_reset (.reset_async,.clk_core(clk_npu),.clk_sys,.clk_ddr,.clk_periph,
-            .rst_core(rst_npu),.rst_sys(),.rst_ddr(),.rst_periph());
-        mm3_axi_subsystem #(.DDR_BYTES(DDR_BYTES),.MAC_LANES(MM3_MAC_LANES)) u_npu (
-            .clk_sys,.rst_sys(dut.rst_sys),.clk_npu,.rst_npu,
-            .control_req(npu_req),.control_rsp(npu_rsp),.memory_req(external_req),.memory_rsp(external_rsp));
-        initial $display("MM3_HARDWARE period_ps=%0d mmio_base=20000000",NPU_PERIOD_PS);
-    end else begin : g_no_npu
+    initial assert (!(NPU_ENABLE || MM3_ENABLE)) else $fatal(1,"accelerator unavailable in this branch");
+    if (1) begin : g_no_npu
         assign external_req='0;
         assign npu_rsp='0;
     end

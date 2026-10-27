@@ -105,7 +105,7 @@ module pango_200hp_top #(
         end
     endgenerate
     initial begin
-        assert (!(NPU_ENABLE && MM3_ENABLE)) else $fatal(1,"select one accelerator");
+        assert (!(NPU_ENABLE || MM3_ENABLE)) else $fatal(1,"accelerator unavailable in this branch");
         assert (BOARD_CLOCK_PROFILE == 0 || BOARD_CLOCK_PROFILE == 1 || BOARD_CLOCK_PROFILE == 4)
             else $fatal(1, "unsupported board clock profile");
         assert (!(NPU_ENABLE || MM3_ENABLE) || BOARD_CLOCK_PROFILE != 0)
@@ -129,23 +129,7 @@ module pango_200hp_top #(
     axi_types_pkg::axi_rsp_t npu_rsp;
     axi_types_pkg::axi_req_t external_req;
     axi_types_pkg::axi_rsp_t external_rsp;
-    if (NPU_ENABLE) begin : g_npu
-        assign external_req = '0;
-        logic rst_npu, rst_npu_sys;
-        soc_reset_controller u_reset (.reset_async(soc_rst),.clk_core(npu_clk),.clk_sys(sys_clk),
-            .clk_ddr(core_clk),.clk_periph(periph_clk),.rst_core(rst_npu),.rst_sys(rst_npu_sys),
-            .rst_ddr(),.rst_periph());
-        npu_axi_target u_target (.clk_sys(sys_clk),.rst_sys(rst_npu_sys),.clk_npu(npu_clk),.rst_npu,
-            .axi_req(npu_req),.axi_rsp(npu_rsp));
-    end else if (MM3_ENABLE) begin : g_mm3
-        logic rst_npu, rst_npu_sys;
-        soc_reset_controller u_reset (.reset_async(soc_rst),.clk_core(npu_clk),.clk_sys(sys_clk),
-            .clk_ddr(core_clk),.clk_periph(periph_clk),.rst_core(rst_npu),.rst_sys(rst_npu_sys),
-            .rst_ddr(),.rst_periph());
-        mm3_axi_subsystem #(.DDR_BYTES(512*1024*1024)) u_target (
-            .clk_sys(sys_clk),.rst_sys(rst_npu_sys),.clk_npu(npu_clk),.rst_npu,
-            .control_req(npu_req),.control_rsp(npu_rsp),.memory_req(external_req),.memory_rsp(external_rsp));
-    end else begin : g_no_npu
+    if (1) begin : g_no_npu
         assign external_req = '0;
         assign npu_rsp = '0;
     end

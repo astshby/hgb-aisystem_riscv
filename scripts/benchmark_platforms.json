@@ -45,28 +45,6 @@
       ],
       "sim_top": "tb_soc_system",
       "pds_top": "pango_200hp_top"
-    },
-    "soc_npu": {
-      "domains": [
-        "core",
-        "sys",
-        "ddr",
-        "periph",
-        "npu"
-      ],
-      "ddr_bytes": 536870912,
-      "cache_enable": 1,
-      "scenarios": [
-        "tcm",
-        "cold",
-        "warm",
-        "background",
-        "npu_background"
-      ],
-      "sim_top": "tb_soc_system",
-      "pds_top": "pango_200hp_top",
-      "npu_enable": 1,
-      "npu_period_ps": 10000
     }
   }
 }
