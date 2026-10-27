@@ -13,10 +13,52 @@ C1 目标 Core/SYS/DDR-user/外设 = 100/80/125/25 MHz。
 `prepare_project.py --core-backend scoreboard --board-clock-profile 1` 暂存无加速器板级工程；
 加 `--npu-enable` 或 `--mm3-enable` 选择对应加速器。两标志互斥，分支未保留的设备不能选择。
 加速器专用分支从 `branch_profile.json` 读取默认设备，all 默认无设备。
-暂存前需 `make loader XLEN=32` 与完整生成 DDR IP 目录。
+默认入口已选择 scoreboard/C1；显式 legacy 使用原共同时钟，仍可显式覆盖时钟档。
+四分支各 64 项 PDS 工具测试通过。暂存前需 `make loader XLEN=32` 与完整生成 DDR IP 目录。
 
 标准综合使用 ADS `synthesize -ads -selected_syn_tool_opt 2`，单线程，增加路径报告深度；
 不启用快速布局布线，本轮不执行 P&R。每个工程保留编译 Tcl、FDC、镜像、源码哈希和原始报告。
+
+## 2026-10-27 标准综合实测
+
+Windows PDS 2025.2 ADS，PG2L200H-6IFBB676，selected_syn_tool_opt=2、单线程、max_path=100。
+下表每格为 **综合估计 Fmax MHz / 同域 setup WNS ns**；目标依次为 100/80/125/25/100 MHz。
+各域最高值独立统计，不能同时替换测试时钟后沿用原 CoreMark/MHz。
+
+| 硬件 | Core | SYS | DDR-user | 外设 | NPU |
+|---|---:|---:|---:|---:|---:|
+| SoC+YOLO | 88.1368 / -1.346 | 83.8293 / +0.571 | 144.7387 / +1.091 | 79.9552 / +27.493 | 106.5871 / +0.618 |
+
+| 硬件 | LUT | FF | DRM36K | APM |
+|---|---:|---:|---:|---:|
+| SoC+YOLO | 71569 | 66789 | 162.5 | 86.0 |
+
+DDR-user 125 MHz 是控制器用户接口；本轮 IP 配置为 DDR 数据率 1000 Mbps、外部 CK 500 MHz。
+各组 RTL、时钟、ROM/TCM 初值和完整原生报告均单独冻结。
+
+原生工程位于 `$PDS_WORK_ROOT/work/four-branches-20261027/`，目录与表行分别为
+`soc_npu-v2`。摘要、命令和报告哈希见本地
+`logs/four-branches-20261027/synthesis-*.json`；工具输出不入源码仓库。
+CoreMark 硬件组绑定 edc2349 公共硬件与 O3 TCM CoreMark 镜像。
+最终分支裁剪移除未启用设备/应用，公共 Core、包和 BSP 的 100 份文件相同，应用在裁剪树另行复测。
+报告绑定原测量输入，不把文档提交或裁剪树 SHA 写成未经运行的新综合。
+
+| 硬件/域 | 最差起点 → 终点（末三级层次） | 逻辑级 | 最高扇出 |
+|---|---|---:|---:|
+| SoC+YOLO/Core | `u_tcm_target/u_target/write_q[15]/CLK` → `u_soc/g_tcm[0].u_ram/g_bank[0].mem_0/CEA` | 16 | 104 |
+| SoC+YOLO/SYS | `g_npu.u_reset/g_domain[1].release_q[2]/CLK` → `u_fabric/g_master[2].u_write_route/occupancy[0]/CE` | 17 | 1934 |
+| SoC+YOLO/DDR-user | `u_ddr_bridge/wr_cmd_q[3]/CLK` → `u_ddr_bridge/wr_error_q_reg[1]/D` | 11 | 56 |
+| SoC+YOLO/外设 | `u_soc/u_reset/g_domain[3].release_q[2]/CLK` → `u_peripherals/u_mtime/time_q[63]/D` | 17 | 1703 |
+| SoC+YOLO/NPU | `g_npu.u_target/u_device/request_addr_q[10]/CLK` → `g_npu.u_target/u_device/bias_q[64]/CE` | 13 | 34 |
+
+| 硬件 | 原始跨域 setup 最差 ns | 原始跨域 hold 最差 ns | 同域 hold 最差 ns | 未指定 input/output delay 数 |
+|---|---:|---:|---:|---:|
+| SoC+YOLO | -6.063 | -4.680 | -0.006 | 35/73 |
+
+上述跨域数值是保留全部真实路径时的原始报告，尚未完成 FIFO/Gray/payload 端点约束及 DDR PHY/I/O 检查。
+域内最差路径的完整端点/逻辑级/扇出，以及原始跨域 setup、hold 和未约束 I/O 均保存在摘要。
+负 WNS 表示对应目标未达到；跨域、DDR PHY 和 I/O 约束仍需逐端点检查，不能据域内 Fmax 宣称整体时序闭合。
+本轮未执行 P&R，布线 Fmax/WNS、未布通数和板级结果均为未测。
 
 ## 结果解释
 

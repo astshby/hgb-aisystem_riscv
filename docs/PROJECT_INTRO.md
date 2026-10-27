@@ -44,3 +44,11 @@ RV32 Ofast 与 O3 相同。完整 YOLOX 尚未验证。
 标准综合按五种实际硬件分别测资源和域内 Fmax，不将核级最高值用作完整系统频率。
 本轮没有 P&R、bitstream 或板级结果。原生综合与内存检查位于 `$PDS_WORK_ROOT/work/four-branches-20261027/`。
 CDC/PHY/I/O 的原始跨域报告与域内路径分别呈现，不用 false path 隐藏真实同步路径。
+
+## 本轮标准综合
+
+五组测量的对应配置、各域 Fmax/WNS、LUT/FF/DRM/APM、最差路径和原始 CDC/hold 问题，
+见 [FPGA 实测表](fpga/FPGA_ADAPTATION.md#2026-10-27-标准综合实测)。本分支表只列自身保留的硬件。
+本分支完整系统的 Core 为 88.1368 MHz，YOLO 独立域为 106.5871 MHz。
+YOLO 域达到 100 MHz 综合目标，Core 的 100 MHz 目标尚未达到。
+没有本轮布局布线或上板成绩。已完成的仿真和原生综合绑定各自冻结输入，文档更新不改变测量来源。
