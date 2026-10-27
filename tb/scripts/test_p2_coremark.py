@@ -197,6 +197,15 @@ class P2ResultTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'cache size'):
             p2.parse_result(text, 'performance', 2, 'cold')
 
+    def test_explicit_cache_capacity_must_match_both_actual_instances(self):
+        text = result_log().replace('icache_bytes=4096', 'icache_bytes=16384').replace('dcache_bytes=4096', 'dcache_bytes=8192')
+        expected = dict(icache_bytes=16384, dcache_bytes=8192)
+        result = p2.parse_result(text, 'performance', 2, 'cold', expected_cache=expected)
+        self.assertEqual(result['cache']['icache_bytes'], 16384)
+        with self.assertRaisesRegex(ValueError, 'cache size'):
+            p2.parse_result(text.replace('dcache_bytes=8192', 'dcache_bytes=4096'),
+                            'performance', 2, 'cold', expected_cache=expected)
+
     def test_fixed_period_tick_conversion_is_checked(self):
         text = result_log().replace('interval_ticks=2500', 'interval_ticks=2048')
         with self.assertRaisesRegex(ValueError, 'tick conversion'):

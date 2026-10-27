@@ -7,6 +7,8 @@ module pango_200hp_top #(
     parameter int unsigned BOARD_CLOCK_PROFILE = 0,
     parameter bit NPU_ENABLE = 0,
     parameter bit MM3_ENABLE = 0,
+    parameter int unsigned ICACHE_BYTES = 4096,
+    parameter int unsigned DCACHE_BYTES = 4096,
     parameter bit LOCAL_TCM_ENABLE = 1'b0,
     parameter bit DMA_WIDE_ENABLE = 1'b1,
     parameter bit DMA_BLOCK_ENABLE = 1'b1,
@@ -135,6 +137,7 @@ module pango_200hp_top #(
     end
     // C1/C4 的 PLL/复位 RTL 与仿真不代表板上时序验收；Flash 管脚仍待板级接入。
     soc_system #(.ITCM_INIT_FILE(ITCM_INIT_FILE),.DTCM_INIT_FILE(DTCM_INIT_FILE),
+        .ICACHE_BYTES(ICACHE_BYTES),.DCACHE_BYTES(DCACHE_BYTES),
         .SOC_PROFILE(SOC_PROFILE),.DDR_BYTES(512*1024*1024),.NPU_BYTES((NPU_ENABLE || MM3_ENABLE) ? 65536 : 0),.CLOCK_HZ(125000000),
         .CLOCK_INFO_ENABLE(BOARD_CLOCK_PROFILE != 0), .CORE_CLOCK_HZ(HOT_HZ), .SYS_CLOCK_HZ(SYS_HZ),
         .DDR_CLOCK_HZ(125000000), .PERIPH_CLOCK_HZ(PERIPH_HZ), .UART_DIVISOR((PERIPH_HZ+57600)/115200)) u_soc (

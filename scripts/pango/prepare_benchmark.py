@@ -74,7 +74,9 @@ def stage(output, config, bundle, sim_receipt, ip_dir=None):
                 shutil.copyfile(bundle/image['directory']/original,loader/dest)
             command=[sys.executable,str(source/'scripts/pango/prepare_project.py'),'--output',str(output),
                      '--ip-dir',str(ip_dir.resolve()),'--core-backend','scoreboard',
-                     '--board-clock-profile',str(config['native_board_profile'])]
+                     '--board-clock-profile',str(config['native_board_profile']),
+                     '--icache-bytes',str(config['memory']['icache_bytes']),
+                     '--dcache-bytes',str(config['memory']['dcache_bytes'])]
             if config.get('npu_enable'): command += ['--npu-enable']
             for name,macro in flags.items(): command += ['--'+name,str(m[macro])]
             subprocess.run(command,check=True,cwd=source)
@@ -132,7 +134,7 @@ def stage(output, config, bundle, sim_receipt, ip_dir=None):
 def verify(root):
     manifest=json.loads((root/'benchmark.json').read_text())
     c=manifest['config']
-    if c!=configuration(c['platform'],c['clock'],c['xlen']): raise ValueError('platform configuration changed')
+    if c!=configuration(c['platform'],c['clock'],c['xlen'],c['memory']['icache_bytes'],c['memory']['dcache_bytes']): raise ValueError('platform configuration changed')
     for name,digest in manifest['files'].items():
         if sha(root/name)!=digest: raise ValueError('modified PDS input: '+name)
     sim=json.loads((root/'simulation-build.json').read_text())
@@ -158,6 +160,8 @@ def main():
     parser.add_argument('--platform',choices=CONFIG['platforms'])
     parser.add_argument('--clock',choices=CONFIG['clock_periods_ps'],default='target')
     parser.add_argument('--bundle',type=Path)
+    parser.add_argument('--icache-bytes',type=int)
+    parser.add_argument('--dcache-bytes',type=int)
     parser.add_argument('--ip-dir',type=Path)
     parser.add_argument('--sim-receipt',type=Path)
     parser.add_argument('--verify',action='store_true')
@@ -166,7 +170,7 @@ def main():
         verify(args.output.resolve()); print('PASS paired PDS inputs'); return
     if not args.platform or not args.bundle or not args.sim_receipt:
         parser.error('--platform, --bundle and --sim-receipt are required for staging')
-    stage(args.output.resolve(),configuration(args.platform,args.clock),args.bundle.resolve(),args.sim_receipt.resolve(),args.ip_dir)
+    stage(args.output.resolve(),configuration(args.platform,args.clock,32,args.icache_bytes,args.dcache_bytes),args.bundle.resolve(),args.sim_receipt.resolve(),args.ip_dir)
 
 
 if __name__=='__main__':

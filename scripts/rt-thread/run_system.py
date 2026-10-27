@@ -25,11 +25,15 @@ def run(command,log,cwd=ROOT,env=None):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--xlen',type=int,choices=(32,64),default=32)
+    parser.add_argument('--icache-bytes',type=int)
+    parser.add_argument('--dcache-bytes',type=int)
     args=parser.parse_args();os.chdir(ROOT)
     opt=support.optimization();width=args.xlen
-    root=ROOT/f'build/rt-thread/system-rv{width}-{opt}';root.mkdir(parents=True,exist_ok=True)
-    run(['bash','scripts/rt-thread/build.sh',str(width)],root/'software-build.log')
-    config=hardware_configuration('none',width)
+    suffix='' if args.icache_bytes is None and args.dcache_bytes is None else f'-i{args.icache_bytes or 4096}-d{args.dcache_bytes or 4096}'
+    root=ROOT/f'build/rt-thread/system-rv{width}-{opt}{suffix}';root.mkdir(parents=True,exist_ok=True)
+    run(['bash','scripts/rt-thread/build.sh',str(width)],root/'software-build.log',
+        env=dict(os.environ,RTTHREAD_BUILD_DIR=str(root)))
+    config=hardware_configuration('none',width,args.icache_bytes,args.dcache_bytes)
     sources=support.rtl_sources()
     digest=hashlib.sha256(json.dumps([config,sources],sort_keys=True).encode()).hexdigest()[:16]
     model=ROOT/f'build/rt-thread/models/{width}-{digest}';binary=model/'Vtb_rt_thread_system'
@@ -41,13 +45,14 @@ def main():
                  *[f'-D{k}={v}' for k,v in config['macros'].items()],'-f','scripts/system_files.f',
                  'tb/common/store_result_monitor.sv','tb/soc/axi_system_memory_model.sv',
                  'tb/soc/spi_flash_model.sv','tb/soc/tb_soc_system.sv','tb/soc/tb_rt_thread_system.sv',
+                 f'-GICACHE_BYTES={config["memory"]["icache_bytes"]}',f'-GDCACHE_BYTES={config["memory"]["dcache_bytes"]}',
                  '--top-module','tb_rt_thread_system','-Mdir',str(model)]
         run(command,model/'build.log',model/'source',env)
         (model/'build.json').write_text(json.dumps(dict(config=config,command=command,source_sha256=sources,binary_sha256=sha(binary)),indent=2)+'\n')
     symbols=support.symbols_from_nm((root/'program.nm').read_text())
     command=[str(binary),f'+IMEM={root}/imem.hex',f'+DMEM={root}/dmem.hex',f'+DDR={root}/ddr.hex',
              f'+TOHOST={symbols["tohost"]:x}',f'+CONSOLE={symbols["sim_console"]:x}',
-             '+UART_LOOPBACK','+GPIO_LOOPBACK','+TEST=rt-thread','+MAX_CYCLES=30000000']
+             '+UART_LOOPBACK','+GPIO_LOOPBACK','+P2_METRICS','+TEST=rt-thread','+MAX_CYCLES=30000000']
     run(command,root/'simulation.log')
     text=(root/'simulation.log').read_text()
     for marker in (f'PASS rt-thread RV{width}',f'PASS rt four-domain RV{width}',

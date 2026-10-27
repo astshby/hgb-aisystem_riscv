@@ -324,7 +324,7 @@ def parse_metrics(text, half_periods, require_w=False):
     return result
 
 
-def parse_result(text, mode, iterations, layer, expected_core=None, expected_soc=None, expected_periods_ps=None):
+def parse_result(text, mode, iterations, layer, expected_core=None, expected_soc=None, expected_periods_ps=None, expected_cache=None):
     if re.search(r'%Fatal|%Error|Assertion failed|TIMEOUT', text):
         raise ValueError('simulator failure')
     if not re.search(r'^PASS p2-coremark-', text, re.M):
@@ -422,9 +422,10 @@ def parse_result(text, mode, iterations, layer, expected_core=None, expected_soc
     if cache_line is None:
         raise ValueError('missing instantiated cache configuration')
     cache = {key: int(value) for key, value in re.findall(r'(\w+)=(\d+)', cache_line[0])}
-    expected_cache = {'icache_bytes': 4096, 'icache_line_bytes': 32, 'icache_ways': 2,
-                      'dcache_bytes': 4096, 'dcache_line_bytes': 32, 'dcache_ways': 2, 'dcache_banks': 2}
-    if any(cache.get(key) != value for key, value in expected_cache.items()):
+    expected_geometry = {'icache_bytes': 4096, 'icache_line_bytes': 32, 'icache_ways': 2,
+                      'dcache_bytes': 4096, 'dcache_line_bytes': 32, 'dcache_ways': 2, 'dcache_banks': 2,
+                      **({key: expected_cache[key] for key in ('icache_bytes','dcache_bytes')} if expected_cache else {})}
+    if any(cache.get(key) != value for key, value in expected_geometry.items()):
         raise ValueError('actual cache size differs from the frozen benchmark contract')
     soc = parse_soc_config(text, expected_soc, expected_periods_ps)
     if soc is not None and (soc['clock_profile'] != clock_config or

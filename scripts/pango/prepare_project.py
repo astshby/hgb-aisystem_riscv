@@ -170,7 +170,8 @@ def core_profile(configuration):
 
 def compile_command(xlen, profile_id, local_tcm, dma_wide=1,
                     cache_block=None, dma_block=None, core_issue_width=None, scoreboard=False,
-                    scoreboard_config=None, soc_system=False, board_clock_profile=0, npu_enable=False, mm3_enable=False):
+                    scoreboard_config=None, soc_system=False, board_clock_profile=0, npu_enable=False, mm3_enable=False,
+                    icache_bytes=4096, dcache_bytes=4096):
     if soc_system and not scoreboard:
         raise ValueError("soc_system requires scoreboard")
     # schema 1--7 保持历史 Tcl；schema 8 的 AXI 系统没有这些 legacy 开关。
@@ -202,6 +203,10 @@ def compile_command(xlen, profile_id, local_tcm, dma_wide=1,
                 issue_directive += f" CORE_SCHEDULER_FORWARD_MODE={scoreboard_config['core_scheduler_forward_mode']}"
     # profile 0 不写入 BOARD_CLOCK_PROFILE，保持既有 compile.tcl 逐字节兼容。
     board_directive = "" if board_clock_profile == 0 else f" BOARD_CLOCK_PROFILE {board_clock_profile}"
+    if (icache_bytes, dcache_bytes) != (4096, 4096):
+        if not soc_system:
+            raise ValueError('cache capacity overrides require soc_system')
+        board_directive += f" ICACHE_BYTES {icache_bytes} DCACHE_BYTES {dcache_bytes}"
     if npu_enable and mm3_enable:
         raise ValueError("select one accelerator")
     if npu_enable or mm3_enable:
@@ -243,6 +248,17 @@ def verify_staged_manifest(root, manifest):
             if type(manifest.get(key)) is not int or manifest.get(key) != 1:
                 raise ValueError(f"invalid staged block/issue configuration: {key}")
     scoreboard_config = dict(SCOREBOARD_CONFIGURATION)
+    if schema in (8, 9):
+        for key in ('icache_bytes', 'dcache_bytes'):
+            size = manifest.get(key)
+            if type(size) is not int or size < 4096 or size > 65536 or size & (size - 1):
+                raise ValueError('invalid staged cache capacity: ' + key)
+            scoreboard_config[key] = size
+        if (manifest['icache_bytes'], manifest['dcache_bytes']) != (4096, 4096):
+            wrapper = (root / 'vsrc/cpu/pango_200hp_top.sv').read_text()
+            for name in ('ICACHE_BYTES', 'DCACHE_BYTES'):
+                if not re.search(rf'parameter\s+int\s+unsigned\s+{name}\s*=', wrapper) or not re.search(rf'\.{name}\({name}\)', wrapper):
+                    raise ValueError('cache capacity is not forwarded by the board wrapper: ' + name)
     if schema >= 5:
         choices = {"core_retire_entries": (16, 32), "core_issue_queue_entries": (2, 4, 8, 16),
                    "core_split_issue_queue": (0, 1), "core_memory_queue_entries": (2, 4, 8),
@@ -336,7 +352,9 @@ def verify_staged_manifest(root, manifest):
                                        soc_system=schema in (8, 9),
                                        board_clock_profile=manifest.get("board_clock_profile", 0),
                                        npu_enable=manifest.get("npu_enable", False),
-                                       mm3_enable=manifest.get("mm3_enable", False))
+                                       mm3_enable=manifest.get("mm3_enable", False),
+                                       icache_bytes=manifest.get('icache_bytes', 4096),
+                                       dcache_bytes=manifest.get('dcache_bytes', 4096))
     accepted_commands = [[expected_compile]]
     # P2 在合入 P1 前使用 schema 4。仅其已覆盖哈希的 AXI wrapper 可省略旧参数。
     if schema == 4 and staged_soc_system(root, manifest):
@@ -391,6 +409,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True, help="empty local ASCII Windows directory")
     parser.add_argument("--ip-dir", type=Path, required=True, help="generated ddr3_test candidate directory")
     parser.add_argument("--xlen", type=int, choices=(32, 64), default=32)
+    parser.add_argument('--icache-bytes', type=int, choices=(4096, 8192, 16384, 32768, 65536), default=4096)
+    parser.add_argument('--dcache-bytes', type=int, choices=(4096, 8192, 16384, 32768, 65536), default=4096)
     parser.add_argument("--soc-profile", choices=("full", "lite"), default="full")
     parser.add_argument("--local-tcm", type=int, choices=(0, 1), default=None,
                         help="legacy switch; soc_system requires 1 (automatic for scoreboard)")
@@ -420,6 +440,8 @@ def main():
     if selected != "none" and selected not in branch["accelerators"]:
         parser.error("accelerator source is absent from this branch: " + selected)
     scoreboard = args.core_backend == "scoreboard"
+    if not scoreboard and (args.icache_bytes, args.dcache_bytes) != (4096, 4096):
+        parser.error('cache capacity overrides require scoreboard soc_system')
     if args.board_clock_profile is None:
         args.board_clock_profile = 1 if scoreboard else 0
     if (args.npu_enable or args.mm3_enable) and (not scoreboard or not args.board_clock_profile):
@@ -526,6 +548,7 @@ def main():
                 "status": "candidate; no timing closure or board compatibility claim", "files": {}}
     if scoreboard:
         manifest.update(SCOREBOARD_CONFIGURATION)
+        manifest.update(icache_bytes=args.icache_bytes, dcache_bytes=args.dcache_bytes)
         manifest.update(core_retire_entries=args.retire_entries,
                         core_split_issue_queue=args.split_issue_queue,
                         core_limited_integer_ooo=args.limited_integer_ooo,
@@ -592,7 +615,8 @@ def main():
                                  core_issue_width=2 if scoreboard else 1, scoreboard=scoreboard,
                                  scoreboard_config=manifest if scoreboard else None,
                                  soc_system=scoreboard,
-                                 board_clock_profile=args.board_clock_profile,npu_enable=args.npu_enable,mm3_enable=args.mm3_enable)]
+                                 board_clock_profile=args.board_clock_profile,npu_enable=args.npu_enable,mm3_enable=args.mm3_enable,
+                                 icache_bytes=args.icache_bytes,dcache_bytes=args.dcache_bytes)]
     (root / "compile.tcl").write_text("\n".join(commands) + "\n", encoding="utf-8")
     (root / "synthesize.tcl").write_text(SYNTHESIZE_COMMANDS, encoding="utf-8")
     shutil.copyfile(repo / "scripts/pango/implement.tcl", root / "implement.tcl")

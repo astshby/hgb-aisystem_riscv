@@ -1,11 +1,15 @@
 // Module: tb_rt_thread_system
 // Description: Standalone RT-Thread on the four-domain SoC with DDR, cache and real DMA hot-code loading.
-module tb_rt_thread_system;
+module tb_rt_thread_system #(
+    parameter int ICACHE_BYTES = 4096,
+    parameter int DCACHE_BYTES = 4096
+);
     timeunit 1ns;
     timeprecision 1ps;
     import core_config_pkg::*;
     tb_soc_system #(.DDR_BYTES(262144), .FLASH_BYTES(0), .NPU_ENABLE(0),
-        .CLOCK_PROFILE(1), .UART_DIVISOR(217)) u_test();
+        .CLOCK_PROFILE(1), .UART_DIVISOR(217),
+        .ICACHE_BYTES(ICACHE_BYTES), .DCACHE_BYTES(DCACHE_BYTES)) u_test();
     int hot_retired = 0;
     int ddr_retired = 0;
     int trap_entries = 0;

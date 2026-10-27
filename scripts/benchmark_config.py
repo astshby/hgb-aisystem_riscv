@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / 'scripts/benchmark_platforms.json'
-from hardware_config import PROFILE, PROFILE_PATH
+from hardware_config import PROFILE, PROFILE_PATH, cache_memory
 CONFIG = dict(PROFILE, **json.loads(CONFIG_PATH.read_text()))
 DOMAINS = ('core', 'sys', 'ddr', 'periph')
 
@@ -14,19 +14,23 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def configuration(platform, clock='target', xlen=32):
+def configuration(platform, clock='target', xlen=32, icache_bytes=None, dcache_bytes=None):
     if xlen not in (32, 64):
         raise ValueError('XLEN must be 32 or 64')
     result = dict(CONFIG['platforms'][platform])
+    memory = cache_memory(icache_bytes, dcache_bytes)
+    identity = sha(CONFIG_PATH) + sha(PROFILE_PATH)
+    if memory != CONFIG['memory']:
+        identity += json.dumps(memory, sort_keys=True)
     periods = dict(CONFIG['clock_periods_ps'][clock])
     if result.get('npu_enable'):
         result['npu_period_ps'] = periods.get('npu', result['npu_period_ps'])
         periods['npu'] = result['npu_period_ps']
     result.update(platform=platform, clock=clock, xlen=xlen,
                   macros=dict(CONFIG['core_macros'], CORE_XLEN=xlen),
-                  memory=dict(CONFIG['memory']), periods_ps=periods,
+                  memory=memory, periods_ps=periods,
                   frequencies_hz={d: 10**12 // periods[d] if d in result['domains'] else None for d in (*DOMAINS, *(['npu'] if result.get('npu_enable') else []))},
-                  config_sha256=hashlib.sha256((sha(CONFIG_PATH)+sha(PROFILE_PATH)).encode()).hexdigest(),
+                  config_sha256=hashlib.sha256(identity.encode()).hexdigest(),
                   native_board_profile=CONFIG['native_board_profiles'].get(clock),
                   timing_status='unvalidated_target')
     return result

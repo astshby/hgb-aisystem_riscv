@@ -44,6 +44,8 @@ class HandoffTests(unittest.TestCase):
             "module pango_200hp_top #(\n"
             "    parameter int unsigned SOC_PROFILE = 0,\n"
             "    parameter int unsigned BOARD_CLOCK_PROFILE = 0,\n"
+            "    parameter int unsigned ICACHE_BYTES = 4096,\n"
+            "    parameter int unsigned DCACHE_BYTES = 4096,\n"
             "    parameter bit DUMMY = 1'b0\n"
             ");\n"
             "logic core_clk, hot_clk, sys_clk, periph_clk;\n"
@@ -61,7 +63,7 @@ class HandoffTests(unittest.TestCase):
             "    pango_soc_reset u_reset ();\n"
             "end\n"
             "endgenerate\n"
-            "`ifdef CORE_SCOREBOARD\nsoc_system #(.CLOCK_HZ(125000000),"
+            "`ifdef CORE_SCOREBOARD\nsoc_system #(.ICACHE_BYTES(ICACHE_BYTES),.DCACHE_BYTES(DCACHE_BYTES),.CLOCK_HZ(125000000),"
             ".CLOCK_INFO_ENABLE(BOARD_CLOCK_PROFILE != 0),.CORE_CLOCK_HZ(HOT_HZ),"
             ".SYS_CLOCK_HZ(SYS_HZ),.PERIPH_CLOCK_HZ(PERIPH_HZ)) u_soc ("
             ".clk_core(hot_clk),.clk_sys(sys_clk),.clk_ddr(core_clk),.clk_periph(periph_clk));\n"
@@ -132,6 +134,18 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(configuration["board_clock_domains_hz"],
                          {"core": 100000000, "sys": 80000000,
                           "ddr": 125000000, "periph": 25000000})
+
+    def test_cache_capacity_is_bound_to_native_compile_and_wrapper(self):
+        output, _ = self.stage(backend="scoreboard", clock=1,
+                               extra=("--icache-bytes", "16384", "--dcache-bytes", "8192"))
+        manifest = json.loads((output / "manifest.json").read_text())
+        configuration = verify_staged_manifest(output, manifest)
+        self.assertEqual((configuration["icache_bytes"], configuration["dcache_bytes"]), (16384, 8192))
+        path = output / "compile.tcl"
+        path.write_text(path.read_text().replace("ICACHE_BYTES 16384", "ICACHE_BYTES 8192"))
+        manifest["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(ValueError, "compile Tcl parameters"):
+            verify_staged_manifest(output, manifest)
 
     def test_p1_defaults_match_simulation_profile(self):
         # 两种入口独立读取的参数必须一致，避免 FPGA 与仿真只共用 P1 名称。

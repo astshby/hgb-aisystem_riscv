@@ -20,6 +20,8 @@ module tb_soc_system #(
     parameter int SOC_PROFILE=soc_config_pkg::SOC_PROFILE_FULL,
     parameter bit ICACHE_ENABLE=1,
     parameter bit DCACHE_ENABLE=1,
+    parameter int ICACHE_BYTES=4096,
+    parameter int DCACHE_BYTES=4096,
     parameter bit LOCAL_TCM_ENABLE=1,
     parameter bit DMA_WIDE_ENABLE=1,
     parameter bit DMA_BLOCK_ENABLE=1,
@@ -441,7 +443,8 @@ module tb_soc_system #(
     soc_system #(.DDR_BYTES(DDR_BYTES),.FLASH_BYTES(FLASH_BYTES),.NPU_BYTES((NPU_ENABLE || MM3_ENABLE) ? 65536 : 0),.UART_DIVISOR(UART_DIVISOR),
         .CLOCK_INFO_ENABLE(1),.CORE_CLOCK_HZ(frequency_hz(0)),.SYS_CLOCK_HZ(frequency_hz(1)),
         .DDR_CLOCK_HZ(DDR_BYTES!=0 ? frequency_hz(2) : 0),.PERIPH_CLOCK_HZ(frequency_hz(3)),
-        .SOC_PROFILE(SOC_PROFILE),.ICACHE_ENABLE(ICACHE_ENABLE),.DCACHE_ENABLE(DCACHE_ENABLE),.CLOCK_HZ(CLOCK_HZ)) dut(.*);
+        .SOC_PROFILE(SOC_PROFILE),.ICACHE_ENABLE(ICACHE_ENABLE),.DCACHE_ENABLE(DCACHE_ENABLE),
+        .ICACHE_BYTES(ICACHE_BYTES),.DCACHE_BYTES(DCACHE_BYTES),.CLOCK_HZ(CLOCK_HZ)) dut(.*);
     axi_system_memory_model #(.BYTES(DDR_MODEL_BYTES == 0 ? 32 : DDR_MODEL_BYTES), .WORD_BYTES(XLEN/8)) u_ddr (.clk(clk_ddr),.rst(dut.rst_ddr),.stall(1'b0),
         .req(ddr_req),.rsp(ddr_rsp),.fault_read_addr,.fault_write_addr);
     spi_flash_model u_flash (.cs_n(flash_cs_n),.sck(flash_sck),.mosi(flash_mosi),.miso(flash_miso));
