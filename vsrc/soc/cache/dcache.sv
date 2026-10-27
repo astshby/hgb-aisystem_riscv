@@ -95,7 +95,9 @@ module dcache #(
         .refill_rsp_valid(lower_rsp_valid), .refill_response(lower_response),
         .mem_req_valid, .mem_req_ready, .mem_request, .mem_rsp_valid, .mem_rsp_ready, .mem_response
     );
-    assign cache_req_ready = state_q == IDLE && !maint_req_valid;
+    // 响应真正消费后才能复用请求寄存器；同步 RAM 仍在下一拍执行 LOOKUP。
+    assign cache_req_ready = !maint_req_valid &&
+                             (state_q == IDLE || (state_q == RESPOND && cache_rsp_ready));
     assign request_fire = cache_req_valid && cache_req_ready;
     assign maint_rsp_valid = state_q == MAINT_DONE;
     assign meta_set = maintenance_q ? scan_set_q : request_q.addr[OFFSET_W +: SET_W];
@@ -233,7 +235,13 @@ module dcache #(
                 STORE_APPLY: begin response_q <= '0; state_q <= RESPOND; end
                 STORE_SEND: if (lower_ready) state_q <= STORE_WAIT;
                 STORE_WAIT: if (lower_rsp_valid) begin response_q <= lower_response; state_q <= RESPOND; end
-                RESPOND: if (cache_rsp_ready) state_q <= IDLE;
+                RESPOND: begin
+                    if (request_fire) begin
+                        request_q <= cache_request;
+                        fill_started_q <= 0;
+                        state_q <= LOOKUP;
+                    end else if (cache_rsp_ready) state_q <= IDLE;
+                end
 
                 // 维护逐项扫描；invalidate 拒绝丢弃脏行，不悄悄写回覆盖 DMA 新数据。
                 SCAN: begin

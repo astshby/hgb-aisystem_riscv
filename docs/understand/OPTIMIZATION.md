@@ -1,6 +1,37 @@
 # 优化学习
 
-> 写作约束：[regulation.md](../../../regulation.md)。本文记录哪些改动真正改变了周期或频率，哪些只是结构变化。
+> 写作约束：[skills/regulation.md](../../../skills/regulation.md)。本文记录哪些改动真正改变了周期或频率，哪些只是结构变化。
+
+2026-10-23 当前分支 `soc/p2-p3-clock-study`，B20在B19 `0501f10` 上推进P2/P3步骤1–3。
+Core的84个RTL/包文件保持P1，8/10/10级、ROB32/int8/mem4与预测/转发配置不变。
+当前生产RTL为 `1a4f8fa`；主要结果见[项目介绍](../PROJECT_INTRO.md)。本轮没有PDS，
+独立时钟候选的物理时序与85MHz下限仍待验证。
+
+I-cache显式安装8字节时，32B行的安装尾部9→5Core拍；默认4字节保留供物理对照。
+标量填行请求仍为32位，两次成功后合并64位写；block完整成功后再安装。
+错误/截断/取消/失效/背压及共享D-cache双宽65次回归通过，命中IF64仍每拍受理。
+不将每次少四拍乘以miss数直接当成全程序周期收益，最终以同镜像测量为准。
+
+M1全程观测到数据响应1拍、d0/d1排队1.046/1.107拍；输出等待216822拍对应DTCM同bank争用，
+入口仅满21拍。当前已支持请求/返回同拍换单，保留注册边界可避免TCM仲裁重接Core.ready。
+本轮没有修改M1队列；后续若继续研究，应分开读读和读写冲突，按CPU阻塞窗口验收益。
+
+DMA补测区分W源气泡与下游反压，连续流每burst的源等待均为AW到首W固定一拍，
+没有观测到额外burst中途缺供。本轮没有加预取。SYS80/100MHz下持续DMA为
+519.20/615.85MB/s，IRQ-only/DMA-only的软件对照另列；原100μs M2-B继续保留。
+
+时钟发现/BSP把mtime、UART、SPI、CoreMark分别按timer、periph、sys、core计时。
+候选C1/C4保留Core100/DDR125/periph25，仅比较SYS80/100；GPLL厂商模型、DDR未启动
+时实际CPU执行ROM/TCM、在途失锁后协调重启均通过。真实站点/CDC/IO约束还需标准PDS。
+旧binary的64次同镜像C1→C4，cold/warm/background分别提高0.361%/0.354%/1.109%；
+该结果属于SYS频率激励变化，和I-cache逻辑收益分开记录。48模式联合矩阵及10模式
+M0/M1控制均通过，同钟fill8两模式无回退；精确数值见项目介绍。
+
+所有结果保留 `logs/p2/joint-step3-20261023/` 的源码、镜像、命令和原始日志；
+实际十秒CoreMark尚未完成，RV64只验功能。RT-Thread四个镜像编译通过，完整运行仍
+被旧测试台层级失配阻塞；裸机时钟软件测试不能替代RT运行。旧P1 GCC11.4数据单列。
+
+以下为 P1 来源报告，不能跨编译器镜像直接计算收益。
 
 P1 以 `main@094443e` 和 GCC 11.4 重建的同一组镜像比较。P1.1a 拆 LQ/SQ 后周期和
 统计不变；P1.1b 的 ROB32、分离 IQ 提高 M0/M1 得分 0.0814%/0.7759%，综合增加
@@ -52,7 +83,7 @@ ELF/HEX、同参数下比较纯 RTL 改动。
 | I1 最终 | Core-only | 584,792 | 1.710011 | Tournament/RAS |
 | I2 i2/q8 | Core-only | 552,169 | 1.811039 | 有限双发射 |
 
-当前 `fdb3ffb` 使用固定 64 次迭代，双宽、M0/M1 的八次重放通过：
+历史 `fdb3ffb` 使用固定 64 次迭代，双宽、M0/M1 的八次重放通过：
 
 | 分类 | RV32 CoreMark/MHz | RV64 CoreMark/MHz |
 |---|---:|---:|
@@ -120,16 +151,59 @@ I$ 命中 II=1、TCM 双 bank 与两个 D$ bank，详细契约见 [SoC 系统](S
 4. 区分延迟和吞吐停顿；空级没有工作不算停顿。
 5. 每次 RTL 改动跑同一 ELF，先 Core-only，再 SoC TCM，再 DDR/RT。
 
-## 7. 优化顺序
+## 7. 当前优化顺序
 
-先完成 scoreboard 双发射 Core 与实际端口供给，并以完整 RV32 SoC 标准 PDS
-≥85 MHz 建立 P0；RV64 先行开发，共享 RTL 验证双宽。当前功能与固定镜像已通过，
-物理验收仍在进行。
+P0 已冻结于 r15，Core 的 ALU/Load/DSP 为 8/10/10 级，原完整 SoC 标准 PDS
+85.2464 MHz。P1 的 Core 工作归其他接手人；本轮 P2 固定 Core，只改 SoC 总线。
+P3 再做实际时钟、CDC 物理约束、标准 PDS 和 ≥85 MHz 验收。RV64 跟随功能仿真。
 
-随后按 P1 TCM、P2 完成/唤醒、P3 分支、P4 访存与 Load-use、P5 前端/Cache、
-P6 整体主频推进。每轮先测同镜像 CoreMark/MHz，再测标准频率，保持 85 MHz
-下限。M2 不单列，DDR 执行及外设背景负载独立记录。具体分支与验收见工作区
-`OPTIMIZATION_PLAN.md` 的 Codex B10/B11。
+P2 以同步 FIFO 切开 ready 返回，AR/AW 译码独立寄存，按目标轮转仲裁，读写
+分方向保存 owner，跨域用有界 FIFO。TCM/Cache 命中留本地，慢设备等待只占
+其目标和相关请求。双缓冲 DMA 继续读写重叠，完成/故障整包跨域。
+
+M0 为 Core 控制组，M1 为 TCM，M2 单列 DDR/Cache cold/warm，M2-B 独立记录
+并发负载。分母用 CPU ROI 周期；改变 sys/ddr/periph 比例必须重测。
+已测 C0–C4 功能不能替代 M2 性能数据，也不能将旧 P0 Fmax 配给新 SoC。
+
+当前分支 `soc/p2-m1-local-timing` 基于 `e3caafe`，先缩短 M1 本地组合逻辑：
+TCM 资格改为独立前缀/对齐/权限检查；双 bank 选择从逐项 greedy 改为并行首选
+加不冲突次选，载荷由 one-hot 掩码直接选取。两项均无新增寄存拍，保持原轮转
+顺序与 IF64 原子访问。宽载荷 grant 扇出仍存在，实际 Fmax 与资源待后续测量。
+双宽原译码对照、组合穷举、原模块逐拍及 RAM 字节参考均通过。
+
+`benchmark/p2/` 为 M2 专用布局：代码、常量、工作区和正常栈在 DDR，TCM
+只留入口、维护/中断胶水及测试控制。cold 在 TCM 控制栈清空 Cache，warm
+预跑一次原版 iterate 并恢复输入；M2-B 使用私有 DDR 区域并由 CPU/定时器
+中断发起、续传 DMA。三场景指令镜像相同，只改 DTCM 配置。
+`run_p2_coremark.py` 强制核对布局、CRC、实际时钟与 ROI 内 DDR/DMA/IRQ 活动。
+2 次迭代是短适配测试；不与 64 次 M0/M1 计算优化比例。
+warm 预热算法代码/数据，未保证所有正常 DDR 栈行预热。M2-B 每次处理完中断后
+重新安排 2048 个 periph 周期，各时钟配置的实际 IRQ 强度不同。
+
+DMA ROI 吞吐统计主口接受的 W beat，完成字节包含收尾排空并另列。最长 AR
+入队等待为零也不能说明 Cache miss 无等待。下一步先增加响应等待统计，再
+比较 CPU R FIFO、DMA W 缓冲/owner、Flash 连续读和系统 TCM 宽口。
+
+本轮双宽 TCM/SoC/ISA 回归通过，M0 固定两模式仍为
+22,381,822/22,507,018 拍，M1 C0–C4两模式共10项通过，ROI仍为25,658,220/25,792,596拍；C1与入口前后相同。
+M2 cold/warm、M2-B × 两模式 × C0–C4 共30项短测通过；解析/布局负测24项通过。
+C1 performance 三场景分别为1,004,030/1,000,530/1,142,577拍，validation为
+1,011,219/1,007,344/1,151,521拍。每CPU MHz归一化值来自迭代数除以mcycle；
+移植层的1MHz虚拟秒数与实际仿真时长分开，当前均未达到实际10秒要求。
+
+```bash
+# RISCV_TOOL_ROOT 指向工具链 bin；日志目录使用新的名字保留之前记录。
+python3 scripts/verilator/run_p2_coremark.py --build-sim --iterations 2 --clocks 0 1 2 3 4 --log-root logs/p2/ddr-replay
+python3 tb/scripts/test_p2_coremark.py
+python3 tb/tools/test_soc_clock_plan.py
+```
+
+`plan_soc_clocks.py` 只生成新 build 目录中的四端口时钟定义及 CDC 清单：
+C0–C4 五种仿真条件和 85/100/125/25 MHz 候选，不写板级 FDC、不启动 PDS。
+wrapper 仍四域共用 125 MHz DDR 用户钟；PLL、综合后 Gray pin 约束和 IO 约束
+需后续接入。此前标准 PDS 为 84.9856 MHz、WNS −0.002 ns，最差端点在冻结
+Core；不能用它宣称本轮候选已通过 85 MHz。证据在
+`logs/p2/m1-local-followup-20261022/`，执行范围见工作区 Codex B17。
 
 ## 8. 不要做的事
 

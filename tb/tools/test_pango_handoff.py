@@ -16,7 +16,11 @@ import xml.etree.ElementTree as ET
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
-from scripts.pango.prepare_project import GENERATED_SCRIPTS, MEMORY_SCRIPTS, SCOREBOARD_CONFIGURATION, compile_command, verify_staged_manifest
+from scripts.pango.prepare_project import (BOARD_CLOCK_PROFILES, BOARD_CLOCK_RATIOS, GENERATED_SCRIPTS,
+                                           MEMORY_SCRIPTS, SCOREBOARD_CONFIGURATION,
+                                           P1_SCOREBOARD_CONFIGURATION, DEFAULT_SCOREBOARD_CONFIGURATION, board_clock_constraints,
+                                           compile_command, verify_independent_board_clocks,
+                                           verify_staged_manifest)
 from scripts.pango.summarize_timing import summarize
 
 
@@ -33,7 +37,39 @@ class HandoffTests(unittest.TestCase):
             shutil.copyfile(REPO / "scripts/pango" / name, scripts / name)
         (self.repo / "vsrc").mkdir()
         (self.repo / "vsrc/fixture.sv").write_text("module fixture; endmodule\n")
-        (self.repo / "scripts/pango_files.f").write_text("vsrc/fixture.sv\n")
+        (self.repo / "vsrc/cpu").mkdir()
+        (self.repo / "vsrc/soc").mkdir()
+        (self.repo / "vsrc/cpu/pango_200hp_top.sv").write_text(
+            "// Offline topology fixture, not elaborated RTL.\n"
+            "module pango_200hp_top #(\n"
+            "    parameter int unsigned SOC_PROFILE = 0,\n"
+            "    parameter int unsigned BOARD_CLOCK_PROFILE = 0,\n"
+            "    parameter bit DUMMY = 1'b0\n"
+            ");\n"
+            "logic core_clk, hot_clk, sys_clk, periph_clk;\n"
+            "localparam int unsigned HOT_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 : 100000000;\n"
+            "localparam int unsigned SYS_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :\n"
+            "    (BOARD_CLOCK_PROFILE == 4 ? 100000000 : 80000000);\n"
+            "localparam int unsigned PERIPH_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 : 25000000;\n"
+            "generate\n"
+            "if (BOARD_CLOCK_PROFILE == 0) begin : g_common_clock\n"
+            "    assign hot_clk = core_clk;\n"
+            "    assign sys_clk = core_clk;\n"
+            "    assign periph_clk = core_clk;\n"
+            "end else begin : g_domain_clocks\n"
+            "    pango_soc_pll #(.CLOCK_PROFILE(BOARD_CLOCK_PROFILE)) u_soc_pll ();\n"
+            "    pango_soc_reset u_reset ();\n"
+            "end\n"
+            "endgenerate\n"
+            "`ifdef CORE_SCOREBOARD\nsoc_system #(.CLOCK_HZ(125000000),"
+            ".CLOCK_INFO_ENABLE(BOARD_CLOCK_PROFILE != 0),.CORE_CLOCK_HZ(HOT_HZ),"
+            ".SYS_CLOCK_HZ(SYS_HZ),.PERIPH_CLOCK_HZ(PERIPH_HZ)) u_soc ("
+            ".clk_core(hot_clk),.clk_sys(sys_clk),.clk_ddr(core_clk),.clk_periph(periph_clk));\n"
+            "`else\nsoc_top #() u_soc ();\n`endif\n"
+            "endmodule\n")
+        (self.repo / "vsrc/soc/soc_system.sv").write_text("// Offline topology fixture.\n")
+        (self.repo / "scripts/pango_files.f").write_text(
+            "vsrc/fixture.sv\nvsrc/cpu/pango_200hp_top.sv\nvsrc/soc/soc_system.sv\n")
         (self.ip / "rtl").mkdir(parents=True)
         (self.ip / "pnr").mkdir()
         for name in ("ddr3_test.v", "ddr3_test_ddrphy_top.v", "rtl/fixture.v"):
@@ -74,19 +110,36 @@ class HandoffTests(unittest.TestCase):
         self.env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ["PATH"],
                         PYTHONDONTWRITEBYTECODE="1")
 
-    def stage(self, width=32, profile="full", local=0, output=None, success=True, backend="legacy", extra=()):
+    def stage(self, width=32, profile="full", local=None, output=None, success=True, backend="legacy", extra=()):
         output = output or self.root / f"rv{width}-{profile}-ltcm{local}"
         result = subprocess.run([sys.executable, "-B", str(self.repo / "scripts/pango/prepare_project.py"),
-                                 "--xlen", str(width), "--soc-profile", profile, "--local-tcm", str(local),
+                                 "--xlen", str(width), "--soc-profile", profile,
+                                 *(("--local-tcm", str(local)) if local is not None else ()),
                                  "--core-backend", backend,
                                  "--output", str(output), "--ip-dir", str(self.ip), *extra],
                                 text=True, capture_output=True, env=self.env)
         self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
         return output, result
 
+    def test_p1_defaults_match_simulation_profile(self):
+        # 两种入口独立读取的参数必须一致，避免 FPGA 与仿真只共用 P1 名称。
+        result = subprocess.run(["bash", "-c", 'source "$1"; env', "profile-check",
+                                 str(REPO / "scripts/verilator/p1_core_config.sh")],
+                                text=True, capture_output=True, check=True)
+        environment = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+        names = {"core_backend": "CORE_BACKEND", "core_issue_width": "ISSUE_WIDTH",
+                 "core_retire_entries": "RETIRE_ENTRIES", "core_split_issue_queue": "SPLIT_ISSUE_QUEUE",
+                 "core_issue_queue_entries": "INTEGER_QUEUE_ENTRIES", "core_memory_queue_entries": "MEMORY_QUEUE_ENTRIES",
+                 "core_limited_integer_ooo": "LIMITED_INTEGER_OOO", "core_scheduler_forward_mode": "SCHEDULER_FORWARD_MODE",
+                 "core_predictor_mode": "PREDICTOR_MODE", "core_ras_enable": "RAS_ENABLE"}
+        for key, variable in names.items():
+            self.assertEqual(str(DEFAULT_SCOREBOARD_CONFIGURATION[key]), environment[variable], variable)
+        self.assertEqual(environment["MUL_IMPL"], "0")
+        self.assertEqual(environment["DIV_IMPL"], "1")
+
     def test_scoreboard_native_configuration_and_bank_images(self):
         for width in (32, 64):
-            for local in (0, 1):
+            for local in (None, 1):
                 with self.subTest(width=width, local=local):
                     firmware = self.repo / f"build/loader/rv{width}"
                     for name in ("imem.hex", "dmem.hex"):
@@ -95,7 +148,7 @@ class HandoffTests(unittest.TestCase):
                     output, _ = self.stage(width=width, local=local, backend="scoreboard")
                     manifest = json.loads((output / "manifest.json").read_text())
                     configuration = verify_staged_manifest(output, manifest)
-                    self.assertEqual(manifest["schema_version"], 7)
+                    self.assertEqual(manifest["schema_version"], 8)
                     self.assertEqual(manifest["memory_guard_version"], 1)
                     for name in MEMORY_SCRIPTS:
                         self.assertIn(name, manifest["files"])
@@ -104,10 +157,22 @@ class HandoffTests(unittest.TestCase):
                     self.assertEqual(configuration["core_split_issue_queue"], 1)
                     self.assertEqual(configuration["core_memory_queue_entries"], 4)
                     self.assertEqual(configuration["core_limited_integer_ooo"], 0)
-                    self.assertEqual(configuration["core_scheduler_forward_mode"], 0)
+                    self.assertEqual(configuration["core_scheduler_forward_mode"], 3)
+                    self.assertEqual(configuration["core_predictor_mode"], 1)
+                    self.assertEqual(configuration["core_ras_enable"], 0)
+                    self.assertEqual(configuration["core_profile"], "custom")
+                    self.assertEqual(configuration["soc_topology"], "soc_system")
+                    self.assertEqual(configuration["local_tcm_enable"], 1)
+                    self.assertEqual(configuration["board_clock_domains_hz"],
+                                     dict.fromkeys(("core", "sys", "ddr", "periph"), 125000000))
+                    self.assertEqual(configuration["mtime_clock_domain"], "periph")
                     self.assertEqual(configuration["data_ports"], 2)
                     self.assertEqual(configuration["slow_presence"], "0x7ff3")
-                    self.assertIn("CORE_SCOREBOARD=1", (output / "compile.tcl").read_text())
+                    compile_text = (output / "compile.tcl").read_text()
+                    self.assertIn("CORE_SCOREBOARD=1", compile_text)
+                    for legacy in ("LOCAL_TCM_ENABLE", "DMA_WIDE_ENABLE",
+                                   "CACHE_BLOCK_ENABLE", "DMA_BLOCK_ENABLE"):
+                        self.assertNotIn(legacy, compile_text)
                     for name in ("imem.hex", "dmem.hex"):
                         words = (output / "firmware" / name).read_text().split()
                         for bank in range(2):
@@ -170,7 +235,7 @@ class HandoffTests(unittest.TestCase):
         del old["core_split_issue_queue"], old["core_memory_queue_entries"]
         path = output / "compile.tcl"
         lines = path.read_text().splitlines()
-        lines[-1] = compile_command(32, 0, 0, dma_wide=1, cache_block=1, dma_block=1,
+        lines[-1] = compile_command(32, 0, 1, dma_wide=1, cache_block=1, dma_block=1,
                                    core_issue_width=2, scoreboard=True)
         path.write_text("\n".join(lines) + "\n")
         old["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -197,7 +262,8 @@ class HandoffTests(unittest.TestCase):
         old["schema_version"] = 5
         del old["core_limited_integer_ooo"], old["core_scheduler_forward_mode"]
         path = output / "compile.tcl"
-        path.write_text(path.read_text().replace(" CORE_LIMITED_INTEGER_OOO=1", "").replace(" CORE_SCHEDULER_FORWARD_MODE=0", ""))
+        path.write_text(compile_command(32, 0, 1, 1, 1, 1, 2, scoreboard=True,
+                                        scoreboard_config=old) + "\n")
         old["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
         self.assertNotIn("core_limited_integer_ooo", verify_staged_manifest(output, old))
 
@@ -219,9 +285,134 @@ class HandoffTests(unittest.TestCase):
         old["schema_version"] = 6
         del old["core_scheduler_forward_mode"]
         path = output / "compile.tcl"
-        path.write_text(re.sub(r" CORE_SCHEDULER_FORWARD_MODE=\d+", "", path.read_text()))
+        path.write_text(compile_command(32, 0, 1, 1, 1, 1, 2, scoreboard=True,
+                                        scoreboard_config=old) + "\n")
         old["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
         self.assertNotIn("core_scheduler_forward_mode", verify_staged_manifest(output, old))
+
+    def test_schema7_final_p1_compatibility(self):
+        output, _ = self.stage(backend="scoreboard")
+        old = json.loads((output / "manifest.json").read_text())
+        old["schema_version"] = 7
+        for key in ("soc_topology", "core_profile", "board_clock_domains_hz",
+                    "clock_relationship", "mtime_clock_domain"):
+            del old[key]
+        path = output / "compile.tcl"
+        path.write_text(compile_command(32, 0, 1, 1, 1, 1, 2, scoreboard=True,
+                                        scoreboard_config=old) + "\n")
+        old["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        self.assertEqual(verify_staged_manifest(output, old)["core_scheduler_forward_mode"], 3)
+        self.assertIn("LOCAL_TCM_ENABLE 1", path.read_text())
+
+    def test_schema4_p2_requires_hashed_system_wrapper(self):
+        output, _ = self.stage(backend="scoreboard")
+        old = json.loads((output / "manifest.json").read_text())
+        old.update(SCOREBOARD_CONFIGURATION, schema_version=4)
+        path = output / "compile.tcl"
+        path.write_text(compile_command(32, 0, 1, 1, 1, 1, 2,
+                                        scoreboard=True, soc_system=True) + "\n")
+        old["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        self.assertEqual(verify_staged_manifest(output, old)["core_retire_entries"], 16)
+        del old["files"]["vsrc/cpu/pango_200hp_top.sv"]
+        with self.assertRaisesRegex(ValueError, "compile Tcl parameters"):
+            verify_staged_manifest(output, old)
+
+    def test_system_configuration_mismatches_rejected(self):
+        output, _ = self.stage(backend="scoreboard")
+        manifest = json.loads((output / "manifest.json").read_text())
+        for key, value in (("soc_topology", "soc_top"), ("local_tcm_enable", 0),
+                           ("core_profile", "p1"), ("mtime_clock_domain", "core"),
+                           ("clock_relationship", "asynchronous"),
+                           ("board_clock_domains_hz", dict.fromkeys(("core", "sys", "ddr", "periph"), 85000000))):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                verify_staged_manifest(output, dict(manifest, **{key: value}))
+        altered = copy.deepcopy(manifest)
+        del altered["files"]["vsrc/soc/soc_system.sv"]
+        with self.assertRaisesRegex(ValueError, "hashed soc_system"):
+            verify_staged_manifest(output, altered)
+        _, result = self.stage(backend="scoreboard", local=0, success=False)
+        self.assertIn("always uses local TCM", result.stderr)
+
+    def test_system_rehashed_clock_wiring_change_rejected(self):
+        output, _ = self.stage(backend="scoreboard")
+        manifest = json.loads((output / "manifest.json").read_text())
+        name = "vsrc/cpu/pango_200hp_top.sv"
+        path = output / name
+        original = path.read_text()
+        for before, after in ((".clk_periph(periph_clk)", ".clk_periph(other_clk)"),
+                              (".CLOCK_HZ(125000000)", ".CLOCK_HZ(85000000)")):
+            path.write_text(original.replace(before, after))
+            manifest["files"][name] = hashlib.sha256(path.read_bytes()).hexdigest()
+            with self.assertRaisesRegex(ValueError, "wrapper"):
+                verify_staged_manifest(output, manifest)
+
+    def test_independent_board_clock_topology_and_constraints(self):
+        wrapper = (REPO / "vsrc/cpu/pango_200hp_top.sv").read_text()
+        for profile in (1, 4):
+            verify_independent_board_clocks(wrapper, profile)
+        with self.assertRaisesRegex(ValueError, "default to BOARD_CLOCK_PROFILE 0"):
+            verify_independent_board_clocks(
+                wrapper.replace("BOARD_CLOCK_PROFILE = 0", "BOARD_CLOCK_PROFILE = 1", 1), 1)
+        with self.assertRaisesRegex(ValueError, "clk_core wiring changed"):
+            verify_independent_board_clocks(
+                wrapper.replace(".clk_core(hot_clk),.clk_sys", ".clk_core(core_clk),.clk_sys", 1), 1)
+        for profile, sys_ratio in ((1, "-multiply_by {16} -divide_by {25}"),
+                                   (4, "-multiply_by {4} -divide_by {5}")):
+            text = board_clock_constraints(profile)
+            self.assertIn(f"create_generated_clock -name {{clk_core}}", text)
+            self.assertIn("-multiply_by {4} -divide_by {5}", text)
+            self.assertIn(sys_ratio, text)
+            self.assertIn("-name {clk_periph}", text)
+            self.assertIn("-multiply_by {1} -divide_by {5}", text)
+            self.assertNotIn("set_clock_groups", text)
+            self.assertNotIn("set_false_path", text)
+            self.assertNotIn("set_max_delay", text)
+
+    def test_compile_command_carries_board_clock_profile(self):
+        common = compile_command(32, 0, 1, 1, 1, 1, 2, scoreboard=True,
+                                 scoreboard_config=P1_SCOREBOARD_CONFIGURATION, soc_system=True)
+        self.assertNotIn("BOARD_CLOCK_PROFILE", common)
+        for profile in (1, 4):
+            command = compile_command(32, 0, 1, 1, 1, 1, 2, scoreboard=True,
+                                      scoreboard_config=P1_SCOREBOARD_CONFIGURATION,
+                                      soc_system=True, board_clock_profile=profile)
+            self.assertIn(f"BOARD_CLOCK_PROFILE {profile}", command)
+            self.assertNotIn("LOCAL_TCM_ENABLE", command)
+
+    def test_c1_c4_board_clock_staging(self):
+        for profile in (1, 4):
+            with self.subTest(profile=profile):
+                output, _ = self.stage(backend="scoreboard", output=self.root / f"board-c{profile}",
+                                       extra=("--board-clock-profile", str(profile)))
+                manifest = json.loads((output / "manifest.json").read_text())
+                configuration = verify_staged_manifest(output, manifest)
+                expected = BOARD_CLOCK_PROFILES[profile]
+                self.assertEqual(manifest["schema_version"], 9)
+                self.assertEqual(configuration["board_clock_profile"], profile)
+                self.assertEqual(configuration["clock_profile"], expected["name"])
+                self.assertEqual(configuration["board_clock_domains_hz"],
+                                 {domain: expected[domain]
+                                  for domain in ("core", "sys", "ddr", "periph")})
+                self.assertIn(f"BOARD_CLOCK_PROFILE {profile}", (output / "compile.tcl").read_text())
+                self.assertIn("add_constraint {board_clocks.fdc}", (output / "compile.tcl").read_text())
+                self.verify_cli(output)
+                original = (output / "board_clocks.fdc").read_text()
+                path = output / "board_clocks.fdc"
+                path.write_text(original.replace("-divide_by {5}", "-divide_by {4}", 1))
+                manifest["files"]["board_clocks.fdc"] = hashlib.sha256(path.read_bytes()).hexdigest()
+                with self.assertRaisesRegex(ValueError, "independent clock constraints"):
+                    verify_staged_manifest(output, dict(manifest))
+        self.stage(backend="legacy", success=False,
+                   extra=("--board-clock-profile", "1"))
+        self.stage(backend="scoreboard", success=False,
+                   extra=("--board-clock-profile", "2"))
+
+    def test_custom_profile_cannot_claim_final_p1(self):
+        output, _ = self.stage(backend="scoreboard", extra=("--scheduler-forward-mode", "0"))
+        manifest = json.loads((output / "manifest.json").read_text())
+        self.assertEqual(verify_staged_manifest(output, manifest)["core_profile"], "custom")
+        with self.assertRaisesRegex(ValueError, "core profile differs"):
+            verify_staged_manifest(output, dict(manifest, core_profile="p1"))
 
     def verify_cli(self, output, staging=True, success=True):
         command = [sys.executable, "-B", str(REPO / "scripts/pango/verify_synthesis.py"), str(output)]
@@ -330,7 +521,7 @@ class HandoffTests(unittest.TestCase):
             del changed["files"][name]
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "not covered by manifest"):
                 verify_staged_manifest(output, changed)
-        for version in (True, 0, 8):
+        for version in (True, 0, 10):
             changed = dict(manifest, schema_version=version)
             with self.subTest(version=version), self.assertRaisesRegex(ValueError, "unsupported staging"):
                 verify_staged_manifest(output, changed)

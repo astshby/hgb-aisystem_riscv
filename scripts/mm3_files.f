@@ -22,3 +22,4 @@ vsrc/soc/mm3/attention/mm3_attention.sv
 vsrc/soc/mm3/gemv/mm3_gemv_accel.sv
 vsrc/soc/mm3/top/mm3_ops_engine.sv
 vsrc/soc/mm3/top/mm3_accel.sv
+vsrc/soc/mm3/top/mm3_soc_compat.sv

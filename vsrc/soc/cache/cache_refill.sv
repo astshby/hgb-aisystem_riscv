@@ -4,6 +4,8 @@ module cache_refill #(
     parameter int unsigned LINE_BYTES = 32,
     parameter int unsigned WORD_BYTES = 4,
     parameter int unsigned WORD_W = $clog2(LINE_BYTES / WORD_BYTES),
+    parameter int unsigned INSTALL_BYTES = WORD_BYTES,
+    parameter int unsigned INSTALL_WORD_W = LINE_BYTES > INSTALL_BYTES ? $clog2(LINE_BYTES / INSTALL_BYTES) : 1,
     parameter bit BLOCK_ENABLE = 1'b0
 ) (
     input logic clk, rst,
@@ -16,8 +18,8 @@ module cache_refill #(
     output logic installable,
     output bus_types_pkg::bus_rsp_t response,
     output logic write_valid,
-    output logic [WORD_W-1:0] write_word,
-    output logic [WORD_BYTES*8-1:0] write_data,
+    output logic [INSTALL_WORD_W-1:0] write_word,
+    output logic [INSTALL_BYTES*8-1:0] write_data,
     output logic mem_req_valid,
     input logic mem_req_ready,
     output bus_types_pkg::bus_req_t mem_request,
@@ -45,15 +47,18 @@ module cache_refill #(
     logic installable_q, fallback_q;
     xlen_t beat_addr;
     localparam int BYTE_W = $clog2(WORD_BYTES);
+    localparam int INSTALL_BYTE_W = $clog2(INSTALL_BYTES);
     localparam int BLOCK_BEATS = LINE_BYTES / DDR_BEAT_BYTES;
     localparam int BEAT_W = BLOCK_BEATS > 1 ? $clog2(BLOCK_BEATS) : 1;
     logic [BEAT_W-1:0] block_beat_q;
     logic [LINE_BYTES*8-1:0] line_q;
     bus_error_e block_error_q;
     logic rd_cmd_fire, rd_fire;
-    logic [WORD_BYTES*8-1:0] buffered_word;
+    logic [WORD_BYTES*8-1:0] buffered_word, scalar_word;
+    logic [INSTALL_BYTES*8-1:0] buffered_install, scalar_install;
+    xlen_t demand_word_addr;
 
-    // I$ 的 WORD_BYTES 固定为 4，D$ 为 DBUS_BYTES。
+    // I$ 的标量 WORD_BYTES 固定为 4，安装宽度可独立为 4/8；D$ 仍使用 DBUS_BYTES。
     // RV64 的 execute 请求仍必须为 MEM_WORD；用子请求地址而非 CPU 原地址选择 lane。
     assign beat_addr = (request_q.addr & ~xlen_t'(LINE_BYTES-1)) + (xlen_t'(word_q) << BYTE_W);
     assign start_ready = state_q == IDLE;
@@ -68,12 +73,29 @@ module cache_refill #(
             mem_request.size = mem_size_e'(BYTE_W);
         end
     end
-    assign write_valid = (state_q == WAIT_DATA && mem_rsp_valid && mem_response.error == BUS_OK) ||
+    assign write_valid = (state_q == WAIT_DATA && mem_rsp_valid && mem_response.error == BUS_OK &&
+                          (INSTALL_BYTES == WORD_BYTES || word_q[0])) ||
                          state_q == BLOCK_WRITE;
-    assign write_word = word_q;
-    assign buffered_word = line_q[int'(word_q)*WORD_BYTES*8 +: WORD_BYTES*8];
-    assign write_data = state_q == BLOCK_WRITE ? buffered_word :
-        (WORD_BYTES*8)'(mem_response.rdata >> (8 * beat_addr[$clog2(DBUS_BYTES)-1:0]));
+    assign write_word = state_q == BLOCK_WRITE ? INSTALL_WORD_W'(word_q) :
+        INSTALL_WORD_W'(word_q >> (INSTALL_BYTE_W-BYTE_W));
+    assign buffered_install = line_q[int'(word_q)*INSTALL_BYTES*8 +: INSTALL_BYTES*8];
+    assign demand_word_addr = request_q.addr & ~xlen_t'(int'(WORD_BYTES)-1);
+    assign buffered_word = (WORD_BYTES*8)'(buffered_install >>
+        (8 * int'(demand_word_addr & xlen_t'(int'(INSTALL_BYTES)-1))));
+    assign scalar_word = (WORD_BYTES*8)'(mem_response.rdata >>
+        (8 * beat_addr[$clog2(DBUS_BYTES)-1:0]));
+    assign write_data = state_q == BLOCK_WRITE ? buffered_install : scalar_install;
+    if (INSTALL_BYTES == WORD_BYTES) begin : g_scalar_word
+        assign scalar_install = scalar_word;
+    end else begin : g_scalar_pair
+        logic [WORD_BYTES*8-1:0] first_word_q;
+        // RV32 的总线仍分两次读取；只有相邻两个成功字齐备后才写一条64位RAM项。
+        always_ff @(posedge clk) begin
+            if (!rst && state_q == WAIT_DATA && mem_rsp_valid &&
+                mem_response.error == BUS_OK && !word_q[0]) first_word_q <= scalar_word;
+        end
+        assign scalar_install = {scalar_word, first_word_q};
+    end
 
     // 块口只扩展已授权的缓存行；原请求回退仍走标量口，保留大小、权限和lane语义。
     assign rd_cmd_valid = BLOCK_ENABLE && !rst && state_q == BLOCK_CMD;
@@ -84,9 +106,11 @@ module cache_refill #(
     assign rd_fire = rd_valid && rd_ready;
 
     // 整行在最后一个成功beat之前不写RAM。错误流仍消费至last，不能把尾部响应当作下一请求。
-    always_ff @(posedge clk) begin
-        if (!rst && state_q == BLOCK_READ && rd_fire)
-            line_q[int'(block_beat_q)*DDR_DATA_W +: DDR_DATA_W] <= rd_data.data;
+    if (BLOCK_ENABLE) begin : g_block_buffer
+        always_ff @(posedge clk) begin
+            if (!rst && state_q == BLOCK_READ && rd_fire)
+                line_q[int'(block_beat_q)*DDR_DATA_W +: DDR_DATA_W] <= rd_data.data;
+        end
     end
 
     // 不把邻近字或扩宽访问的填行错误归给原指令；只回退一次原地址、原大小、原权限的访问。
@@ -159,12 +183,13 @@ module cache_refill #(
                 BLOCK_DRAIN: if (rd_fire && rd_data.last)
                     state_q <= fallback_q ? RETRY_SEND : DONE;
                 BLOCK_WRITE: begin
-                    if (word_q == request_q.addr[BYTE_W +: WORD_W]) begin
+                    if (INSTALL_WORD_W'(word_q) ==
+                        INSTALL_WORD_W'((request_q.addr & xlen_t'(int'(LINE_BYTES)-1)) >> INSTALL_BYTE_W)) begin
                         response_q.rdata <= xlen_t'(buffered_word) <<
-                            (8 * beat_addr[$clog2(DBUS_BYTES)-1:0]);
+                            (8 * demand_word_addr[$clog2(DBUS_BYTES)-1:0]);
                         response_q.error <= BUS_OK;
                     end
-                    if (word_q == WORD_W'(LINE_BYTES/WORD_BYTES-1)) begin
+                    if (word_q == WORD_W'(LINE_BYTES/INSTALL_BYTES-1)) begin
                         installable_q <= 1'b1;
                         state_q <= DONE;
                     end else word_q <= word_q + 1'b1;
@@ -176,6 +201,8 @@ module cache_refill #(
     end
 
 `ifndef SYNTHESIS
+    initial assert (INSTALL_BYTES == WORD_BYTES || (WORD_BYTES == 4 && INSTALL_BYTES == 8))
+        else $fatal(1, "refill installation width must match scalar words or combine two 32-bit words");
     initial if (BLOCK_ENABLE) assert (LINE_BYTES >= DDR_BEAT_BYTES &&
         LINE_BYTES <= BLOCK_MAX_BYTES && (LINE_BYTES & (LINE_BYTES-1)) == 0)
         else $fatal(1, "Block refill requires a 32/64/128-byte line");

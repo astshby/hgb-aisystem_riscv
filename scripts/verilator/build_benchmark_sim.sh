@@ -22,13 +22,19 @@ if [[ "$core_backend" == scoreboard ]]; then
 fi
 if [[ "${SOC:-0}" == "1" ]]; then
     extra_sources+=(tb/soc/axi_memory_model.sv tb/soc/axi_block_memory_model.sv)
+    if [[ "$core_backend" == scoreboard ]]; then
+        extra_sources+=(tb/soc/axi_system_memory_model.sv tb/soc/spi_flash_model.sv)
+    fi
     extra_options+=("-GDDR_BYTES=${SOC_DDR_BYTES:-0}" "-GDDR_MODEL_BYTES=${bench_ddr_model_bytes}" "-GDCACHE_ENABLE=${SOC_DCACHE_ENABLE:-1}"
                     "-GCLOCK_HZ=${bench_clock_hz}" "-GUART_DIVISOR=${bench_uart_divisor}"
                     "-GLOCAL_TCM_ENABLE=${bench_local_tcm_enable}"
                     "-GDMA_WIDE_ENABLE=${bench_dma_wide_enable}"
                     "-GDMA_BLOCK_ENABLE=${bench_dma_block_enable}"
                     "-GCACHE_BLOCK_ENABLE=${bench_cache_block_enable}"
-                    "-GSOC_PROFILE=${bench_soc_profile_id}" "-GMM3_ACCEL_ENABLE=${bench_mm3_accel_enable}" "-GMM3_MAC_LANES=${bench_mm3_mac_lanes}")
+                    "-GSOC_PROFILE=${bench_soc_profile_id}")
+    if [[ "$bench_top" == tb_soc_benchmark ]]; then
+        extra_options+=("-GMM3_ACCEL_ENABLE=${bench_mm3_accel_enable}" "-GMM3_MAC_LANES=${bench_mm3_mac_lanes}")
+    fi
 fi
 verilator -Wall -Wno-fatal --assert --timing --binary -j 2 \
     "${core_microarch_flags[@]}" \

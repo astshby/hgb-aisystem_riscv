@@ -16,7 +16,19 @@ make -j4 PRECISION=w8a16_int
 
 ## 整数算子扩展交付（2026-10-27）
 
-**当前状态：RV32单算子、T=4 Attention及单Token第0层的独立链/CPU链简测通过；综合与上板未验收。** 本节对应 `codex/mm3-integer-operators`，基点 `cbf5a035a21570a24c9885e45543e7023b55ba28`。下面的命令入口已写入；本轮没有运行参考数值计算、任何功能仿真、综合、时序或上板。历史 GEMV 结果不代表新增算子通过。
+**当前状态：合并前RV32简测通过；合并主线后静态检查通过、功能待复验；综合与上板未验收。** 本节对应 `codex/mm3-integer-operators`，基点 `cbf5a035a21570a24c9885e45543e7023b55ba28`。下面的命令入口已写入；本轮没有运行参考数值计算、任何功能仿真、综合、时序或上板。历史 GEMV 结果不代表新增算子通过。
+
+### 合并 origin/main 的兼容边界（2026-10-27）
+
+主分支基点 `a84ab1a` 引入默认四时钟域 AXI4 `soc_system`，其 Flash 控制窗为 `0x10050000`，预留 NPU 控制窗为 `0x10060000`。此次冲突处理保留该默认架构、AXI/CDC/Flash、时钟发现寄存器及相关 Make 入口，没有把 MiniMind 强行接入新总线。
+
+原 MiniMind 单时钟块总线拓扑保存为 `vsrc/soc/mm3/top/mm3_soc_compat.sv`。`tb_mm3_soc` 和旧 `tb_soc_benchmark` 明确实例化这个兼容顶层；MiniMind 专用 `make mm3-*` 继续使用该路径，旧 MMIO `0x10050000`、设备位15和 DMA 块接口保持。`soc_addr_pkg` 的同值 MM3/Flash 常量属于不同顶层，不能在同一个四域系统同时译码成两种设备。默认 scoreboard benchmark 仍选主线 `tb_soc_system`，只有显式 `SOC_MM3_ACCEL_ENABLE=1` 才选 MiniMind 兼容 harness。主线 Pango 顶层仍使用四域 SoC，不会自动包含 MiniMind。
+
+公共 `soc_info` 同时保留16位设备发现和主线新增时钟发现；C 能力表保留末尾 MM3 编号。默认 legacy `soc_top` 的公共总线数组扩到16槽，末槽关闭且显式终止，避免公共总线类型与顶层大小不匹配。
+
+实际仅执行：`make mm3-static-check`（C宿主/RV32/RV64编译、无浮点审计、单算子和兼容SoC lint）；主线 `tb_soc_system`、主线 scoreboard `soc_top`、legacy `soc_top`、`tb_core_config` 的 RV32/RV64 共8项额外 lint，兼容 benchmark 另2项 lint；benchmark 选择分支和Shell/Make语法检查。日志在 `logs/mm3-merge/`，MiniMind 静态结果在 `logs/mm3-ops/ac60559d357f5ce9/`。没有启动仿真、数值参考、综合或上板。此前单层功能PASS属于合并前源码，Core/Cache公共实现随主线更新后须由用户重新运行功能回归，不能复用为本次合并的通过证据。
+
+建议用户复验：`make mm3-layer-test TRACE=1`、`make mm3-attn-test TRACE=1`、`make mm3-layer-soc XLEN=32 TRACE=1`。四域 AXI4 原生加速器适配、地址迁移、跨域命令/Cache契约及板级接入仍待后续工作。
 
 ### 用户功能简测结果（2026-10-27，后续更新）
 

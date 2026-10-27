@@ -12,6 +12,7 @@ import xml.etree.ElementTree as ET
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from scripts.verilator.check_soc_profile_structure import instantiated_modules, parameter, walk
+from scripts.pango.prepare_project import P1_SCOREBOARD_CONFIGURATION
 
 
 def write_vendor_stub(path):
@@ -29,7 +30,24 @@ def write_vendor_stub(path):
         declarations.append(f"    {direction} wire {width}{name}")
         if direction == "output":
             assignments.append(f"    assign {name} = " + ("ref_clk;" if name == "core_clk" else "'0;"))
-    path.write_text(
+    pll_parameters = ["parameter real CLKIN_FREQ=125.0", 'parameter INTERNAL_FB="CLKOUTF"',
+                      'parameter EXTERNAL_FB="DISABLE"', 'parameter BANDWIDTH="OPTIMIZED"']
+    pll_parameters += [f"parameter integer STATIC_RATIO{suffix}=8" for suffix in ("I", "M", "F", "0", "1", "2", "3", "4", "5", "6")]
+    pll_parameters += [f"parameter integer STATIC_DUTY{suffix}=8" for suffix in ("F", "0", "1", "2", "3", "4", "5", "6")]
+    pll_outputs = ["CLKOUT0", "CLKOUT0N", "CLKOUT1", "CLKOUT1N", "CLKOUT2", "CLKOUT2N", "CLKOUT3", "CLKOUT3N",
+                   "CLKOUT4", "CLKOUT5", "CLKOUT6", "CLKOUTF", "CLKOUTFN", "LOCK", "DPS_DONE", "APB_READY"]
+    pll_inputs = ["CLKIN1", "CLKIN2", "CLKIN_SEL", "CLKFB", "RST", "PLL_PWD", "DPS_CLK", "DPS_EN", "DPS_DIR",
+                  "CLKOUT0_SYN", "CLKOUT1_SYN", "CLKOUT2_SYN", "CLKOUT3_SYN", "CLKOUT4_SYN", "CLKOUT5_SYN",
+                  "CLKOUT6_SYN", "CLKOUTF_SYN", "APB_CLK", "APB_RST_N", "APB_SEL", "APB_EN", "APB_WRITE"]
+    pll_stub = ("// Module: GTP_GPLL\n// Description: Elaboration stub only; outputs are not generated clocks.\n"
+                "module GTP_GPLL #(\n" + ",\n".join(pll_parameters) + ")(\n" +
+                ",\n".join(["output wire " + name for name in pll_outputs] +
+                             ["input wire " + name for name in pll_inputs] +
+                             ["input wire [4:0] APB_ADDR", "input wire [15:0] APB_WDATA", "output wire [15:0] APB_RDATA"]) + ");\n" +
+                "\n".join("assign " + name + " = '0;" for name in pll_outputs + ["APB_RDATA"]) + "\nendmodule\n"
+                "// Module: GTP_CLKBUFG\n// Description: Elaboration stub only.\n"
+                "module GTP_CLKBUFG(input wire CLKIN, output wire CLKOUT); assign CLKOUT=CLKIN; endmodule\n")
+    path.write_text(pll_stub +
         "// Module: GTP_INBUFDS\n// Description: Offline elaboration stub, not vendor primitive behavior.\n"
         "module GTP_INBUFDS(input wire I, IB, output wire O);\n    assign O = I;\nendmodule\n"
         "// Module: ddr3_test\n// Description: IDF-port elaboration stub, not a DDR model or generated IP.\n"
@@ -86,10 +104,58 @@ def check_tree(path, xlen, profile, local):
             "tcm_instances": counts["tcm_controller"], "local_fabric_instances": counts["tcm_local_fabric"]}
 
 
+def check_scoreboard_tree(path, xlen, profile, clock_profile=0):
+    tree = json.loads(path.read_text())
+    modules = {node["addr"]: node for node in tree["modulesp"] if node["type"] == "MODULE"}
+    wrapper = next(node for node in modules.values() if node.get("origName") == "pango_200hp_top")
+    children = list(instantiated_modules(wrapper, modules))
+    counts = Counter(node["origName"] for node in children)
+    soc = next(node for node in children if node["origName"] == "soc_system")
+    assert parameter(soc, "SOC_PROFILE") == int(profile == "lite")
+    assert parameter(soc, "DDR_BYTES") == 512 * 1024 * 1024
+    assert parameter(soc, "CLOCK_HZ") == 125000000
+    assert parameter(wrapper, "BOARD_CLOCK_PROFILE") == clock_profile
+    expected_clocks = dict(core=125000000, sys=125000000, ddr=125000000, periph=125000000)
+    if clock_profile:
+        expected_clocks.update(core=100000000, sys=100000000 if clock_profile == 4 else 80000000, periph=25000000)
+    assert parameter(soc, "CLOCK_INFO_ENABLE") == int(clock_profile != 0)
+    for domain, frequency in expected_clocks.items():
+        assert parameter(soc, f"{domain.upper()}_CLOCK_HZ") == frequency
+    assert parameter(soc, "UART_DIVISOR") == (expected_clocks["periph"] + 57600) // 115200
+    assert counts["pango_soc_pll"] == counts["GTP_GPLL"] == counts["pango_soc_reset"] == int(clock_profile != 0)
+    assert counts["GTP_CLKBUFG"] == (3 if clock_profile else 0)
+    assert parameter(soc, "FLASH_BYTES") == 0
+    for name in ("scoreboard_core", "cpu_memory_adapter", "axi_system_fabric",
+                 "axi_availability_gate", "ddr_axi_target", "pango_block_bridge",
+                 "dma_axi_master", "dma_block_engine", "mmio_bus"):
+        assert counts[name] == 1, (name, counts[name])
+    assert counts["tcm_dual_bank"] == 2
+    for name in ("scoreboard_soc_memory", "ddr_port_arbiter", "ddr_block_fabric", "dma_legacy_engine"):
+        assert counts[name] == 0, (name, counts[name])
+    config = next(node for node in tree["modulesp"] if node.get("origName") == "core_config_pkg")
+    assert parameter(config, "XLEN") == xlen
+    actual_core = {}
+    for key, expected in P1_SCOREBOARD_CONFIGURATION.items():
+        if key.startswith("core_") and type(expected) is int:
+            actual_core[key] = parameter(config, key.removeprefix("core_").upper())
+            assert actual_core[key] == expected, f"P1 parameter did not reach core_config_pkg: {key}"
+    assert parameter(config, "RETIRE_IDX_W") == 5
+    assert parameter(config, "SCHEDULER_ENTRIES") == 12
+    assert counts["uart"] == (1 if profile == "lite" else 2)
+    assert counts["gpio"] == (1 if profile == "lite" else 3)
+    return {"xlen": xlen, "profile": profile, "backend": "scoreboard",
+            "system": "AXI4", "physical_tcm": 2, "board_clock_profile": clock_profile, "board_clock_domains_hz": expected_clocks,
+            "flash_pins_connected": False, "core_profile": "p1", "core_configuration": actual_core}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=REPO / "build/pango-handoff-wrapper")
+    parser.add_argument("--backend", choices=("legacy", "scoreboard"), default="legacy")
+    parser.add_argument("--clock-profile", type=int, choices=(0, 1, 4), default=0)
     args = parser.parse_args()
+    if args.backend == "legacy" and args.clock_profile:
+        parser.error("independent domains require scoreboard")
     output = args.output.resolve()
     if output.exists() and any(output.iterdir()):
         parser.error("output must be empty; retain earlier elaboration evidence")
@@ -99,7 +165,7 @@ def main():
     results = []
     for xlen in (32, 64):
         for profile in ("full", "lite"):
-            for local in (0, 1):
+            for local in ((1,) if args.backend == "scoreboard" else (0, 1)):
                 destination = output / f"rv{xlen}-p{profile}-ltcm{local}"
                 destination.mkdir()
                 tree = destination / "rtl.tree.json"
@@ -107,26 +173,34 @@ def main():
                            "--json-only-output", str(tree), "--json-only-meta-output", str(destination / "rtl.meta.json"),
                            f"-DCORE_XLEN={xlen}", "-DCORE_MUL_IMPL=0", "-DCORE_DIV_IMPL=1",
                            "-f", "scripts/pango_files.f", str(stub), "--top-module", "pango_200hp_top",
-                           f"-GSOC_PROFILE={int(profile == 'lite')}", f"-GLOCAL_TCM_ENABLE={local}"]
+                           f"-GSOC_PROFILE={int(profile == 'lite')}", f"-GBOARD_CLOCK_PROFILE={args.clock_profile}"]
+                if args.backend == "scoreboard":
+                    command += ["-DCORE_SCOREBOARD"]
+                    command += [f"-D{key.upper()}={value}" for key, value in P1_SCOREBOARD_CONFIGURATION.items()
+                                if key.startswith("core_") and type(value) is int]
+                else:
+                    command += [f"-GLOCAL_TCM_ENABLE={local}"]
+                (destination / "command.json").write_text(json.dumps(command, indent=2) + "\n")
                 completed = subprocess.run(command, cwd=REPO, text=True, stdout=subprocess.PIPE,
                                            stderr=subprocess.STDOUT)
                 (destination / "elaborate.log").write_text(completed.stdout)
                 if completed.returncode:
                     raise RuntimeError(f"wrapper elaboration failed: {destination}\n{completed.stdout[-8000:]}")
                 warnings = [line for line in completed.stdout.splitlines() if
-                            re.search(r"%(?:Error|Warning-(?:PINMISSING|PINNOTFOUND|LATCH|UNOPTFLAT|MULTIDRIVEN)):", line) or
+                            re.search(r"%(?:Error|Warning-(?:PINMISSING|PINNOTFOUND|LATCH|UNOPTFLAT|MULTIDRIVEN|ALWCOMBORDER)):", line) or
                             (re.search(r"%Warning-WIDTH[A-Z]*:", line) and
                              ("vsrc/cpu/pango_200hp_top.sv:" in line or "vendor_stubs.sv:" in line))]
                 if warnings:
                     raise RuntimeError(f"wrapper critical warnings: {warnings}")
                 # core 内既有位宽提示保留在日志，不把本次参数接线检查说成全仓 lint 干净。
-                result = check_tree(tree, xlen, profile, local)
+                result = (check_scoreboard_tree(tree, xlen, profile, args.clock_profile) if args.backend == "scoreboard"
+                          else check_tree(tree, xlen, profile, local))
                 result["warning_count"] = len(re.findall(r"^%Warning-", completed.stdout, re.M))
                 results.append(result)
                 print("PASS wrapper elaboration " + json.dumps(result, sort_keys=True), flush=True)
     (output / "summary.json").write_text(json.dumps({"status": "offline elaboration only; no PDS/DDR/board evidence",
                                                     "configurations": results}, indent=2) + "\n")
-    print("PASS 8/8 wrapper configurations; PDS, DDR behavior, timing and board checks NOT RUN")
+    print(f"PASS {len(results)}/{len(results)} wrapper configurations; PDS, DDR behavior, timing and board checks NOT RUN")
 
 
 if __name__ == "__main__":

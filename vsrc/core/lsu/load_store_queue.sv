@@ -23,6 +23,7 @@ module load_store_queue #(
     output pipeline_pkg::retire_completion_t completion [COMPLETION_PORTS],
     output pipeline_pkg::retire_gpr_forward_t early_forward [2],
     output pipeline_pkg::retire_gpr_forward_t load_return [2], store_forward_hint [2],
+    output pipeline_pkg::retire_gpr_forward_t store_slot_hint [core_config_pkg::LOAD_QUEUE_ENTRIES],
     output logic busy, draining,
     output logic store_owner_valid,
     output pipeline_pkg::retire_id_t store_owner_id
@@ -228,6 +229,17 @@ module load_store_queue #(
                 id:selected_descriptor[portno].id, data:forwarded_data[portno]};
             if (response_forward[portno].valid) early_forward[portno] = response_forward[portno];
         end
+    end
+    // 提示载荷直接来自固定 LQ 槽，标签比较不再等待端口仲裁后的描述符多路器。
+    // 资格仍按原双端口决定；同口合法返回遮住 Store 提示，不能额外唤醒原来未广播的项。
+    // 每口选择为独热：槽已被选中时直接检查本槽 forwarded，省去端口归并再反馈。
+    // 已展示的锁定请求必须继续访问内存，不能改用后来出现的 Store 转发。
+    for (genvar slot = 0; slot < LQ; slot++) begin : g_slot_hint
+        assign store_slot_hint[slot] = '{
+            valid:!rst && !flush && !recovery.valid && forwarded[slot] &&
+                  ((request_select[0][slot] && !request_locked_q[0] && !response_forward[0].valid) ||
+                   (request_select[1][slot] && !request_locked_q[1] && !response_forward[1].valid)),
+            id:loads[slot].descriptor.id, data:formatted_forward[slot]};
     end
     // 请求包在外部反压期间锁定到原物理槽；取消读仍按原协议接受并排空。
     always_ff @(posedge clk) begin

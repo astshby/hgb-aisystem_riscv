@@ -28,9 +28,10 @@ module completion_queue (
     assign input_killed = recovery.valid && younger_than(input_completion.id, recovery.id, head_slot);
     // 输出只来自寄存项；输入容量只依赖寄存占用，切断中央仲裁到发射的 ready 反馈。
     // 预选有效只描述寄存候选；全局 flush 关闭握手，但不穿过中央宽数据选择。
-    // 使用者必须另以 flush 关闭结果接纳；分支取消仍按完整年龄去除年轻候选。
-    assign output_preview_valid = !rst && count_q != 0 && !killed[0];
-    assign output_valid = output_preview_valid && !flush;
+    // 预选不经过当拍恢复比较；使用者必须以完整 ID 的接受位屏蔽已取消结果。
+    // 年龄选择先取老项，年轻的取消项不会挤占存活项；实际出队仍检查取消。
+    assign output_preview_valid = !rst && count_q != 0;
+    assign output_valid = output_preview_valid && !flush && !killed[0];
     assign output_completion = data_q[0];
     assign output_fire = output_valid && output_ready;
     assign input_ready = !rst && !flush && count_q < 2;

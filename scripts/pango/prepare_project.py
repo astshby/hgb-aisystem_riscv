@@ -23,20 +23,154 @@ SCOREBOARD_CONFIGURATION = {
     "dcache_banks": 2, "dcache_bytes": 4096, "icache_bytes": 4096,
 }
 
+# P1 已合入配置；P0 常量继续服务历史 schema，不覆盖旧工程的参数证据。
+P1_SCOREBOARD_CONFIGURATION = dict(
+    SCOREBOARD_CONFIGURATION, core_retire_entries=32, core_split_issue_queue=1,
+    core_memory_queue_entries=4, core_limited_integer_ooo=1,
+    core_scheduler_forward_mode=3, core_predictor_mode=1, core_ras_enable=1)
+# 保留旧 P1 参数用于核验历史工程；当前正式配置裁掉 RAS，并按同一固定镜像
+# 比较关闭有限整数乱序（H0 81.7327 MHz、M0 3.150157，见 OPTIMIZATION_PLAN B25）。
+DEFAULT_SCOREBOARD_CONFIGURATION = dict(P1_SCOREBOARD_CONFIGURATION,
+                                        core_ras_enable=0, core_limited_integer_ooo=0)
+BOARD_CLOCK_DOMAINS = dict.fromkeys(("core", "sys", "ddr", "periph"), 125000000)
+# C1/C4 的时钟来自 800 MHz VCO 的 GPLL；DDR 用户钟仍由 DDR IP 的 125 MHz 输出提供。
+BOARD_CLOCK_PROFILES = {
+    0: {"name": "common", "core": 125000000, "sys": 125000000,
+        "ddr": 125000000, "periph": 125000000},
+    1: {"name": "C1", "core": 100000000, "sys": 80000000,
+        "ddr": 125000000, "periph": 25000000},
+    4: {"name": "C4", "core": 100000000, "sys": 100000000,
+        "ddr": 125000000, "periph": 25000000},
+}
+# 相对 125 MHz ref_clk 的 GTP_GPLL 输出比；与 pango_soc_pll 的 STATIC_RATIO* 对齐。
+BOARD_CLOCK_RATIOS = {
+    1: {"core": (4, 5), "sys": (16, 25), "periph": (1, 5)},
+    4: {"core": (4, 5), "sys": (4, 5), "periph": (1, 5)},
+}
+
+
+def verify_default_board_clocks(wrapper):
+    """Schema 8 still stages profile 0; new domain profiles need their own physical constraints."""
+    wrapper = re.sub(r"//[^\n]*|/\*.*?\*/", "", wrapper, flags=re.S)
+    match = re.search(r"`ifdef\s+CORE_SCOREBOARD\b(.*?)`else", wrapper, re.S)
+    if match is None:
+        raise ValueError("missing scoreboard wrapper")
+    branch = match[1]
+    independent = "BOARD_CLOCK_PROFILE" in wrapper
+    mapping = dict(core="hot_clk", sys="sys_clk", ddr="core_clk", periph="periph_clk")
+    if independent:
+        if not re.search(r"parameter\s+int\s+unsigned\s+BOARD_CLOCK_PROFILE\s*=\s*0\s*,", wrapper):
+            raise ValueError("staged wrapper must default to BOARD_CLOCK_PROFILE 0")
+        common = re.search(r"if\s*\(BOARD_CLOCK_PROFILE\s*==\s*0\)\s*begin\s*:\s*g_common_clock(.*?)end\s+else", wrapper, re.S)
+        if common is None:
+            raise ValueError("missing wrapper common-clock branch")
+        for net in ("hot_clk", "sys_clk", "periph_clk"):
+            if not re.search(rf"assign\s+{net}\s*=\s*core_clk\s*;", common[1]):
+                raise ValueError(f"wrapper profile 0 changed {net}")
+        for name in ("HOT_HZ", "SYS_HZ", "PERIPH_HZ"):
+            if not re.search(rf"{name}\s*=\s*BOARD_CLOCK_PROFILE\s*==\s*0\s*\?\s*125000000\s*:", wrapper):
+                raise ValueError(f"wrapper profile 0 changed {name}")
+    else:
+        mapping = dict.fromkeys(BOARD_CLOCK_DOMAINS, "core_clk")
+    for domain, net in mapping.items():
+        if not re.search(rf"\.clk_{domain}\s*\(\s*{net}\s*\)", branch):
+            raise ValueError(f"wrapper board clk_{domain} wiring changed")
+    if not re.search(r"\.CLOCK_HZ\s*\(\s*125000000\s*\)", branch):
+        raise ValueError("soc_system wrapper CLOCK_HZ does not match 125 MHz")
+
+
+def verify_independent_board_clocks(wrapper, profile):
+    """C1/C4：默认仍为 profile 0，实际 profile 由 compile 参数覆盖。"""
+    if profile not in BOARD_CLOCK_RATIOS:
+        raise ValueError("independent board clock profile must be C1 or C4")
+    text = re.sub(r"//[^\n]*|/\*.*?\*/", "", wrapper, flags=re.S)
+    if not re.search(r"parameter\s+int\s+unsigned\s+BOARD_CLOCK_PROFILE\s*=\s*0\s*,", text):
+        raise ValueError("staged wrapper must default to BOARD_CLOCK_PROFILE 0")
+    branch = re.search(r"`ifdef\s+CORE_SCOREBOARD\b(.*?)`else", text, re.S)
+    if branch is None:
+        raise ValueError("missing scoreboard wrapper")
+    body = branch[1]
+    for domain, net in (("core", "hot_clk"), ("sys", "sys_clk"),
+                        ("ddr", "core_clk"), ("periph", "periph_clk")):
+        if not re.search(rf"\.clk_{domain}\s*\(\s*{net}\s*\)", body):
+            raise ValueError(f"wrapper board clk_{domain} wiring changed")
+    if not re.search(r"pango_soc_pll\s*#\(\.CLOCK_PROFILE\(BOARD_CLOCK_PROFILE\)\)\s+u_soc_pll", text):
+        raise ValueError("missing independent GPLL instance")
+    if not re.search(r"pango_soc_reset\s+u_reset", text):
+        raise ValueError("missing independent boot reset supervisor")
+    if not re.search(r"CLOCK_INFO_ENABLE\(BOARD_CLOCK_PROFILE\s*!=\s*0\)", body):
+        raise ValueError("clock discovery is not enabled for independent profiles")
+    if not re.search(r"HOT_HZ\s*=\s*BOARD_CLOCK_PROFILE\s*==\s*0\s*\?\s*125000000\s*:\s*100000000", text):
+        raise ValueError("unexpected HOT_HZ profile formula")
+    if not re.search(r"SYS_HZ\s*=\s*BOARD_CLOCK_PROFILE\s*==\s*0\s*\?\s*125000000\s*:\s*"
+                     r"\(\s*BOARD_CLOCK_PROFILE\s*==\s*4\s*\?\s*100000000\s*:\s*80000000\s*\)", text):
+        raise ValueError("unexpected SYS_HZ profile formula")
+    if not re.search(r"PERIPH_HZ\s*=\s*BOARD_CLOCK_PROFILE\s*==\s*0\s*\?\s*125000000\s*:\s*25000000", text):
+        raise ValueError("unexpected PERIPH_HZ profile formula")
+
+
+def board_clock_constraints(profile):
+    """只生成 C1/C4 的 generated clock 与时钟不确定性，不加载 CDC 例外。"""
+    if profile not in BOARD_CLOCK_RATIOS:
+        raise ValueError("board clock constraints require C1 or C4")
+    lines = [
+        "# C1/C4 board clocks from the 125 MHz ref_clk through GTP_GPLL.",
+        "# board_ddr.fdc defines ref_clk; PLL/DDR site coexistence is left to PDS placement.",
+        "# All cross-domain paths remain timed; no clock group, false path or max_delay is loaded.",
+    ]
+    for domain, pin, clock in (("core", "CLKOUT0", "clk_core"),
+                               ("sys", "CLKOUT1", "clk_sys"),
+                               ("periph", "CLKOUT2", "clk_periph")):
+        multiply, divide = BOARD_CLOCK_RATIOS[profile][domain]
+        lines.append(
+            f"create_generated_clock -name {{{clock}}} -source [get_ports {{ref_clk_p}}] "
+            f"[get_pins {{g_domain_clocks.u_soc_pll.u_pll/{pin}}}] "
+            f"-master_clock [get_clocks {{ref_clk}}] "
+            f"-multiply_by {{{multiply}}} -divide_by {{{divide}}}")
+        lines.append(f"set_clock_uncertainty -setup 0.2 [get_clocks {{{clock}}}]")
+        lines.append(f"set_clock_uncertainty -hold 0.05 [get_clocks {{{clock}}}]")
+    lines += [
+        "# I/O delay constraints remain an explicit board gap; DDR pins stay in board_ddr.fdc.",
+        "# CDC FIFO exceptions require a native binding audit before they may be loaded.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def staged_soc_system(root, manifest):
+    """Identify the hashed scoreboard wrapper branch, without claiming elaboration."""
+    wrapper = "vsrc/cpu/pango_200hp_top.sv"
+    system = "vsrc/soc/soc_system.sv"
+    if wrapper not in manifest["files"] or system not in manifest["files"]:
+        return False
+    text = (root / wrapper).read_text(encoding="utf-8")
+    branch = re.search(r"`ifdef\s+CORE_SCOREBOARD\b(.*?)`else", text, re.S)
+    return bool(branch and re.search(r"\bsoc_system\s*#", branch[1]))
+
+
+def core_profile(configuration):
+    return ("p1" if all(configuration.get(key) == value
+                        for key, value in P1_SCOREBOARD_CONFIGURATION.items()) else "custom")
+
 
 def compile_command(xlen, profile_id, local_tcm, dma_wide=1,
                     cache_block=None, dma_block=None, core_issue_width=None, scoreboard=False,
-                    scoreboard_config=None):
-    dma_parameter = "" if dma_wide is None else f" DMA_WIDE_ENABLE {dma_wide}"
-    block_parameters = ""
-    if cache_block is not None:
-        block_parameters += f" CACHE_BLOCK_ENABLE {cache_block}"
-    if dma_block is not None:
-        block_parameters += f" DMA_BLOCK_ENABLE {dma_block}"
+                    scoreboard_config=None, soc_system=False, board_clock_profile=0):
+    if soc_system and not scoreboard:
+        raise ValueError("soc_system requires scoreboard")
+    # schema 1--7 保持历史 Tcl；schema 8 的 AXI 系统没有这些 legacy 开关。
+    legacy_parameters = ""
+    if not soc_system:
+        dma_parameter = "" if dma_wide is None else f" DMA_WIDE_ENABLE {dma_wide}"
+        block_parameters = ""
+        if cache_block is not None:
+            block_parameters += f" CACHE_BLOCK_ENABLE {cache_block}"
+        if dma_block is not None:
+            block_parameters += f" DMA_BLOCK_ENABLE {dma_block}"
+        legacy_parameters = f" LOCAL_TCM_ENABLE {local_tcm}{dma_parameter}{block_parameters}"
     issue_directive = "" if core_issue_width is None else f" CORE_ISSUE_WIDTH={core_issue_width}"
     if scoreboard:
         if core_issue_width != 2:
-            raise ValueError("scoreboard P0 requires issue width 2")
+            raise ValueError("scoreboard requires issue width 2")
         issue_directive += (" CORE_SCOREBOARD=1 CORE_RETIRE_ENTRIES=16 CORE_ISSUE_QUEUE_ENTRIES=8"
                             " CORE_LOAD_QUEUE_ENTRIES=4 CORE_STORE_QUEUE_ENTRIES=4 CORE_BRANCH_CHECKPOINTS=4"
                             " CORE_PREDICTOR_MODE=0 CORE_RAS_ENABLE=0")
@@ -50,11 +184,13 @@ def compile_command(xlen, profile_id, local_tcm, dma_wide=1,
                 issue_directive += f" CORE_LIMITED_INTEGER_OOO={scoreboard_config['core_limited_integer_ooo']}"
             if "core_scheduler_forward_mode" in scoreboard_config:
                 issue_directive += f" CORE_SCHEDULER_FORWARD_MODE={scoreboard_config['core_scheduler_forward_mode']}"
+    # profile 0 不写入 BOARD_CLOCK_PROFILE，保持既有 compile.tcl 逐字节兼容。
+    board_directive = "" if board_clock_profile == 0 else f" BOARD_CLOCK_PROFILE {board_clock_profile}"
     return ("compile -top_module pango_200hp_top -verilog_standard SystemVerilog "
             f"-compiler_directives {{CORE_XLEN={xlen} CORE_MUL_IMPL=0 CORE_DIV_IMPL=1{issue_directive}}} "
             '-defined_parameters {ITCM_INIT_FILE "firmware/imem.hex" '
             'DTCM_INIT_FILE "firmware/dmem.hex" '
-            f'SOC_PROFILE {profile_id} LOCAL_TCM_ENABLE {local_tcm}{dma_parameter}{block_parameters}}} -loop_limit 65536')
+            f'SOC_PROFILE {profile_id}{legacy_parameters}{board_directive}}} -loop_limit 65536')
 
 
 def verify_staged_manifest(root, manifest):
@@ -73,7 +209,7 @@ def verify_staged_manifest(root, manifest):
                     slow_presence="unknown", dma_wide_enable="unknown", ddr_data_bits="unknown",
                     cache_block_enable="unknown", dma_block_enable="unknown", core_issue_width="unknown",
                     evidence="legacy: generated Tcl/configuration unverified")
-    if type(manifest["schema_version"]) is not int or manifest["schema_version"] not in (1, 2, 3, 4, 5, 6, 7):
+    if type(manifest["schema_version"]) is not int or manifest["schema_version"] not in (1, 2, 3, 4, 5, 6, 7, 8, 9):
         raise ValueError("unsupported staging manifest schema")
     schema = manifest["schema_version"]
     if schema >= 2 and (type(manifest.get("dma_wide_enable")) is not int or
@@ -111,6 +247,37 @@ def verify_staged_manifest(root, manifest):
                     raise ValueError(f"TCM bank image not covered by manifest: {bank_name}")
                 if (root / bank_name).read_text().split() != original[bank::2]:
                     raise ValueError(f"incorrect TCM interleaving: {bank_name}")
+    if schema in (8, 9):
+        if manifest.get("soc_topology") != "soc_system" or not staged_soc_system(root, manifest):
+            raise ValueError(f"schema {schema} requires a hashed soc_system scoreboard wrapper")
+        wrapper = (root / "vsrc/cpu/pango_200hp_top.sv").read_text(encoding="utf-8")
+        if schema == 8:
+            verify_default_board_clocks(wrapper)
+            if (manifest.get("board_clock_profile", 0) != 0 or
+                    manifest.get("board_clock_domains_hz") != BOARD_CLOCK_DOMAINS or
+                    manifest.get("clock_relationship") != "common_ddr_user_clock" or
+                    manifest.get("mtime_clock_domain") != "periph"):
+                raise ValueError("unexpected soc_system board clock configuration")
+        else:
+            profile = manifest.get("board_clock_profile")
+            if type(profile) is not int or profile not in BOARD_CLOCK_RATIOS:
+                raise ValueError("schema 9 requires a C1/C4 board clock profile")
+            verify_independent_board_clocks(wrapper, profile)
+            expected_domains = {domain: BOARD_CLOCK_PROFILES[profile][domain]
+                                for domain in ("core", "sys", "ddr", "periph")}
+            if (manifest.get("clock_profile") != BOARD_CLOCK_PROFILES[profile]["name"] or
+                    manifest.get("board_clock_domains_hz") != expected_domains or
+                    manifest.get("clock_relationship") != "independent_gpll_800mhz_vco" or
+                    manifest.get("mtime_clock_domain") != "periph"):
+                raise ValueError("unexpected independent board clock configuration")
+            if "board_clocks.fdc" not in manifest["files"]:
+                raise ValueError("independent clock constraints not covered by manifest")
+            if (root / "board_clocks.fdc").read_text(encoding="utf-8") != board_clock_constraints(profile):
+                raise ValueError("independent clock constraints differ from staging configuration")
+        if manifest.get("local_tcm_enable") != 1:
+            raise ValueError("soc_system always uses local TCM")
+        if manifest.get("core_profile") != core_profile(scoreboard_config):
+            raise ValueError("core profile differs from staged scheduler configuration")
     profile = manifest.get("soc_profile")
     local_tcm = manifest.get("local_tcm_enable")
     if profile not in ("full", "lite") or type(local_tcm) is not int or local_tcm not in (0, 1):
@@ -135,12 +302,20 @@ def verify_staged_manifest(root, manifest):
                 raise ValueError(f"memory guard not covered by manifest: {name}")
     commands = [line.strip() for line in (root / "compile.tcl").read_text(encoding="utf-8").splitlines()
                 if line.strip().startswith("compile")]
-    if commands != [compile_command(manifest["xlen"], profile_id, local_tcm,
-                                    1 if schema >= 2 else None,
-                                    1 if schema >= 3 else None, 1 if schema >= 3 else None,
-                                    2 if schema >= 4 else (1 if schema == 3 else None),
-                                    scoreboard=schema >= 4,
-                                    scoreboard_config=scoreboard_config if schema >= 5 else None)]:
+    expected_compile = compile_command(manifest["xlen"], profile_id, local_tcm,
+                                       1 if schema >= 2 else None,
+                                       1 if schema >= 3 else None, 1 if schema >= 3 else None,
+                                       2 if schema >= 4 else (1 if schema == 3 else None),
+                                       scoreboard=schema >= 4,
+                                       scoreboard_config=scoreboard_config if schema >= 5 else None,
+                                       soc_system=schema in (8, 9),
+                                       board_clock_profile=manifest.get("board_clock_profile", 0))
+    accepted_commands = [[expected_compile]]
+    # P2 在合入 P1 前使用 schema 4。仅其已覆盖哈希的 AXI wrapper 可省略旧参数。
+    if schema == 4 and staged_soc_system(root, manifest):
+        accepted_commands.append([compile_command(manifest["xlen"], profile_id, local_tcm,
+                                                  1, 1, 1, 2, scoreboard=True, soc_system=True)])
+    if commands not in accepted_commands:
         raise ValueError("compile Tcl parameters differ from staging manifest")
     if (root / "synthesize.tcl").read_text(encoding="utf-8") != SYNTHESIZE_COMMANDS:
         raise ValueError("unexpected generated synthesis commands")
@@ -153,6 +328,13 @@ def verify_staged_manifest(root, manifest):
         configuration[key] = manifest[key] if schema >= 3 else "unknown"
     if schema >= 4:
         configuration.update({key: manifest[key] for key in scoreboard_config})
+    if schema in (8, 9):
+        configuration.update({key: manifest[key] for key in
+                              ("soc_topology", "core_profile", "board_clock_domains_hz",
+                               "clock_relationship", "mtime_clock_domain")})
+    if schema == 9:
+        configuration.update({key: manifest[key] for key in
+                              ("board_clock_profile", "clock_profile")})
     configuration["evidence"] = (f"schema {schema}: staged hashes and compile parameters verified "
                                  "(input evidence only)" +
                                  ("; legacy DMA configuration unknown" if schema == 1 else "") +
@@ -183,18 +365,39 @@ def main():
     parser.add_argument("--ip-dir", type=Path, required=True, help="generated ddr3_test candidate directory")
     parser.add_argument("--xlen", type=int, choices=(32, 64), default=32)
     parser.add_argument("--soc-profile", choices=("full", "lite"), default="full")
-    parser.add_argument("--local-tcm", type=int, choices=(0, 1), default=0)
+    parser.add_argument("--local-tcm", type=int, choices=(0, 1), default=None,
+                        help="legacy switch; soc_system requires 1 (automatic for scoreboard)")
     parser.add_argument("--core-backend", choices=("legacy", "scoreboard"), default="legacy",
-                        help="scoreboard selects explicit dual-issue scheduler parameters")
-    parser.add_argument("--retire-entries", type=int, choices=(16, 32), default=32)
-    parser.add_argument("--split-issue-queue", type=int, choices=(0, 1), default=1)
-    parser.add_argument("--limited-integer-ooo", type=int, choices=(0, 1), default=0)
-    parser.add_argument("--scheduler-forward-mode", type=int, choices=(0, 1, 2, 3), default=0)
-    parser.add_argument("--integer-queue-entries", type=int, choices=(2, 4, 8, 16), default=8)
-    parser.add_argument("--memory-queue-entries", type=int, choices=(2, 4, 8), default=4)
-    parser.add_argument("--predictor-mode", type=int, choices=(0, 1), default=0)
-    parser.add_argument("--ras-enable", type=int, choices=(0, 1), default=0)
+                        help="scoreboard selects P1 final defaults on P2 soc_system; explicit scheduler overrides are recorded")
+    parser.add_argument("--retire-entries", type=int, choices=(16, 32), default=None)
+    parser.add_argument("--split-issue-queue", type=int, choices=(0, 1), default=None)
+    parser.add_argument("--limited-integer-ooo", type=int, choices=(0, 1), default=None)
+    parser.add_argument("--scheduler-forward-mode", type=int, choices=(0, 1, 2, 3), default=None)
+    parser.add_argument("--integer-queue-entries", type=int, choices=(2, 4, 8, 16), default=None)
+    parser.add_argument("--memory-queue-entries", type=int, choices=(2, 4, 8), default=None)
+    parser.add_argument("--predictor-mode", type=int, choices=(0, 1), default=None)
+    parser.add_argument("--ras-enable", type=int, choices=(0, 1), default=None)
+    parser.add_argument("--board-clock-profile", type=int, choices=(0, 1, 4), default=0,
+                        help="0=125 MHz common, 1=C1, 4=C4; non-zero requires scoreboard")
     args = parser.parse_args()
+    scoreboard = args.core_backend == "scoreboard"
+    if args.board_clock_profile and not scoreboard:
+        parser.error("C1/C4 board clock profiles require --core-backend scoreboard")
+    if args.local_tcm is None:
+        args.local_tcm = int(scoreboard)
+    if scoreboard and args.local_tcm != 1:
+        parser.error("soc_system always uses local TCM; --local-tcm 0 is legacy-only")
+    defaults = DEFAULT_SCOREBOARD_CONFIGURATION if scoreboard else dict(
+        P1_SCOREBOARD_CONFIGURATION, core_limited_integer_ooo=0, core_scheduler_forward_mode=0)
+    for attribute, key in (("retire_entries", "core_retire_entries"),
+                           ("split_issue_queue", "core_split_issue_queue"),
+                           ("limited_integer_ooo", "core_limited_integer_ooo"),
+                           ("scheduler_forward_mode", "core_scheduler_forward_mode"),
+                           ("integer_queue_entries", "core_issue_queue_entries"),
+                           ("memory_queue_entries", "core_memory_queue_entries"),
+                           ("predictor_mode", "core_predictor_mode"), ("ras_enable", "core_ras_enable")):
+        if getattr(args, attribute) is None:
+            setattr(args, attribute, defaults[key])
     if args.limited_integer_ooo and (args.core_backend != "scoreboard" or not args.split_issue_queue):
         parser.error("limited integer issue requires scoreboard and split queues")
     if args.scheduler_forward_mode and args.core_backend != "scoreboard":
@@ -267,7 +470,8 @@ def main():
     profile_id = 0 if args.soc_profile == "full" else 1
     present = 0x7fff if profile_id == 0 else 0x727f
     scoreboard = args.core_backend == "scoreboard"
-    manifest = {"schema_version": 7 if scoreboard else 3, "xlen": args.xlen, "mul": 0, "div": 1,
+    schema = 9 if args.board_clock_profile else (8 if scoreboard else 3)
+    manifest = {"schema_version": schema, "xlen": args.xlen, "mul": 0, "div": 1,
                 "dma_wide_enable": 1, "ddr_data_bits": 256,
                 "cache_block_enable": 1, "dma_block_enable": 1, "core_issue_width": 1,
                 "soc_profile": args.soc_profile, "soc_profile_id": profile_id,
@@ -286,6 +490,19 @@ def main():
                         core_issue_queue_entries=args.integer_queue_entries,
                         core_memory_queue_entries=args.memory_queue_entries,
                         core_predictor_mode=args.predictor_mode, core_ras_enable=args.ras_enable)
+        if args.board_clock_profile:
+            profile = BOARD_CLOCK_PROFILES[args.board_clock_profile]
+            manifest.update(soc_topology="soc_system", core_profile=core_profile(manifest),
+                            board_clock_profile=args.board_clock_profile,
+                            clock_profile=profile["name"],
+                            board_clock_domains_hz={domain: profile[domain]
+                                                    for domain in ("core", "sys", "ddr", "periph")},
+                            clock_relationship="independent_gpll_800mhz_vco",
+                            mtime_clock_domain="periph")
+        else:
+            manifest.update(soc_topology="soc_system", core_profile=core_profile(manifest),
+                            board_clock_domains_hz=dict(BOARD_CLOCK_DOMAINS),
+                            clock_relationship="common_ddr_user_clock", mtime_clock_domain="periph")
     try:
         manifest["source_commit"] = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True,
                                                             stderr=subprocess.DEVNULL).strip()
@@ -312,15 +529,24 @@ def main():
     (root / "board_ddr.fdc").write_bytes(constraints.encode("utf-8"))
     manifest["removed_reference_constraints"] = free_lines
     manifest["files"]["board_ddr.fdc"] = hashlib.sha256((root / "board_ddr.fdc").read_bytes()).hexdigest()
+    if args.board_clock_profile:
+        (root / "board_clocks.fdc").write_text(
+            board_clock_constraints(args.board_clock_profile), encoding="utf-8")
+        manifest["files"]["board_clocks.fdc"] = hashlib.sha256(
+            (root / "board_clocks.fdc").read_bytes()).hexdigest()
     rtl = [relative for _, relative in staged if relative.suffix in (".sv", ".v", ".vp")]
     commands = ["# Offline ADS candidate flow; no JTAG/configuration commands.",
                 "set_arch -family Logos2 -device PG2L200H -package FBB676 -speedgrade -6"]
     commands += [f"add_design {{{path.as_posix()}}}" for path in rtl]
-    commands += ["add_constraint {board_ddr.fdc}",
-                 compile_command(args.xlen, profile_id, args.local_tcm,
+    commands += ["add_constraint {board_ddr.fdc}"]
+    if args.board_clock_profile:
+        commands += ["add_constraint {board_clocks.fdc}"]
+    commands += [compile_command(args.xlen, profile_id, args.local_tcm,
                                  dma_wide=1, cache_block=1, dma_block=1,
                                  core_issue_width=2 if scoreboard else 1, scoreboard=scoreboard,
-                                 scoreboard_config=manifest if scoreboard else None)]
+                                 scoreboard_config=manifest if scoreboard else None,
+                                 soc_system=scoreboard,
+                                 board_clock_profile=args.board_clock_profile)]
     (root / "compile.tcl").write_text("\n".join(commands) + "\n", encoding="utf-8")
     (root / "synthesize.tcl").write_text(SYNTHESIZE_COMMANDS, encoding="utf-8")
     shutil.copyfile(repo / "scripts/pango/implement.tcl", root / "implement.tcl")
@@ -334,7 +560,7 @@ def main():
     print(f"PASS staged RV{args.xlen} m0d1 profile={args.soc_profile} "
           f"local_tcm={args.local_tcm} dma_wide=1 ddr_data=256 cache_block=1 dma_block=1 "
           f"core_backend={args.core_backend} core_issue_width={2 if scoreboard else 1} "
-          f"candidate: {len(rtl)} HDL files, {root}")
+          f"board_clock_profile={args.board_clock_profile} candidate: {len(rtl)} HDL files, {root}")
     print("Run pds_shell -work_dir <output> -project_name soc_rvN -file <output>/compile.tcl first.")
 
 

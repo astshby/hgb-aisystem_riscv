@@ -196,7 +196,11 @@ def runtime_configuration(cfg):
         require(requested is None or reported == requested, f"benchmark helper disagrees with {variable}")
         core_parameters[field] = int(reported) if reported != "unsupported" else None
         core_parameters[f"{field}_parameter_supported"] = reported != "unsupported"
-    return name, {"local_tcm_enable": int(local_tcm) if cfg["soc"] else None,
+    # 只给已选中的新 SoC 增加实际拓扑，旧快照和旧 helper 的字段契约保持。
+    topology = ({"system_bus": "axi4", "actual_local_tcm": True,
+                 "actual_cache_block": True, "actual_unified_dma": True}
+                if cfg["soc"] and reported_backend == "scoreboard" else {})
+    return name, {**topology, "local_tcm_enable": int(local_tcm) if cfg["soc"] else None,
                   "core_backend": reported_backend if reported_backend != "unsupported" else None,
                   "ddr_model_bytes": int(reported_model_bytes) if reported_model_bytes != "unsupported" else None,
                   "soc_clock_hz": int(reported_clock_hz) if cfg["soc"] and reported_clock_hz != "unsupported" else None,
@@ -213,7 +217,7 @@ def runtime_configuration(cfg):
                   **core_parameters}
 
 
-def scoreboard_metrics(text, harness_cycles):
+def scoreboard_metrics(text, harness_cycles, counter_offset=1):
     records = re.findall(r"^SCOREBOARD_STATS (.+)$", text, re.M)
     if not records:
         return {}
@@ -229,8 +233,7 @@ def scoreboard_metrics(text, harness_cycles):
     require(all(type(metrics[key]) is int and metrics[key] >= 0 for key in names),
             "invalid scoreboard metrics counter")
     cycles = metrics["cycles"]
-    # 既有 TB 的 for 循环从 0 报退出索引；计数器记录全部非复位上升沿。
-    require(cycles == harness_cycles + 1, "scoreboard metrics/harness window mismatch")
+    require(cycles == harness_cycles + counter_offset, "scoreboard metrics/harness window mismatch")
     for group in ("issue", "retire"):
         require(sum(metrics[f"{group}_{index}"] for index in range(3)) == cycles,
                 f"scoreboard {group} cycle partition mismatch")
@@ -243,12 +246,53 @@ def scoreboard_metrics(text, harness_cycles):
     return {"scoreboard_metrics": metrics}
 
 
+def scheduler_metrics(text, harness_cycles, counter_offset=1):
+    records = re.findall(r"^SCHEDULER_STATS (.+)$", text, re.M)
+    if not records:
+        return {}
+    require(len(records) == 1, "duplicate scheduler metrics")
+    metrics = json.loads(records[0])
+    names = {"cycles", "occupied_cycles", "ready_cycles", "full_cycles", "raw_cycles",
+             "raw_alu_cycles", "raw_mdu_cycles", "raw_load_cycles", "mdu_resource_cycles",
+             "mdu_iq_idle_cycles", "accepted_cycles", "accepted_operations",
+             "bypass_raw_cycles", "bypass_mdu_cycles"}
+    require(isinstance(metrics, dict) and set(metrics) == names | {"window"} and
+            metrics["window"] == "whole_run", "invalid scheduler metrics schema/window")
+    require(all(type(metrics[key]) is int and metrics[key] >= 0 for key in names),
+            "invalid scheduler metrics counter")
+    require(metrics["cycles"] == harness_cycles + counter_offset, "scheduler metrics/harness window mismatch")
+    require(all(metrics[key] <= metrics["cycles"] for key in names - {"accepted_operations"}),
+            "scheduler cycle counter exceeds window")
+    require(metrics["accepted_cycles"] <= metrics["accepted_operations"] <= 2 * metrics["accepted_cycles"],
+            "scheduler accepted operation count exceeds dual-issue bounds")
+    # RAW、MDU 和各类队列状态可重叠；不把这些周期相加当作停顿总数。
+    return {"scheduler_metrics": metrics}
+
+
 def result_fields(log, mode, xlen, allow_short=False):
     text = log.read_text()
     require(not re.search(r"%Fatal|%Error|Assertion failed", text), f"failure in {log}")
     require(f"2K {mode} run parameters for coremark." in text, f"wrong mode in {log}")
-    completion = re.findall(rf"^PASS coremark-{mode} RV{xlen} cycles=(\d+)$", text, re.M)
+    clock_suffix = (r" clocks=C(?P<configuration>[0-4])"
+                    r" core_half_ns=(?P<core>[0-9]+\.[0-9]+)"
+                    r" sys_half_ns=(?P<sys>[0-9]+\.[0-9]+)"
+                    r" ddr_half_ns=(?P<ddr>[0-9]+\.[0-9]+)"
+                    r" periph_half_ns=(?P<periph>[0-9]+\.[0-9]+) SPI_reads=(?P<spi_reads>[0-9]+)")
+    completion = list(re.finditer(rf"^PASS coremark-{mode} RV{xlen} cycles=(?P<cycles>\d+)"
+                                 rf"(?:{clock_suffix})?$", text, re.M))
     require(len(completion) == 1, f"missing/duplicate exact benchmark PASS in {log}")
+    harness_cycles = positive(completion[0]['cycles'])
+    clock_fields = {}
+    # M0/旧 SoC 的 for-loop 报零基退出索引，监测器多计一拍。
+    # 四域 SoC 的未复位 TB cycles 含初始化首沿，Core 监测器经复位后少一拍。
+    # 按明确的 TB 输出契约选择固定偏移；不接受任意 +/-1 容差。
+    counter_offset = -1 if completion[0]['configuration'] is not None else 1
+    if completion[0]['configuration'] is not None:
+        periods = {domain: float(completion[0][domain]) for domain in ('core', 'sys', 'ddr', 'periph')}
+        require(all(value > 0 for value in periods.values()), f"nonpositive clock half period in {log}")
+        clock_fields = {"simulation_clocks": {"configuration": "C" + completion[0]['configuration'],
+                                            "half_period_ns": periods,
+                                            "spi_reads": int(completion[0]['spi_reads'])}}
     errors = [line for line in text.splitlines() if re.search(r"error|cannot validate", line, re.I)]
     duration_valid = "Correct operation validated" in text
     if duration_valid:
@@ -267,12 +311,13 @@ def result_fields(log, mode, xlen, allow_short=False):
     require(seconds == ticks // 1000000, f"unexpected cycle/timing basis in {log}")
     require(duration_valid == (seconds >= 10), f"inconsistent duration result in {log}")
     return {"iterations": positive(field("Iterations", r"\d+")), "ticks": ticks,
-            "harness_cycles": positive(completion[0]),
+            "harness_cycles": harness_cycles,
             "duration_valid": duration_valid,
             "crc": {key: field(key, r"0x[0-9a-fA-F]+").lower() for key in CRC_FIELDS},
             "compiler_version": field("Compiler version", r"[^\n]+"),
             "compiler_flags": field("Compiler flags", r"[^\n]+"),
-            **scoreboard_metrics(text, positive(completion[0]))}
+            **scoreboard_metrics(text, harness_cycles, counter_offset),
+            **scheduler_metrics(text, harness_cycles, counter_offset), **clock_fields}
 
 
 def elf_metadata(elf, cfg):
@@ -392,6 +437,11 @@ def replay(args):
     require(override is None or positive(override) == iterations, "COREMARK_ITERATIONS differs from frozen image")
     allow_short = os.environ.get("COREMARK_REPLAY_ALLOW_SHORT", "0")
     require(allow_short in ("0", "1"), "COREMARK_REPLAY_ALLOW_SHORT must be 0 or 1")
+    soc_metrics = os.environ.get("COREMARK_REPLAY_SOC_METRICS", "0")
+    require(soc_metrics in ("0", "1"), "COREMARK_REPLAY_SOC_METRICS must be 0 or 1")
+    require(soc_metrics == "0" or (cfg["soc"] and rtl_parameters["core_backend"] == "scoreboard"),
+            "SoC memory observation requires the scoreboard SoC harness")
+    observation_args = ["+P2_METRICS", "+P2_EXPECT_M1"] if soc_metrics == "1" else []
     snapshot_hash = digest(root / "manifest.json")
     sim_override = os.environ.get("COREMARK_REPLAY_SIM")
     if sim_override:
@@ -400,7 +450,7 @@ def replay(args):
         require(bool(sim_source), "explicit simulator requires COREMARK_REPLAY_SIM_SOURCE")
     else:
         subprocess.run(["bash", "scripts/verilator/build_benchmark_sim.sh", str(args.xlen)], check=True)
-        top = "tb_soc_benchmark" if cfg["soc"] else "tb_benchmark"
+        top = ("tb_soc_system" if os.environ.get("CORE_BACKEND") == "scoreboard" else "tb_soc_benchmark") if cfg["soc"] else "tb_benchmark"
         simulator = Path(f"build/verilator/benchmark-rv{args.xlen}-{runtime_name}/V{top}").resolve()
         sim_source = "built from current checkout"
     require(simulator.is_file() and os.access(simulator, os.X_OK), "simulator not executable")
@@ -412,6 +462,7 @@ def replay(args):
               "source_revision": manifest["source_revision"], "rtl_checkout": checkout_info(),
               "simulator": str(simulator), "simulator_sha256": digest(simulator),
               "simulator_source": sim_source, "allow_short_duration": allow_short == "1",
+              "soc_memory_observation": soc_metrics == "1",
               "timing_source": "cpu-cycle (port uses virtual 1000000 ticks/sec)", "modes": {}}
     (log_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     (log_dir / "provenance.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
@@ -425,13 +476,14 @@ def replay(args):
         command = [str(simulator), f"+IMEM={root / mode / 'imem.hex'}",
                    f"+DMEM={root / mode / 'dmem.hex'}", f"+TOHOST={record['symbols']['tohost']:x}",
                    f"+CONSOLE={record['symbols']['sim_console']:x}", f"+TEST=coremark-{mode}",
-                   f"+MAX_CYCLES={record['max_cycles']}"]
+                   f"+MAX_CYCLES={record['max_cycles']}", *observation_args]
         with run_log.open("x") as output:
             subprocess.run(command, stdout=output, stderr=subprocess.STDOUT, check=True)
         observed = result_fields(run_log, mode, args.xlen, allow_short=allow_short == "1")
         for key in ("iterations", "crc", "compiler_version", "compiler_flags"):
             require(observed[key] == record[key], f"replay {mode} {key} differs from frozen baseline; see {run_log}")
         report["modes"][mode] = {**observed, "log": str(run_log), "command": command,
+                                  "core_statistics_counter_offset": -1 if "simulation_clocks" in observed else 1,
                                   "cycles_per_iteration": observed["ticks"] / iterations,
                                   "coremark_per_mhz": iterations * 1000000 / observed["ticks"]}
         print(f"PASS CoreMark replay {mode} RV{args.xlen}: iterations={iterations} ticks={observed['ticks']}")

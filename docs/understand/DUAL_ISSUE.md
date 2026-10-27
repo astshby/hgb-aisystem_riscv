@@ -1,8 +1,20 @@
 # 双发射学习
 
-> 写作约束：[regulation.md](../../../regulation.md)。本文描述当前 scoreboard 后端及旧控制组边界。
+> 写作约束：[skills/regulation.md](../../../skills/regulation.md)。本文描述当前 scoreboard 后端及旧控制组边界。
 
-当前 P1.1a 候选从 `main@094443e` 建立 `core/p1-1a-split-lq-sq`。
+当前分支为 `soc/p2-p1-integration`，基于已合入 P1 的 `origin/main@91e33f7`。
+P2 在 `baseline/p2-before-p1-20261023@f2b33b4` 完整保存；集成的 84 个 Core/包文件
+与 main 一致，76 个 P2 SoC 文件与保存点一致，未借集成修改 Core RTL。
+当前选择 ROB32、独立 int8/mem4、有限整数乱序、转发模式 3、Tournament/RAS；
+LQ4/SQ4、共享 BR/MDU、双数据口与 ALU/Load/DSP 的 8/10/10 级边界保持。
+
+仿真先运行 `source scripts/verilator/p1_core_config.sh`；P2 入口继续读取共享参数，
+构建目录包含完整配置标签。Pango 的 `--core-backend scoreboard` 则直接生成
+schema 8 的 P1+P2 配置，具体边界见 [FPGA 适配](../fpga/FPGA_ADAPTATION.md)。
+本轮没有新增 PDS，RV32 ≥85 MHz 待验；集成后的 CoreMark 待同镜像测量。
+以下 P1/P0 数值均保留原始编译器、源码和日志归属，不作为本轮结果。
+
+历史 P1.1a 从 `main@094443e` 建立 `core/p1-1a-split-lq-sq`。
 LQ/SQ 的控制和数据已拆入两个模块：LQ 持有 Load 描述符、逐字节 Store 转发、
 读返回格式化及完成；SQ 持有 Store 描述符、队头写授权、写返回及完成。
 两者通过 `lsu_entry_view_t` 共享存活描述符，分别拥有分配容量和状态写使能。
@@ -22,7 +34,7 @@ P1.1b 位于 `core/p1-1b-rob32-split-iq`，显式选择 `RETIRE_ENTRIES=32 SPLIT
 `split_scoreboard_queue.sv` 分别保存 int8/mem4 操作数并合并全局最老两项，
 保持按序发射，提交 `f547da3` 完整回归为 RV32 228 PASS/5 SKIP、RV64 264 PASS/5 SKIP。
 四次同镜像比较通过，M0/M1 为 2.635803/2.335916 CoreMark/MHz，标准 PDS 尚未完成。
-P1.2 在 `core/p1-2-limited-integer-ooo` 开发，显式开启 `LIMITED_INTEGER_OOO=1`。
+P1.2 原开发分支为 `core/p1-2-limited-integer-ooo`，显式开启 `LIMITED_INTEGER_OOO=1`。
 `integer_issue_queue.sv` 使用独立有效位分配空槽，选择最老就绪整数项，不压缩宽包数组。
 完整 ROB 标签和已捕获数据保留 RAW/WAW/WAR 语义；忙 MDU 留在 IQ，避免占住 ISS。
 内存队列保持 FIFO，未知 Store 地址挡住后续 Load。整数 IQ 中尚未接纳的 CSR/系统
@@ -42,7 +54,7 @@ performance 全程 RAW 等待为 1,620,773/3,479,525 拍，P1.1b 为 2,342,183/4
 LSU 等待增至 984,283/1,452,702 拍，ISS 的 MDU 反压计数均为零；该计数不包含 IQ
 内部等待，不据此判断全部 MDU 瓶颈。未增加 MDU 或 ALU 流水级。
 结果及命令为 `logs/p1/p1-2-precise/regression/summary.json`。
-P1.3 在 `core/p1-3-iq-forward-timing` 开发。整数选择改为并行
+P1.3 原开发分支为 `core/p1-3-iq-forward-timing`。整数选择改为并行
 年龄序位和独热数据选择，新增 6,144 组就绪掩码、年龄排列及资源组合测试。
 旧 LSU 早期总线同时包含 Store 转发和合法读返回，现分源并保留原同口返回优先级。
 Store 提示仍在同口合法返回有效时关闭；请求、取消、响应和完成握手保持。
@@ -81,7 +93,7 @@ Store 提示仍在同口合法返回有效时关闭；请求、取消、响应�
 新 IQ 统计使用完整生产者标签区分 RAW 来源，计数可重叠；模式 0 的 M0/M1 全程
 MDU 资源等待只有 741/742 拍，Load RAW 为 11,140,475/14,601,178 拍。IQ 无候选
 不等于 Core 无发射，访存 bank 同拍仍可能工作；不将这些计数与旧 `no_issue` 分类相加。
-本轮保留 ALU/MDU 级数。`8c072c0` 最终回归为 RV32 237 PASS/4 SKIP、
+P1.3 保留 ALU/MDU 级数。`8c072c0` 最终回归为 RV32 237 PASS/4 SKIP、
 RV64 269 PASS/4 SKIP，RV32 包含八次固定镜像重放。两轮的 CRC、ROI/TB、新旧统计和
 镜像哈希逐项一致，也与选定候选一致；原始日志和实际仿真器已封存。
 结果为 `logs/p1/p1-3-final/regression/summary.json` 和 `replay-audit.json`。
@@ -96,7 +108,7 @@ RV64 269 PASS/4 SKIP，RV32 包含八次固定镜像重放。两轮的 CRC、ROI
 两次均未进入 route，不将工具内存池峰值当作进程提交量。失败收据为
 `logs/p1/p1-3-final/retry-place-failed.json`，原工程、网表和日志保留。
 用户已要求暂停布局；最终 P1.3 没有 Fmax/WNS、物理资源、最差路径或未布通数量，
-代码与仿真结果提交分支 PR，最终物理验收未完成。
+代码与仿真结果已合入 main，最终物理验收未完成。
 P1.1b 中间工程标准布局完成，布线第 13 轮仍有 24,179/69,295 条未布通，已主动终止并
 保留全部日志，没有最终 Fmax/WNS。记录为 `logs/p1/p1-1b-drain/pds-cancelled.json`。
 以下 r15 数据保持其历史归属。
@@ -109,7 +121,14 @@ P1.1b 中间工程标准布局完成，布线第 13 轮仍有 24,179/69,295 条�
 
 ## 1. 流水与状态所有权
 
-P0 冻结配置为 `CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16 MUL_IMPL=0 DIV_IMPL=1`，
+当前 P1 配置由以下入口选择，legacy 保留为独立控制组：
+
+```bash
+source scripts/verilator/p1_core_config.sh
+# scoreboard / i2 / ROB32 / int8+mem4 / split1 / OOO1 / f3 / p1r1 / m0d1
+```
+
+历史 P0 冻结配置为 `CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16 MUL_IMPL=0 DIV_IMPL=1`，
 IQ8、LQ4/SQ4、checkpoint4、p0/r0。`CORE_BACKEND=legacy` 保留原控制组。
 r15 开发分支 `core/pipe-lsu-forward-format` 基于完成预选测量文档检查点 `57ca4d2`。
 已将转发值按 Load 槽提前格式化，再按原选择向量送两个输出；提示有效与载荷分离，
@@ -126,18 +145,24 @@ CMP RTL
 ISS 提交 `85ab1ca` 已通过完整双宽回归与八次重放，r13 完整标准 PDS 为 82.8726 MHz、WNS −0.302 ns、86 个 slow setup 失败端点、零未布通，频率验收失败。
 
 ```text
-原生 IF64 → 取指 FIFO8 → 两槽译码寄存 → RAT/ROB 双分配 → scoreboard IQ8
-                                                          │
-                                          两条已就绪的年龄前缀进入 ISS2
-                                                          │
-                                                寄存操作数后按序执行
-                                                ┌─────────┴─────────┐
-                                              ALU0/AGU0          ALU1/AGU1
-                                                └────共享 BR/MDU────┘
-                                                      │
-                              ALU0/ALU1、MDU、LSQ 本地双完成口，共五源
-                                                      │
-                                         每源两项 CMP → 最老两个完成 → ROB16 → 双退休
+原生 IF64 → 取指 FIFO8 → 两槽译码寄存 → RAT/ROB32 双分配
+                                                 │
+                              split_scoreboard_queue：共享 ROB/广播捕获
+                                                 │
+                              ┌──────────────────┴─────────────────┐
+                         int8 独立操作数                         mem4 FIFO
+                  ALU/MDU 可选择最老就绪项                  访存保持有序接纳
+                              └──────────────────┬─────────────────┘
+                                      分支/CSR/系统指令顺序约束
+                                                 │
+                                           ISS2 寄存包
+                              ┌──────────────────┴─────────────────┐
+                           ALU0/AGU0                            ALU1/AGU1
+                              └─────────────共享 BR/MDU─────────────┘
+                                                 │
+                              ALU0/ALU1、MDU、LSQ 双完成口，共五源
+                                                 │
+                              每源两项 CMP → 最老两个完成 → ROB32 → 双退休
 ```
 
 ALU 复用原结果寄存作为 CMP 首项，LSU/MDU 在本地完成与中央选择之间增加一拍。
@@ -155,16 +180,18 @@ CMT 只有在合并已有边界后才评估，不能直接把 Load 路径加到 
 Cache miss 或外部 DDR 访问都在十拍内完成。MDU 适配器只保存标签，不另存结果。
 
 取指、IQ、长执行和访存含队列及反压，不能用固定拍数描述所有指令。普通整数指令
-经过译码寄存、IQ 和执行结果寄存；MDU/LSQ 独立持有事务。发射保持年龄前缀，
-年轻指令不能越过未就绪的队首；已发射指令允许先后完成，提交保持程序顺序。
+经过译码寄存、IQ 和执行结果寄存；MDU/LSQ 独立持有事务。当前 P1 的 ALU/MDU
+可越过等待项，按年龄选择最老就绪整数候选；访存与分支保持有序接纳，CSR/系统
+指令形成顺序屏障。执行允许先后完成，ROB 始终按程序顺序提交。
+P0 的统一 IQ8 年龄前缀发射只用于历史对照。
 
 | 状态 | 所有者与作用 |
 |---|---|
 | 架构 GPR | `regfile.sv`，4 读 2 写，年轻退休写口优先，x0 恒零 |
 | 推测寄存器名 | `rename_table.sv`，RAT 将架构寄存器映射到完整 ROB 标签 |
-| 待发射指令与操作数 | `scoreboard_queue.sv`，保存标签及已捕获数据，输出年龄前缀 |
+| 待发射指令与操作数 | `split_scoreboard_queue.sv` 分为 int8/mem4；整数使用 `integer_issue_queue.sv` 最老就绪选择，访存使用 `scoreboard_queue.sv` FIFO |
 | 已就绪待执行指令 | `issue_queue.sv`，两项完整寄存包与分支结果，双出双入、部分消费、取消压紧 |
-| 推测结果、异常、退休顺序 | `retire_queue.sv`，16 项 ROB，标签包含槽号与代次 |
+| 推测结果、异常、退休顺序 | `retire_queue.sv`，32 项 ROB，标签包含 5 位槽号与代次 |
 | 待中央接纳的完成结果 | `completion_queue.sv`，五源各两项，寄存结果、完整 ID 和异常 |
 | Load 事务 | `load_queue.sv`，LQ4、逐字节转发、读返回与取消排空 |
 | Store 事务 | `store_queue.sv`，SQ4、队头授权、写返回与取消排空 |
@@ -184,15 +211,18 @@ WAW/WAR 假依赖不再按旧唯一写者规则停顿；真实 RAW 绑定最近�
 ALU0/1、MDU 与 LSQ 本地两个完成口各接两项 FIFO。来源接纳握手释放本地结果，
 中央每拍从已寄存来源选择最老两项；未获选的结果继续保持。FIFO 输入容量只由
 寄存占用决定，满时不能借当拍出队位置，切断中央 ready 返回发射的组合路径。
-占用一项时可同拍出入，五源总共最多保存十项完成，不改变 ROB 的 16 项容量。
+占用一项时可同拍出入，五源总共最多保存十项完成，不改变 ROB 的 32 项容量。
 分支恢复逐项取消年轻完成，较老项保留；取消清空前的 busy 参与迟到响应排空和
 代次复用保护。未对齐和访问异常的完整归属随结果保存。
 
-IQ 捕获两路中央广播、两路 ALU 与一路 MDU 入 CMP 广播、两路 LSU 返回/转发提示。
+IQ 共享捕获两路中央广播、两路 ALU 与一路 MDU 入 CMP 广播、两路合法 Load
+返回和两路 Store 转发提示，共九路。
 提前广播必须满足真实接纳、完整 ID 匹配存活生产者、GPR 写有效、无异常及无重定向。
-LSU 提示在 `result_q` 前提供已格式化值，同口返回优先于 Store 转发；没有获得提示
-口的值仍经正常完成交付。只捕获操作数，不提前标记 ROB 完成或更新架构寄存器。
-IQ→ISS 接纳侧按完整标签旁路当前广播，进入 ISS 寄存器后才供 ALU/AGU/MDU 执行。
+LSU 提示在 `result_q` 前提供已格式化值，同口合法返回优先于 Store 转发；没有获得
+提示口的值仍经正常完成交付。当前模式 3 保留合法读返回直通，Store 提示先捕获，
+分支忽略 Store 提示，避免晚 Store 资格直接进入分支选择。捕获不提前标记 ROB
+完成或更新架构寄存器；IQ→ISS 按完整标签核对当前可用广播，进入 ISS 寄存器后
+供 ALU/AGU/MDU 执行。
 
 共享分支单元在 IQ→ISS 接纳时判定，结果随 ISS 包保持，恢复事件独立寄存且只报
 一次，不等待完成 FIFO 和中央仲裁；未对齐跳转仍在执行侧生成精确异常。D1 接纳
@@ -214,7 +244,7 @@ Trap/MRET 后继 PC 来自提交时 CSR，IRQ 保存最后实际退休指令的�
 
 预测训练接收两条真实退休事件并按序送往预测器。RAS 的 committed 栈先应用
 两条退休，再重放存活 ROB；D1 JAL 恢复还按序重放尚未分配的两个 decode 项。
-支持 p1/r1 功能测试，P0 模板使用 p0/r0：p0 是 GShare，r0 关闭 RAS。
+当前 P1 使用 p1/r1，即 Tournament 和 RAS；历史 P0 的 p0/r0 为 GShare、关闭 RAS。
 
 ## 3. 双 LSU 与真实端口边界
 
@@ -227,14 +257,14 @@ Trap/MRET 后继 PC 来自提交时 CSR，IRQ 保存最后实际退休指令的�
 | TCM | 每块 64 KiB，两物理 bank，IF64、D0/D1、DMA 仲裁 | RV32 IF64 同时占两 bank；双数据接受须不冲突且当拍获得 bank |
 | I-cache | 4 KiB、两路组相联、32B 行、64 位同步阵列，命中 II=1 | blocking miss，失效/错误填充按协议排空 |
 | D-cache | 总 4 KiB，两个各 2 KiB 的两路组相联 bank，地址 bit10 选 bank | 不同 bank 可并行命中；同 bank 串行；单 bank 仍为阻塞式控制器 |
-| DDR | Cache 行口与 DMA 块口接原外部通道 | 共享填充/写回所有权，没有增加第二条物理 DDR 通道 |
+| DDR | P2 Cache 适配器与 DMA 经 AXI 系统总线、准入门和 DDR 目标到原生桥 | DDR 每方向保留活动 owner，没有增加第二条物理 DDR 通道 |
 
 `555453f` 在两个 Core 数据口进入 SoC 路由前各加二项寄存请求队列，切开
 LSQ 选择、地址解码与 Cache ready 的长组合链。请求多一拍，稳态各路 II=1；
 满队列不组合借用下游当拍弹出的空位。请求一旦接纳就保持完整标签，取消读仍
 外发并排空，LSQ 在真实响应到来前保留 owner。该候选 `555453f` 的 M1 成绩为
 RV32 2.142396、RV64 1.911813 CoreMark/MHz；`b98f714` 保留无额外请求拍的对照。
-加入 ROB 寄存退休后的当前成绩另列于本节，频率仍待最终布线报告。
+加入 ROB 寄存退休后的历史成绩另列于本节；当前 P1+P2 成绩和频率需单独验证。
 
 TCM 响应受反压时转入客户端缓冲，释放共享 RAM，避免 IF FIFO 满时占住解除
 数据停顿所需的 bank。直接消费仍为一拍。I-cache 失败填充逐 word 回退，保留
@@ -243,7 +273,11 @@ TCM 响应受反压时转入客户端缓冲，释放共享 RAM，避免 IF FIFO 
 
 ## 4. 验证与测量
 
-当前已测检查点为 `dffb8a2`，完整双宽功能/ISA 和 RV32 四次固定镜像重放通过。
+当前集成版的双宽 AXI、DCache turnover、TCM 等价聚焦回归共 28 PASS/0 SKIP，
+完整命令、源码和二进制 SHA 在 `logs/p2/p1-adapt-20261023/focused/summary.json`。
+该结果不代替完整 Core/ISA 回归或 CoreMark 测量。
+
+以下为历史 P0 检查点 `dffb8a2`：完整双宽功能/ISA 和 RV32 四次固定镜像重放通过。
 命令、源 SHA、镜像 manifest、CRC、ROI/TB 周期在
 `logs/pipeline/forward-format-dffb8a2-20261021/summary.json`；与 CMP 的逐项对照为
 同目录 `p0-acceptance.json`。逐项结果如下：
@@ -268,6 +302,8 @@ RV32 的 M0/M1 为 2.859463363/2.494327354 CoreMark/MHz；四次 ROI/TB、CRC �
 
 legacy 跳过另一位宽和关闭 RAS 的用例，Core ISA 跳过 fence_i/ma_data，SoC ISA
 只跳过 ma_data。测试在仓库根目录运行，工具链由 `RISCV_TOOL_ROOT` 指定。
+
+以下命令对应上述历史 P0 参数；当前 P1 使用本节前面的 profile 入口。
 
 ```bash
 export CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16
@@ -296,7 +332,7 @@ COREMARK_REPLAY_DIR=build/frozen/p0-c6-m0-rv32 make coremark XLEN=32
 M1 保留 512 MiB DDR 译码、完整外设、Cache 与 DMA 块通道，模型只分配低 64 KiB；
 CoreMark 在 TCM，DDR 空闲。镜像在 `build/frozen/p0-c6-m{0,1}-rv{32,64}`，
 每个 manifest 保存 ELF/HEX SHA。虚拟 1 MHz tick 的 duration_valid 不等于板上
-十秒测量，DDR 执行成绩仍待建立。
+十秒测量。后续 P2 DDR 执行的固定迭代记录见工作区交接文档；当前集成版单独测量。
 
 ISS 的 M0/M1 对 CMP 提升，RV32 为 9.84%/8.61%，RV64 为 8.59%/7.75%；
 历史八次重放的逐项对照在 `logs/pipeline/issue-85ab1ca-20261021/summary.json`。
@@ -311,7 +347,8 @@ CMP、ISS 各草案的对照结果和代价集中记录于工作区 `ITERATIONS.
 
 ## 5. PDS 与旧控制组
 
-PDS staging schema 4 明确设置新后端 i2/ROB16/IQ8/LQ4/SQ4/IF64/双数据口，
+当前 P1+P2 staging 为 schema 8，使用最终 P1 调度参数和 P2 `soc_system`；
+未进行新的综合或布局布线。历史 schema 4 明确设置 P0 后端 i2/ROB16/IQ8/LQ4/SQ4/IF64/双数据口，
 标准综合和 place/route 使用独立新目录。以下 r2 至 r14b 为历史记录。RV32 r2 综合为 40,170 LUT、31,381 FF、
 36 DRM、4 APM、0 latch；TCM INIT 全字节匹配。标准 place 在 EP_DL 内存失败，
 没有有效 Fmax。并行选择版本 r3 的综合最差逻辑深度从 97 降至 24 级，LUT 为 41,088；
@@ -359,7 +396,7 @@ r14b 完整标准 PDS 为 82.7423 MHz、WNS −0.321 ns、TNS −0.759 ns，5 �
 接纳，18 级、11.675 ns，其中逻辑 3.367 ns、布线 8.308 ns。周期保持、频率仍失败。
 转发格式化 `dffb8a2` 已提前并行计算各 Load 槽的值，再按原请求选择输出；提示
 有效位独立控制接纳，不增加流水级或等待。修改范围为 LSQ 与相应定向 TB。
-本轮 `dffb8a2` 的 r15 标准 PDS 已完成：**85.2464 MHz、85 MHz WNS +0.034 ns、
+历史 P0 `dffb8a2` 的 r15 标准 PDS 已完成：**85.2464 MHz、85 MHz WNS +0.034 ns、
 TNS 0、零未布通**，12 类 STA 均无失败，57,382 条网络全部布通。物理为
 40,154 LUT、32,318 FF、36 DRM、4 APM、77 IO；比 r14b 少 800 LUT，FF 不变。
 相对 r14b，Fmax 提高 3.03%；比 CMP 的 87.8837 MHz 低 3.00%。
@@ -373,16 +410,19 @@ CMP 是 7 级 ALU 诊断点，不作为本次冻结门槛。原 `p0-acceptance.j
 逻辑/布线为 3.588/7.595 ns，最高扇出 76。标准 place 用时 20 分 20 秒，
 内存池峰值 10,058 MB；route 用时 11 分 28 秒，运行中未发生内存分配失败。
 
-每阶段启动前读取 Windows 物理可用内存与提交余量，两项均至少 6 GiB；仿真/编译
-与 PDS 分时运行。本次冻结依据为当前 8–10 级结构、RV32 固定镜像周期不回退、
+每阶段启动前读取 Windows 物理可用内存与提交余量，脚本最低门槛为双 6 GiB；
+P1.3 已在 24.021 GiB 启动提交余量下 OOM，Windows 事件中的进程提交约 39.34 GiB。
+最低门槛不能保证 P1+P2 的运行容量，恢复 PDS 前须重新评估并使用新目录。
+仿真/编译与 PDS 分时运行。历史 P0 冻结依据为 8–10 级结构、RV32 固定镜像周期不回退、
 标准 PDS ≥85 MHz、零未布通及全部已报告 STA 通过；I/O 和板级验证仍单列。
 
 Core、TCM、Cache、MMIO、AXI 用户侧目前共用 DDR IP 的 125 MHz 用户时钟。
 85 MHz 是独立的约束目标实验，未重新生成 DDR IP、未改变实际板上时钟。
 DDR PHY/IO 时钟与整机 STA 需要单独列明。没有拿旧 i1 的 92.3306 MHz 代替新后端。
-本轮检查仍有 35 个输入和 73 个输出缺 I/O 延迟约束，未验证板级运行。
+历史检查仍有 35 个输入和 73 个输出缺 I/O 延迟约束，未验证板级运行。
 
 旧后端为有限双发射、第二槽普通 ALU、无 RAT、单 LSU、SoC 串行拼接 IF64。
 旧矩阵和 q8 性能保留在历史分支 `fpga/i2-core-c5` 及后续 I2 分支；不把它们与
 新 scoreboard 的端口、性能或时序混记。第二分支单元、第二 MDU、任意乱序发射、
-多路物理 DDR 通道均未实现。P1 至 P6 在新 P0 完成后继续。
+多路物理 DDR 通道均未实现。P1 的有限整数乱序已经合入，当前集成 P2；
+P3 及之后的物理适配与扩展仍按工作区规划执行。

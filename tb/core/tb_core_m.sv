@@ -33,12 +33,18 @@ module tb_core_m;
     xlen_t misa;
 
     always #5 clk = ~clk;
-    sim_cpu_top dut (.commit_trace(), .*);
+    pipeline_pkg::retire_trace_t commit_trace [2], sampled_trace [2];
+    sim_cpu_top dut (.*);
+    // 上升沿记录本拍真实退休，下降沿按年龄遍历两个端口。
+    always_ff @(posedge clk) begin
+        if (rst) begin sampled_trace[0] <= '0; sampled_trace[1] <= '0; end
+        else sampled_trace <= commit_trace;
+    end
 
     // Load→M 的正确性取决于实际发射操作数，不再绑定旧 load-use 气泡信号。
     always @(posedge clk) begin
         if (!rst && dut.u_core.mdu_req_valid && dut.u_core.mdu_req_ready &&
-            dut.u_core.d2_ex_q.pc == xlen_t'(112)) begin
+            dut.observed_mdu_packet.pc == xlen_t'(112)) begin
             assert (dut.u_core.mdu_request.operand_a == xlen_t'(-6) &&
                     dut.u_core.mdu_request.operand_b == xlen_t'(3))
                 else $fatal(1, "Load producer was not captured by dependent MDU");
@@ -121,31 +127,34 @@ module tb_core_m;
         rst = 1'b0;
         for (int cycles = 0; cycles < 5000; cycles++) begin
             @(negedge clk);
-            if (dut.u_core.execution_stall) m_waits++;
+            if (dut.observed_mdu_wait) m_waits++;
             if (dmem_store_fire) begin
                 stores++;
                 assert (dmem_store_addr == '0 && dmem_store_data[31:0] == 32'hffff_fffa &&
                         dmem_store_strb[3:0] == 4'b1111)
                     else $fatal(1, "M store data/lanes");
             end
-            if (commit_valid) begin
-                assert (!commit_exception && commit_pc == xlen_t'(retired * 4) &&
-                        commit_inst == program_inst[retired])
-                    else $fatal(1, "M instruction retired twice/out of order pc=%h expected=%0d", commit_pc, retired*4);
-                assert (commit_rd_we == expected_write[retired])
-                    else $fatal(1, "M GPR write qualification pc=%h", commit_pc);
-                if (commit_rd_we)
-                    assert (commit_rd == program_inst[retired][11:7] &&
-                            commit_rd_data == expected_data[retired])
-                        else $fatal(1, "M pc=%h got=%h expected=%h", commit_pc, commit_rd_data, expected_data[retired]);
-                retired++;
-                if (retired == program_size) begin
-                    assert (stores == 1 && m_waits > 0 && load_operand_seen)
-                        else $fatal(1, "M pipeline coverage incomplete");
-                    $display("PASS tb_core_m RV%0d retired=%0d cycles=%0d", XLEN, retired, cycles);
-                    break;
+            for (int lane = 0; lane < 2; lane++) begin
+                if (sampled_trace[lane].valid) begin
+                    assert (!sampled_trace[lane].exception && sampled_trace[lane].pc == xlen_t'(retired * 4) &&
+                            sampled_trace[lane].inst == program_inst[retired])
+                        else $fatal(1, "M instruction retired twice/out of order pc=%h expected=%0d", sampled_trace[lane].pc, retired*4);
+                    assert (sampled_trace[lane].rd_we == expected_write[retired])
+                        else $fatal(1, "M GPR write qualification pc=%h", sampled_trace[lane].pc);
+                    if (sampled_trace[lane].rd_we)
+                        assert (sampled_trace[lane].rd == program_inst[retired][11:7] &&
+                                sampled_trace[lane].rd_data == expected_data[retired])
+                            else $fatal(1, "M pc=%h got=%h expected=%h", sampled_trace[lane].pc, sampled_trace[lane].rd_data, expected_data[retired]);
+                    retired++;
+                    if (retired == program_size) begin
+                        assert (stores == 1 && m_waits > 0 && load_operand_seen)
+                            else $fatal(1, "M pipeline coverage incomplete");
+                        $display("PASS tb_core_m RV%0d retired=%0d cycles=%0d", XLEN, retired, cycles);
+                        break;
+                    end
                 end
             end
+            if (retired == program_size) break;
         end
         assert (retired == program_size) else $fatal(1, "M program timeout");
         $finish;

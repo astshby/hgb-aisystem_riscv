@@ -10,16 +10,18 @@ module tb_scoreboard_completion #(
     import pipeline_pkg::*;
     logic clk = 0, rst = 1;
     logic [RETIRE_IDX_W-1:0] head_slot;
-    logic [SOURCES-1:0] source_valid, source_ready;
+    logic [SOURCES-1:0] source_valid, source_accept, source_ready;
     retire_completion_t source_completion [SOURCES], completion [2];
-    logic [1:0] complete_valid, capacity;
+    logic [1:0] complete_valid, complete_accept, capacity;
     pred_update_t incoming [2], update;
     xlen_t expected[$], discarded;
     int serial, checked, full_cycles, pair_pushes, arbitration_checks;
+    int accepted_sources = 0, rejected_sources = 0;
     int unsigned random_state = 32'hc01234ab;
     always #5 clk = ~clk;
     completion_select #(.SOURCES(SOURCES)) u_select (.*);
     predictor_update_queue u_training (.*);
+    // 预检拒绝仍须排空真实来源；source_accept 不参与年龄仲裁，只决定选中项是否广播。
     // 独立逐项参考算法覆盖年龄回卷、空洞、同龄来源和全部 valid 组合。
     task automatic check_arbitration;
         logic [SOURCES-1:0] remaining, expected_ready;
@@ -36,15 +38,19 @@ module tb_scoreboard_completion #(
             end
             assert (complete_valid[portno] == (selected >= 0)) else $fatal(1, "completion rank valid");
             if (selected >= 0) begin
+                assert (complete_accept[portno] == source_accept[selected])
+                    else $fatal(1, "completion accept not paired with selected ID");
+                if (source_accept[selected]) accepted_sources++;
+                else rejected_sources++;
                 assert (completion[portno] == source_completion[selected]) else $fatal(1, "completion rank/data");
                 expected_ready[selected] = 1; remaining[selected] = 0;
-            end
+            end else assert (!complete_accept[portno]) else $fatal(1, "empty completion accepted");
         end
         assert (source_ready == expected_ready) else $fatal(1, "completion source ownership");
         arbitration_checks++;
     endtask
     initial begin
-        head_slot = RETIRE_IDX_W'(RETIRE_ENTRIES - 4); source_valid = 0;
+        head_slot = RETIRE_IDX_W'(RETIRE_ENTRIES - 4); source_valid = 0; source_accept = '1;
         for (int src = 0; src < SOURCES; src++) begin
             source_completion[src] = '0;
             source_completion[src].id.slot = RETIRE_IDX_W'(RETIRE_ENTRIES - 4 + (4-src));
@@ -70,6 +76,7 @@ module tb_scoreboard_completion #(
                         random_state = random_state * 32'd1664525 + 32'd1013904223;
                         source_completion[src].id.slot = RETIRE_IDX_W'(random_state >> 16);
                         source_completion[src].result.gpr_data = xlen_t'(random_state);
+                        source_accept[src] = random_state[23];
                     end
                     #1; check_arbitration();
                 end
@@ -93,11 +100,12 @@ module tb_scoreboard_completion #(
                 if (incoming[lane].valid) expected.push_back(incoming[lane].pc);
             @(negedge clk);
         end
-        assert (expected.size() == 0 && checked == serial - 1 && pair_pushes > 0 && full_cycles > 0)
+        assert (expected.size() == 0 && checked == serial - 1 && pair_pushes > 0 && full_cycles > 0 &&
+                accepted_sources > 0 && rejected_sources > 0)
             else $fatal(1, "training coverage/drain remaining=%0d checked=%0d offered=%0d pair=%0d full=%0d",
                         expected.size(), checked, serial-1, pair_pushes, full_cycles);
-        $display("PASS tb_scoreboard_completion XLEN=%0d collision_sources=%0d arbitration=%0d training=%0d full_cycles=%0d",
-                 XLEN, SOURCES, arbitration_checks, checked, full_cycles);
+        $display("PASS tb_scoreboard_completion XLEN=%0d collision_sources=%0d arbitration=%0d training=%0d full_cycles=%0d accepted=%0d rejected=%0d",
+                 XLEN, SOURCES, arbitration_checks, checked, full_cycles, accepted_sources, rejected_sources);
         $finish;
     end
 endmodule

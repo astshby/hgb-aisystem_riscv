@@ -9,8 +9,12 @@ module tb_scoreboard_request_queue;
     import scoreboard_pkg::*;
     logic clk = 0, rst = 1;
     logic [1:0] in_valid, in_ready, out_valid, out_ready, stalled, previous_ready;
+    logic [1:0] previous_output_stall;
     memory_request_t in_request [2], out_request [2], expected [2][$], discarded;
+    memory_request_t previous_output [2];
     int accepted [2], returned [2], dropped [2], blocked [2];
+    logic [RETIRE_ENTRIES-1:0] seen_slots [2];
+    logic [(1<<RETIRE_GEN_W)-1:0] seen_generations [2];
     int streak, longest, dual_returns;
     int unsigned random_state = 32'hc0de4096;
     always #5 clk = ~clk;
@@ -36,6 +40,7 @@ module tb_scoreboard_request_queue;
     always @(posedge clk) begin
         stalled = in_valid & ~in_ready;
         if (rst) begin
+            previous_output_stall = 0;
             assert (in_ready == 0 && out_valid == 0) else $fatal(1, "queue active during reset");
             for (int p = 0; p < 2; p++) begin
                 dropped[p] += expected[p].size();
@@ -48,13 +53,22 @@ module tb_scoreboard_request_queue;
                 if (streak > longest) longest = streak;
             end else streak = 0;
             for (int p = 0; p < 2; p++) begin
+                if (previous_output_stall[p])
+                    assert (out_valid[p] && out_request[p] == previous_output[p])
+                        else $fatal(1, "queued request changed while stalled port=%0d", p);
+                previous_output_stall[p] = out_valid[p] && !out_ready[p];
+                previous_output[p] = out_request[p];
                 assert (in_ready[p] == (expected[p].size() < 2) &&
                         out_valid[p] == (expected[p].size() != 0))
                     else $fatal(1, "queue capacity or registered latency port=%0d", p);
                 if (out_valid[p]) begin
                     assert (out_request[p] == expected[p][0])
                         else $fatal(1, "request replaced/reordered port=%0d count=%0d", p, returned[p]);
-                    if (out_ready[p]) begin discarded = expected[p].pop_front(); returned[p]++; end
+                    if (out_ready[p]) begin
+                        seen_slots[p][out_request[p].id.slot] = 1;
+                        seen_generations[p][out_request[p].id.generation] = 1;
+                        discarded = expected[p].pop_front(); returned[p]++;
+                    end
                 end
                 if (in_valid[p] && in_ready[p]) begin
                     expected[p].push_back(in_request[p]); accepted[p]++;
@@ -67,6 +81,7 @@ module tb_scoreboard_request_queue;
         in_valid = 0; out_ready = 0; stalled = 0;
         for (int p = 0; p < 2; p++) begin
             in_request[p] = '0; accepted[p] = 0; returned[p] = 0; dropped[p] = 0; blocked[p] = 0;
+            seen_slots[p] = 0; seen_generations[p] = 0;
         end
         streak = 0; longest = 0; dual_returns = 0;
         repeat (2) @(negedge clk);
@@ -93,13 +108,19 @@ module tb_scoreboard_request_queue;
         end
         in_valid = 0; out_ready = 3;
         repeat (4) @(negedge clk);
-        for (int p = 0; p < 2; p++)
+        for (int p = 0; p < 2; p++) begin
             assert (expected[p].size() == 0 && returned[p] + dropped[p] == accepted[p] &&
                     returned[p] > 1000 && blocked[p] > 100)
                 else $fatal(1, "queue balance or backpressure coverage port=%0d", p);
+            // 完整槽号与代次都经真实输出握手检查；ROB32 必须覆盖高半区及槽31。
+            assert (&seen_slots[p] && &seen_generations[p])
+                else $fatal(1, "incomplete slot/generation coverage port=%0d", p);
+        end
         assert (longest >= 80 && dual_returns > 500) else $fatal(1, "dual sustained throughput");
-        $display("PASS tb_scoreboard_request_queue XLEN=%0d returned=%0d/%0d reset_drop=%0d/%0d dual=%0d streak=%0d",
-                 XLEN, returned[0], returned[1], dropped[0], dropped[1], dual_returns, longest);
+        $display("PASS tb_scoreboard_request_queue XLEN=%0d ROB=%0d tag_bits=%0d slots=%h/%h generations=%h/%h returned=%0d/%0d reset_drop=%0d/%0d dual=%0d streak=%0d",
+                 XLEN, RETIRE_ENTRIES, $bits(retire_id_t), seen_slots[0], seen_slots[1],
+                 seen_generations[0], seen_generations[1], returned[0], returned[1],
+                 dropped[0], dropped[1], dual_returns, longest);
         $finish;
     end
     initial begin #100000; $fatal(1, "request queue timeout"); end

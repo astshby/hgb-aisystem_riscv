@@ -7,6 +7,7 @@ module d1_stage (
     output pipeline_pkg::redirect_t  redirect,
     output logic                       serialize_req
 );
+    import core_config_pkg::*;
     import core_types_pkg::*;
     import pipeline_pkg::*;
 
@@ -16,7 +17,8 @@ module d1_stage (
     gpr_addr_t rd;
     csr_addr_t csr_addr;
     xlen_t imm;
-    xlen_t jal_target;
+    xlen_t jal_target, jal_imm;
+    logic jal_opcode, jal_aligned;
     exception_t decoded_exc;
 
     decoder u_decoder (
@@ -33,10 +35,13 @@ module d1_stage (
         .imm
     );
 
-    // 无寄存器依赖的目标地址：唯一在 D1 提前处理的 J 指令是 JAL。
-    always_comb begin
-        jal_target = in_packet.pc + imm;
-    end
+    // JAL 的 opcode 唯一确定合法性和 J 型位移；提前控制不等待通用 uOp/立即数选择。
+    assign jal_opcode = in_packet.inst[6:0] == 7'b1101111;
+    assign jal_imm = {{(XLEN-21){in_packet.inst[31]}}, in_packet.inst[31],
+                     in_packet.inst[19:12], in_packet.inst[20], in_packet.inst[30:21], 1'b0};
+    assign jal_target = in_packet.pc + jal_imm;
+    // PC 已四字节对齐时，JAL 目标 bit1 直接等于 inst[21]，无需等待地址加法器。
+    assign jal_aligned = in_packet.pc[1:0] == 2'b00 && !in_packet.inst[21];
 
     // D1 异常在控制流处理之前完成，异常指令不会产生提前重定向。
     d1_exception_check u_d1_exception_check (
@@ -56,7 +61,8 @@ module d1_stage (
     // JAL 控制仍在 D1 提前解析；BTB 等该指令正常退休才训练，JAL 不进入 GHR。
     always_comb begin
         redirect = '0;
-        if (in_packet.valid && !decoded_exc.valid && (uop.branch_op == BR_JAL)) begin
+        // JAL 不属于 SYSTEM/非法编码；IF 错误和 PC/目标未对齐仍禁止提前重定向。
+        if (in_packet.valid && jal_opcode && !in_packet.exc.valid && jal_aligned) begin
             // 指令有效、未命中预测或目标错误时，重定向到实际 JAL 目标。
             if (!in_packet.pred.taken || (in_packet.pred.target != jal_target)) begin
                 redirect.valid = 1'b1;

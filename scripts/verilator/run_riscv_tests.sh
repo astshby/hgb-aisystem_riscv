@@ -13,6 +13,7 @@ source_list=scripts/sim_files.f
 linker=tb/riscv_tests/env/link.ld
 source scripts/soc_profile.sh
 platform_options=()
+extra_sources=()
 result_options=()
 if [[ "${SOC:-0}" == "1" ]]; then
     local_tcm="${SOC_LOCAL_TCM_ENABLE:-0}"
@@ -32,6 +33,12 @@ if [[ "${SOC:-0}" == "1" ]]; then
     tb_top=tb_soc_benchmark
     tb_file=tb/soc/tb_soc_benchmark.sv
     source_list=scripts/soc_files.f
+    if [[ "$core_backend" == scoreboard ]]; then
+        platform_suffix="${platform_suffix}-axi4"
+        tb_top=tb_soc_system
+        tb_file=tb/soc/tb_soc_system.sv
+        extra_sources=(tb/soc/axi_system_memory_model.sv tb/soc/spi_flash_model.sv)
+    fi
     linker=tb/riscv_tests/env/link_soc.ld
     # ISA 的 .dword tohost 由两笔 SW 报告；bare/RT 的 unsigned int 仍使用默认四字节。
     result_options=(-GRESULT_BYTES=8)
@@ -89,7 +96,7 @@ verilator "${core_microarch_flags[@]}" -Wall -Wno-fatal --assert --timing --bina
     -Mdir "${sim_dir}" \
     -f "${source_list}" \
     tb/common/store_result_monitor.sv \
-    "${tb_file}" \
+    "${extra_sources[@]}" "${tb_file}" \
     "${platform_options[@]}" --top-module "${tb_top}" \
     >"logs/riscv-tests-build-rv${xlen}${platform_suffix}.log" 2>&1
 

@@ -36,15 +36,28 @@ module tb_core_predictor;
     logic completed = 1'b0;
 
     always #5 clk = ~clk;
-    sim_cpu_top dut (.commit_trace(), .*);
+    pipeline_pkg::retire_trace_t commit_trace [2], sampled_trace [2];
+    sim_cpu_top dut (.*);
+    // 上升沿记录本拍真实退休，下降沿按年龄遍历两个端口。
+    always_ff @(posedge clk) begin
+        if (rst) begin sampled_trace[0] <= '0; sampled_trace[1] <= '0; end
+        else sampled_trace <= commit_trace;
+    end
     assign result_addr = xlen_t'(TEST_RESULT_ADDR);
     // 结果 Store 的总线所有者与退休 ID 从 TB 层级读取，不扩展 FPGA 接口。
     store_result_monitor u_result_monitor (
+`ifdef CORE_SCOREBOARD
+        .store_request_id(dut.u_core.store_request_id),
+        .store_response_fire(dut.u_core.store_response_fire),
+        .store_response_error(dut.u_core.store_response_error),
+        .store_response_id(dut.u_core.store_response_id),
+`else
         .store_request_id(dut.u_core.lsu_owner_id),
         .store_response_fire(dut.u_core.dmem_rsp_valid && dut.u_core.dmem_rsp_ready &&
                              dut.u_core.lsu_owner_valid && dut.u_core.dmem_req_write),
         .store_response_error(dut.u_core.dmem_rsp_error),
         .store_response_id(dut.u_core.lsu_owner_id),
+`endif
         .store_retire_fire(dut.u_core.queue_retire_fire &&
                            dut.u_core.head_meta.kind == pipeline_pkg::RET_STORE),
         .store_retire_error(dut.u_core.head_result.exc.valid),
@@ -59,20 +72,23 @@ module tb_core_predictor;
             loop_resolutions <= 0;
             late_correct <= 0;
         end else begin
-            if (commit_valid && (commit_inst[6:0] == OPCODE_BRANCH))
-                branch_count <= branch_count + 1;
+            if ((commit_trace[0].valid && commit_trace[0].inst[6:0] == OPCODE_BRANCH) ||
+                (commit_trace[1].valid && commit_trace[1].inst[6:0] == OPCODE_BRANCH))
+                branch_count <= branch_count +
+                    int'(commit_trace[0].valid && commit_trace[0].inst[6:0] == OPCODE_BRANCH) +
+                    int'(commit_trace[1].valid && commit_trace[1].inst[6:0] == OPCODE_BRANCH);
             if (dut.u_core.selected_redirect.valid)
                 redirect_count <= redirect_count + 1;
             // 退休训练比 EX 训练晚，短窗的冷启动重定向数应原样报告，不绑旧时序阈值。
             // 独立软件迭代序号决定方向：前 19 次跳回 PC8，最后一次顺序退出。
-            if (dut.u_core.ex_stage_advance && dut.u_core.d2_ex_q.pc == 12) begin
-                assert (dut.u_core.ex_packet.branch.taken == (loop_resolutions < 19) &&
-                        dut.u_core.ex_packet.branch.target == 8)
+            if (dut.observed_branch_fire && dut.observed_branch_packet.pc == 12) begin
+                assert (dut.observed_branch_taken == (loop_resolutions < 19) &&
+                        dut.observed_branch_target == 8)
                     else $fatal(1, "branch-loop execution differs from software iteration model");
                 loop_resolutions <= loop_resolutions + 1;
                 if (loop_resolutions >= 14 && loop_resolutions < 19) begin
-                    assert (dut.u_core.d2_ex_q.pred.hit && dut.u_core.d2_ex_q.pred.taken &&
-                            dut.u_core.d2_ex_q.pred.target == 8 && !dut.u_core.ex_redirect.valid)
+                    assert (dut.observed_branch_packet.pred.hit && dut.observed_branch_packet.pred.taken &&
+                            dut.observed_branch_packet.pred.target == 8 && !dut.observed_branch_wrong)
                         else $fatal(1, "steady-state branch prediction did not converge iteration=%0d", loop_resolutions);
                     late_correct <= late_correct + 1;
                 end

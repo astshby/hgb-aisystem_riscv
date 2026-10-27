@@ -42,7 +42,9 @@ run_case() {
 }
 
 # 默认对照加小/大参数：恢复槽数独立于 RAS 深度与退休队列容量。
+run_case tb_predictor_ras ras4-replay34 -GDEPTH=4 -GREPLAY_SLOTS=34
 run_case tb_predictor_ras ras4-replay8 -GDEPTH=4 -GREPLAY_SLOTS=8
+run_case tb_predictor_ras ras3-replay7 -GDEPTH=3 -GREPLAY_SLOTS=7
 run_case tb_predictor_ras ras1-replay1 -GDEPTH=1 -GREPLAY_SLOTS=1
 run_case tb_predictor_ras ras8-replay10 -GDEPTH=8 -GREPLAY_SLOTS=10
 run_case tb_predictor_direction local64-h8-choice32 -GLHT_ENTRIES=64 -GHISTORY_W=8 -GCHOOSER_ENTRIES=32

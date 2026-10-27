@@ -15,6 +15,12 @@ package soc_addr_pkg;
     localparam logic [31:0] GPIO2_BASE = 32'h1002_2000;
     localparam logic [31:0] DMA_BASE   = 32'h1003_0000;
     localparam logic [31:0] SOC_BASE   = 32'h1004_0000;
+    localparam logic [31:0] FLASH_CTRL_BASE = 32'h1005_0000;
+    localparam logic [31:0] NPU_CTRL_BASE = 32'h1006_0000;
+    localparam logic [31:0] NPU_SRAM_BASE = 32'h2000_0000;
+    localparam logic [31:0] FLASH_BASE = 32'h3000_0000;
+    localparam logic [31:0] DDR_STATUS = SOC_BASE + 32'h44;
+    // 仅 mm3_soc_compat 使用旧窗口；四域 soc_system 此处仍是 Flash。
     localparam logic [31:0] MM3_BASE   = 32'h1005_0000;
     localparam logic [31:0] DDR_BASE   = 32'h8000_0000;
     localparam int unsigned MMIO_BYTES = 4096;

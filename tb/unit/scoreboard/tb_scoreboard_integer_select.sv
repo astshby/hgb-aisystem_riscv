@@ -12,7 +12,7 @@ module tb_scoreboard_integer_select;
     branch_recovery_t recovery;
     logic [RETIRE_IDX_W-1:0] head_slot = 0;
     logic [1:0] push_count, push_capacity, pop_count, operands_ready, oldest_pending;
-    logic serial_pending;
+    logic serial_pending, first_is_oldest;
     d2_ex_t push_packet [2], issue_packet [2];
     retire_gpr_entry_t producers [RETIRE_ENTRIES];
     retire_gpr_forward_t broadcast [2];
@@ -74,6 +74,8 @@ module tb_scoreboard_integer_select;
                     #1;
                     assert (occupancy == 8 && oldest_pending == 3 && oldest_id[0] == tag(0) &&
                             oldest_id[1] == tag(1) && !serial_pending) else $fatal(1, "static age rank");
+                    assert (first_is_oldest == (expected[0] == 0))
+                        else $fatal(1, "first integer/oldest intersection phase=%0d mask=%h", phase, mask);
                     for (int lane = 0; lane < 2; lane++) begin
                         assert (operands_ready[lane] == (expected[lane] >= 0)) else $fatal(1, "ready mask phase=%0d mask=%h lane=%0d", phase, mask, lane);
                         if (expected[lane] >= 0)
@@ -82,7 +84,7 @@ module tb_scoreboard_integer_select;
                                 else $fatal(1, "age/data phase=%0d mask=%h lane=%0d expected=%0d", phase, mask, lane, expected[lane]);
                     end
                     pop_count = expected[1] >= 0 ? 2 : (expected[0] >= 0 ? 1 : 0); tick();
-                    #1; assert (occupancy == 8 - int'(expected[0] >= 0) - int'(expected[1] >= 0)) else $fatal(1, "onehot pop");
+                    #1; assert (int'(occupancy) == 8 - int'(expected[0] >= 0) - int'(expected[1] >= 0)) else $fatal(1, "onehot pop");
                     flush = 1; tick(); flush = 0; cases++;
                 end
             end

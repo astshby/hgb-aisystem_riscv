@@ -28,13 +28,16 @@ module split_scoreboard_queue #(
     logic [$clog2(INTEGER_DEPTH+1)-1:0] integer_occupancy;
     logic [$clog2(MEMORY_DEPTH+1)-1:0] memory_occupancy;
     logic selected_memory [2];
-    integer demand [2], next_index [2];
-    integer bank, index;
+    integer demand [2];
+    logic integer_first_is_oldest;
+    logic [1:0] memory_eligible [2];
+    logic [1:0] memory_before_integer [2];
+    logic first_memory, first_integer, memory_after_integer, memory_after_memory;
+    logic [3:0] merge_select [2], candidate_ready;
+    d2_ex_t candidates [4];
     logic serial_pending;
     logic [1:0] oldest_integer_pending;
     retire_id_t serial_id, oldest_integer_id [2];
-    logic memory_eligible, first_consumes_oldest_integer;
-    integer integer_boundary;
     assign bank_issue[1] = memory_issue;
 
     // ROB 数据读取与当拍广播先于类型分流，只实例化两条分配指令的四个源读口。
@@ -78,7 +81,8 @@ module split_scoreboard_queue #(
             .push_count(bank_push_count[0]), .push_packet(bank_push[0]), .push_capacity(bank_capacity[0]),
             .producers, .broadcast, .issue_packet(bank_issue[0]), .operands_ready(bank_ready[0]),
             .pop_count(bank_pop_count[0]), .occupancy(integer_occupancy), .serial_pending, .serial_id,
-            .oldest_pending(oldest_integer_pending), .oldest_id(oldest_integer_id)
+            .oldest_pending(oldest_integer_pending), .oldest_id(oldest_integer_id),
+            .first_is_oldest(integer_first_is_oldest)
         );
     end else begin : g_ordered_integer
         assign serial_pending = 0;
@@ -86,6 +90,7 @@ module split_scoreboard_queue #(
         assign oldest_integer_pending = 0;
         assign oldest_integer_id[0] = '0;
         assign oldest_integer_id[1] = '0;
+        assign integer_first_is_oldest = 0;
         scoreboard_queue #(.DEPTH(INTEGER_DEPTH), .BROADCAST_PORTS(BROADCAST_PORTS), .ISSUE_BYPASS(1), .CAPTURE_PUSH_OPERANDS(0)) u_integer (
             .clk, .rst, .flush, .recovery, .head_slot,
             .push_count(bank_push_count[0]), .push_packet(bank_push[0]), .push_capacity(bank_capacity[0]),
@@ -123,7 +128,7 @@ module split_scoreboard_queue #(
         end
         for (int lane = 0; lane < 2; lane++) begin
             if (lane < int'(push_count)) begin
-                bank_push[push_memory[lane]][bank_push_count[push_memory[lane]]] = dispatch_captured[lane];
+                bank_push[push_memory[lane]][bank_push_count[push_memory[lane]][0]] = dispatch_captured[lane];
                 bank_push_count[push_memory[lane]]++;
             end
         end
@@ -131,38 +136,49 @@ module split_scoreboard_queue #(
 
     // ALU/MDU 可越过等待项；访存与分支保留全局接纳顺序，避免晚异常堵住老项。
     // 内存仍只消费 FIFO 的连续就绪前缀，不越过尚在整数 IQ 中的老项。
+    // 四个固定候选的年龄比较、内存边界资格并行计算，不先搬运 lane0 宽包再选 lane1。
+    for (genvar memory_slot = 0; memory_slot < 2; memory_slot++) begin : g_memory_candidate
+        for (genvar boundary = 0; boundary < 2; boundary++) begin : g_boundary
+            assign memory_eligible[memory_slot][boundary] = memory_issue[memory_slot].valid &&
+                (!LIMITED_OOO || (bank_ready[1][memory_slot] &&
+                 (!oldest_integer_pending[boundary] || !younger_than(
+                    memory_issue[memory_slot].retire_id, oldest_integer_id[boundary], head_slot)) &&
+                 (!serial_pending || !younger_than(memory_issue[memory_slot].retire_id, serial_id, head_slot))));
+        end
+        for (genvar integer_slot = 0; integer_slot < 2; integer_slot++) begin : g_compare
+            assign memory_before_integer[integer_slot][memory_slot] = younger_than(
+                bank_issue[0][integer_slot].retire_id, memory_issue[memory_slot].retire_id, head_slot);
+        end
+    end
+
+    assign first_memory = memory_eligible[0][0] &&
+        (!bank_issue[0][0].valid || memory_before_integer[0][0]);
+    assign first_integer = bank_issue[0][0].valid && !first_memory;
+    // 仅消耗真正最老整数项时，M0 才能与下一条最老整数比较；年轻就绪项不解除阻塞。
+    assign memory_after_integer = memory_eligible[0][integer_first_is_oldest] &&
+        (!bank_issue[0][1].valid || memory_before_integer[1][0]);
+    // 第一项来自 Memory 时，整数边界不前进，第二项只比较 I0 与 M1。
+    assign memory_after_memory = memory_eligible[1][0] &&
+        (!bank_issue[0][0].valid || memory_before_integer[0][1]);
+    assign merge_select[0] = {1'b0, first_memory, 1'b0, first_integer};
+    assign merge_select[1] = {
+        first_memory && memory_after_memory,
+        first_integer && memory_after_integer,
+        first_integer && !memory_after_integer && bank_issue[0][1].valid,
+        first_memory && !memory_after_memory && bank_issue[0][0].valid
+    };
+    assign candidates[0] = bank_issue[0][0];
+    assign candidates[1] = bank_issue[0][1];
+    assign candidates[2] = memory_issue[0];
+    assign candidates[3] = memory_issue[1];
+    assign candidate_ready = {bank_ready[1], bank_ready[0]};
     always_comb begin
-        next_index[0] = 0;
-        next_index[1] = 0;
-        operands_ready = 0;
-        bank = 0;
-        index = 0;
-        first_consumes_oldest_integer = 0;
-        integer_boundary = 0;
-        memory_eligible = 0;
         for (int lane = 0; lane < 2; lane++) begin
-            selected_memory[lane] = 0;
             issue_packet[lane] = '0;
-            integer_boundary = first_consumes_oldest_integer ? 1 : 0;
-            memory_eligible = memory_issue[next_index[1]].valid &&
-                (!LIMITED_OOO || (bank_ready[1][next_index[1]] &&
-                 (!oldest_integer_pending[integer_boundary] ||
-                  !younger_than(memory_issue[next_index[1]].retire_id, oldest_integer_id[integer_boundary], head_slot)) &&
-                 (!serial_pending || !younger_than(memory_issue[next_index[1]].retire_id, serial_id, head_slot))));
-            if (bank_issue[0][next_index[0]].valid || memory_eligible) begin
-                bank = !bank_issue[0][next_index[0]].valid ||
-                    (memory_eligible && younger_than(
-                        bank_issue[0][next_index[0]].retire_id,
-                        bank_issue[1][next_index[1]].retire_id, head_slot)) ? 1 : 0;
-                index = next_index[bank];
-                selected_memory[lane] = 1'(bank);
-                issue_packet[lane] = bank_issue[bank][index];
-                operands_ready[lane] = bank_ready[bank][index];
-                next_index[bank]++;
-                if (lane == 0 && bank == 0 && oldest_integer_pending[0] &&
-                    issue_packet[lane].retire_id == oldest_integer_id[0])
-                    first_consumes_oldest_integer = 1;
-            end
+            operands_ready[lane] = |(candidate_ready & merge_select[lane]);
+            selected_memory[lane] = |merge_select[lane][3:2];
+            for (int candidate = 0; candidate < 4; candidate++)
+                issue_packet[lane] |= candidates[candidate] & {$bits(d2_ex_t){merge_select[lane][candidate]}};
         end
     end
 

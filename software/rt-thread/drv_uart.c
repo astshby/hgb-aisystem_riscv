@@ -11,7 +11,7 @@ static rt_ubase_t base(struct rt_serial_device *s)
 
 static rt_err_t validate_config(const struct serial_configure *cfg)
 {
-    rt_uint32_t clock = REG32(INFO_BASE + 4);
+    rt_uint32_t clock = hgb_clocks.periph_hz;
     if (!cfg || !cfg->baud_rate || cfg->baud_rate > clock / 4 || !cfg->bufsz ||
         cfg->data_bits != DATA_BITS_8 || cfg->stop_bits != STOP_BITS_1 ||
         cfg->parity != PARITY_NONE || cfg->bit_order != BIT_ORDER_LSB ||
@@ -24,7 +24,7 @@ static rt_err_t configure(struct rt_serial_device *s, struct serial_configure *c
 {
     rt_err_t result = validate_config(cfg);
     if (result) return result;
-    REG32(base(s) + 12) = REG32(INFO_BASE + 4) / cfg->baud_rate;
+    REG32(base(s) + 12) = hgb_soc_uart_divisor(hgb_clocks.periph_hz, cfg->baud_rate);
     return RT_EOK;
 }
 

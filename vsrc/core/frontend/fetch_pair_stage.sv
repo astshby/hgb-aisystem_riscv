@@ -21,7 +21,7 @@ module fetch_pair_stage (
     import pipeline_pkg::*;
     xlen_t pc_q, sequential_pc;
     if_d1_t request_q, request_1_q, response_packet, response_packet_1;
-    logic killed_q, high_word_q, request_second, response_fire, kill_now, push_ready;
+    logic killed_q, high_word_q, request_second, response_fire, kill_now, response_space;
     logic [1:0] push_count;
     logic [$clog2(FETCH_QUEUE_DEPTH+1)-1:0] occupancy;
 
@@ -32,7 +32,10 @@ module fetch_pair_stage (
     assign request_second = !pc_q[2] && !prediction.taken;
     assign kill_now = redirect.valid || flush;
     assign imem_req_addr = pc_q & ~xlen_t'(7);
-    assign imem_rsp_ready = request_q.valid && (killed_q || kill_now || push_ready);
+    // 仅使用已登记的队列占用决定响应容量，隔离 pop_count 的退休/发射反馈。
+    // 满队列开始弹出时晚接一拍；腾出两格后仍可连续双入双出。废弃响应立即排空。
+    assign response_space = !rst && occupancy <= $bits(occupancy)'(FETCH_QUEUE_DEPTH-2);
+    assign imem_rsp_ready = request_q.valid && (killed_q || kill_now || response_space);
     assign response_fire = imem_rsp_valid && imem_rsp_ready;
     assign imem_req_valid = !rst && fetch_request_enable && !kill_now &&
                             (!request_q.valid || response_fire);
@@ -65,7 +68,7 @@ module fetch_pair_stage (
     end
     fetch_queue #(.DEPTH(FETCH_QUEUE_DEPTH)) u_queue (
         .clk, .rst, .flush(kill_now), .push_packet(response_packet),
-        .push_packet_1(response_packet_1), .push_count, .push_ready,
+        .push_packet_1(response_packet_1), .push_count, .push_ready(),
         .out_packet, .out_packet_1, .pop_count, .occupancy
     );
 
