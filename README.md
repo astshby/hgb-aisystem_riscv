@@ -1,5 +1,13 @@
 # hgb-aisystem
 
+本分支：**`baseline-minimind`**。公共合并起点：`3e838fc`。
+
+当前选择 MiniMind 整数语言模型算子路线。开发与仿真入口为单时钟
+`mm3_soc_compat`，执行 `make mm3-accel-unit XLEN=32`、`make mm3-layer-soc XLEN=32`；
+RV64 使用相同入口跟随验证。五域接入与 FPGA 测量仍待独立完成。
+
+两条路线源码保留，硬件顶层独立选择；另一条路线在对应分支继续开发。
+
 RV32 优先的 RISC-V Core/SoC 协作仓库。目标是 RT-Thread 上的文本输入、板上模型
 推理、文本输出；RV64 跟随共享架构验证。近期不把 Linux、MMU、F/V、图像链路作为
 交付前提。
