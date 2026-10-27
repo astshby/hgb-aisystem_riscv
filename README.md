@@ -1,5 +1,13 @@
 # hgb-aisystem
 
+本分支：**`baseline-yolo`**。公共合并起点：`3e838fc`。
+
+当前选择 YOLO 的 128-MAC 卷积路线。开发与仿真入口为四域
+`soc_system` 加独立 NPU 时钟，执行 `make npu-test XLEN=32`、`make coremark-platforms`；
+RV64 做功能回归。MiniMind 的兼容地址表不用于本路线。
+
+两条路线源码保留，硬件顶层独立选择；另一条路线在对应分支继续开发。
+
 RV32 优先的 RISC-V Core/SoC 协作仓库。目标是 RT-Thread 上的文本输入、板上模型
 推理、文本输出；RV64 跟随共享架构验证。近期不把 Linux、MMU、F/V、图像链路作为
 交付前提。
