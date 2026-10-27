@@ -394,8 +394,8 @@ def main():
     parser.add_argument("--soc-profile", choices=("full", "lite"), default="full")
     parser.add_argument("--local-tcm", type=int, choices=(0, 1), default=None,
                         help="legacy switch; soc_system requires 1 (automatic for scoreboard)")
-    parser.add_argument("--core-backend", choices=("legacy", "scoreboard"), default="legacy",
-                        help="scoreboard selects P1 final defaults on P2 soc_system; explicit scheduler overrides are recorded")
+    parser.add_argument("--core-backend", choices=("legacy", "scoreboard"), default="scoreboard",
+                        help="default scoreboard selects the measured ROB16 soc_system; explicit overrides are recorded")
     parser.add_argument("--retire-entries", type=int, choices=(16, 32), default=None)
     parser.add_argument("--split-issue-queue", type=int, choices=(0, 1), default=None)
     parser.add_argument("--limited-integer-ooo", type=int, choices=(0, 1), default=None)
@@ -404,8 +404,8 @@ def main():
     parser.add_argument("--memory-queue-entries", type=int, choices=(2, 4, 8), default=None)
     parser.add_argument("--predictor-mode", type=int, choices=(0, 1), default=None)
     parser.add_argument("--ras-enable", type=int, choices=(0, 1), default=None)
-    parser.add_argument("--board-clock-profile", type=int, choices=(0, 1, 4), default=0,
-                        help="0=125 MHz common, 1=C1, 4=C4; non-zero requires scoreboard")
+    parser.add_argument("--board-clock-profile", type=int, choices=(0, 1, 4), default=None,
+                        help="default C1 for scoreboard, common for legacy; 0=125 MHz common, 1=C1, 4=C4")
     parser.add_argument("--npu-enable", action="store_true", help="attach pinned 128-MAC NPU on dedicated 100 MHz clock")
     parser.add_argument("--mm3-enable", action="store_true", help="attach MiniMind on dedicated 100 MHz clock")
     args = parser.parse_args()
@@ -420,6 +420,8 @@ def main():
     if selected != "none" and selected not in branch["accelerators"]:
         parser.error("accelerator source is absent from this branch: " + selected)
     scoreboard = args.core_backend == "scoreboard"
+    if args.board_clock_profile is None:
+        args.board_clock_profile = 1 if scoreboard else 0
     if (args.npu_enable or args.mm3_enable) and (not scoreboard or not args.board_clock_profile):
         parser.error("NPU requires scoreboard C1/C4")
     if args.board_clock_profile and not scoreboard:
