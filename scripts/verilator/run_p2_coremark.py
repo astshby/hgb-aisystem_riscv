@@ -52,9 +52,9 @@ def check_core_profile(config, expected):
 
 
 def optimization():
-    value = os.environ.get('OPT', 'O2')
+    value = os.environ.get('SOFTWARE_OPT', 'O2')
     if value not in ('O2', 'O3', 'Ofast'):
-        raise ValueError('OPT must be O2, O3 or Ofast')
+        raise ValueError('SOFTWARE_OPT must be O2, O3 or Ofast')
     return value
 
 

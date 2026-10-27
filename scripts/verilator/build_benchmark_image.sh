@@ -4,8 +4,8 @@ set -euo pipefail
 xlen="$1"
 output_dir="$2"
 shift 2
-opt="${OPT:-O2}"
-case "$opt" in O2|O3|Ofast) ;; *) echo "OPT must be O2, O3 or Ofast" >&2; exit 2;; esac
+opt="${SOFTWARE_OPT:-O2}"
+case "$opt" in O2|O3|Ofast) ;; *) echo "SOFTWARE_OPT must be O2, O3 or Ofast" >&2; exit 2;; esac
 
 tool_root="${RISCV_TOOL_ROOT:?set RISCV_TOOL_ROOT to the toolchain bin directory}"
 tool_prefix="${tool_root}/riscv64-unknown-elf-"

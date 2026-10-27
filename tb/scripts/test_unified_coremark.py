@@ -20,7 +20,7 @@ class UnifiedCoreMarkTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             bundle=Path(directory)
             (bundle/'manifest.json').write_text(json.dumps(dict(iterations=2,modes=['performance'],optimization='O2')))
-            with patch.dict(os.environ,OPT='O3'):
+            with patch.dict(os.environ,SOFTWARE_OPT='O3'):
                 with self.assertRaisesRegex(ValueError,'selection differs'):
                     unified.freeze(bundle,2,['performance'])
 

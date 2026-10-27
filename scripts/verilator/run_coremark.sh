@@ -14,8 +14,8 @@ source scripts/verilator/benchmark_platform.sh
 tool_root="${RISCV_TOOL_ROOT:?set RISCV_TOOL_ROOT to the toolchain bin directory}"
 tool_prefix="${tool_root}/riscv64-unknown-elf-"
 sim_dir="build/verilator/benchmark-rv${xlen}-${config}"
-opt="${OPT:-O2}"
-case "$opt" in O2|O3|Ofast) ;; *) echo "OPT must be O2, O3 or Ofast" >&2; exit 2;; esac
+opt="${SOFTWARE_OPT:-O2}"
+case "$opt" in O2|O3|Ofast) ;; *) echo "SOFTWARE_OPT must be O2, O3 or Ofast" >&2; exit 2;; esac
 # RTL 模型与优化等级无关；软件镜像及日志各自保存。
 config="${config}-${opt}"
 coremark_root="benchmark/coremark/vendor/coremark"
