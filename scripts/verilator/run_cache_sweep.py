@@ -30,6 +30,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--bundle', type=Path, required=True)
+    parser.add_argument('--models', type=Path, help='reuse models from an earlier sweep with identical RTL/configuration')
     parser.add_argument('--pairs', nargs='+', default=['4:4','8:4','16:4','32:4','4:8','4:16','4:32'],
                         help='I:D capacities in KiB')
     parser.add_argument('--modes', nargs='+', choices=['performance','validation'], default=['performance'])
@@ -39,6 +40,8 @@ def main():
     args = parser.parse_args()
     os.chdir(ROOT)
     output, bundle = args.output.resolve(), args.bundle.resolve()
+    models = args.models.resolve() if args.models else output
+    driver_sha256 = sha(Path(__file__))
     output.mkdir(parents=True, exist_ok=True)
     firmware = unified.freeze(bundle, args.iterations, args.modes)
     pairs = [tuple(int(v)*1024 for v in pair.split(':')) for pair in args.pairs]
@@ -48,7 +51,8 @@ def main():
         config = configuration('soc_ddr','target',32,*pair)
         name = f'i{pair[0]//1024}-d{pair[1]//1024}'
         root = output/name
-        binary, receipt = unified.build(config, root/'model')
+        print(f'CACHE_CONFIGURATION {name}',flush=True)
+        binary, receipt = unified.build(config, models/name/'model')
         results = []
         for image in firmware['images']:
             if image['scenario'] not in args.scenarios or image['mode'] not in args.modes:
@@ -73,7 +77,7 @@ def main():
         if ratios:
             row['equal_scenario_geomean_score_gain_percent']=100*(math.exp(sum(map(math.log,ratios))/len(ratios))-1)
     unified.write(output/'summary.json',dict(command=sys.argv,source_commit=subprocess.check_output(
-        ['git','rev-parse','HEAD'],text=True).strip(),driver_sha256=sha(Path(__file__)),
+        ['git','rev-parse','HEAD'],text=True).strip(),driver_sha256=driver_sha256,
         firmware_manifest_sha256=sha(bundle/'manifest.json'),rows=rows))
     print(f'PASS cache capacity sweep configurations={len(rows)} measurements={sum(len(r["results"]) for r in rows)}',flush=True)
 
