@@ -274,7 +274,7 @@ def main():
     parser.add_argument('--models',type=Path,help='Shared immutable RTL model directory across software optimization levels')
     parser.add_argument('--platforms',nargs='+',choices=CONFIG['platforms'],default=list(CONFIG['platforms']))
     parser.add_argument('--clocks',nargs='+',choices=CONFIG['clock_periods_ps'],default=['target'])
-    parser.add_argument('--scenarios',nargs='+',choices=['tcm','tcm_background',*p2.LAYERS,'npu_background'])
+    parser.add_argument('--scenarios',nargs='+',choices=sorted({s for p in CONFIG['platforms'].values() for s in p['scenarios']}))
     parser.add_argument('--modes',nargs='+',choices=p2.EXPECTED,default=list(p2.EXPECTED))
     parser.add_argument('--iterations',type=int,default=2)
     parser.add_argument('--build-only',action='store_true')
@@ -284,6 +284,9 @@ def main():
     if args.iterations<=0: parser.error('iterations must be positive')
     if args.build_only and args.functional: parser.error('choose --build-only or --functional')
     if args.xlen==64 and not (args.build_only or args.functional): parser.error('RV64 is functional-only; use --functional')
+    if not (args.build_only or args.functional) and args.scenarios and not any(
+            set(CONFIG['platforms'][p]['scenarios']) & set(args.scenarios) for p in args.platforms):
+        parser.error('selected platforms have no requested scenario')
     os.chdir(ROOT)
     output=args.output.resolve()
     bundle=args.bundle.resolve() if args.bundle else output/'firmware'
