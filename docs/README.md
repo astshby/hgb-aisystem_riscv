@@ -24,6 +24,6 @@
 - `vsrc/cpu/`：FPGA wrapper 和 DDR 桥。
 - `tb/`：测试。
 - `scripts/`：仿真、PDS、loader。
-- `benchmark/`：CoreMark 和裸机 runtime。
+- `benchmark/`：裸机 CoreMark；通用启动/runtime 在 `software/common/baremetal/`。
 
 修改 RTL 前先看对应学习文档和测试；功能和性能边界以源码、正式契约和实测日志为准。

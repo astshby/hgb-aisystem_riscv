@@ -8,7 +8,8 @@ module tb_uart_loader #(
     timeprecision 1ps;
     import core_config_pkg::*;
     localparam int DIVISOR = 100; // 50 MHz / 500 kbaud, simulation firmware only.
-    tb_soc_benchmark #(.DDR_BYTES(256 * 1024), .LOCAL_TCM_ENABLE(LOCAL_TCM_ENABLE),
+    tb_soc_system #(.DDR_BYTES(256 * 1024), .PERIPH_PERIOD_PS(20000),
+                       .UART_DIVISOR(DIVISOR), .LOCAL_TCM_ENABLE(LOCAL_TCM_ENABLE),
                        .SOC_PROFILE(SOC_PROFILE)) test();
     logic host_rx = 1'b1;
     byte unsigned received[$];
@@ -25,19 +26,19 @@ module tb_uart_loader #(
     initial forever begin
         byte unsigned value;
         @(negedge test.uart_tx[0]);
-        repeat (DIVISOR/2) @(negedge test.clk);
+        repeat (DIVISOR/2) @(negedge test.clk_periph);
         assert (!test.uart_tx[0]) else $fatal(1, "bad UART start");
         for (int bit_index=0; bit_index<8; bit_index++) begin
-            repeat (DIVISOR) @(negedge test.clk);
+            repeat (DIVISOR) @(negedge test.clk_periph);
             value[bit_index]=test.uart_tx[0];
         end
-        repeat (DIVISOR) @(negedge test.clk);
+        repeat (DIVISOR) @(negedge test.clk_periph);
         assert (test.uart_tx[0]) else $fatal(1, "bad UART stop");
         received.push_back(value);
     end
 
     task automatic recv_byte(output byte unsigned value);
-        while (received.size()==0) @(negedge test.clk);
+        while (received.size()==0) @(negedge test.clk_periph);
         value=received.pop_front();
     endtask
     task automatic ready_banner;
@@ -51,17 +52,17 @@ module tb_uart_loader #(
         assert (line=="LOADER READY v1 m0d1\n") else $fatal(1,"unexpected loader banner: %s",line);
     endtask
     task automatic send_byte(input byte unsigned value, input bit stop_ok=1'b1);
-        @(negedge test.clk);
+        @(negedge test.clk_periph);
         host_rx=0;
-        repeat (DIVISOR) @(negedge test.clk);
+        repeat (DIVISOR) @(negedge test.clk_periph);
         for (int bit_index=0; bit_index<8; bit_index++) begin
             host_rx=value[bit_index];
-            repeat (DIVISOR) @(negedge test.clk);
+            repeat (DIVISOR) @(negedge test.clk_periph);
         end
         host_rx=stop_ok;
-        repeat (DIVISOR) @(negedge test.clk);
+        repeat (DIVISOR) @(negedge test.clk_periph);
         host_rx=1;
-        repeat (DIVISOR) @(negedge test.clk);
+        repeat (DIVISOR) @(negedge test.clk_periph);
     endtask
     task automatic ack(input byte unsigned expected);
         byte unsigned value;

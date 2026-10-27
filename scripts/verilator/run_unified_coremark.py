@@ -94,11 +94,12 @@ def freeze(bundle, iterations, modes):
             im=p2.build_image(args,layer,mode,tools,bundle)
             im['scenario']=layer
             images.append(im)
-    args.npu=True
-    for mode in modes:
-        im=p2.build_image(args,'background',mode,tools,bundle)
-        im['scenario']='npu_background'
-        images.append(im)
+    if 'soc_npu' in CONFIG['platforms']:
+        args.npu=True
+        for mode in modes:
+            im=p2.build_image(args,'background',mode,tools,bundle)
+            im['scenario']='npu_background'
+            images.append(im)
     manifest=dict(schema=1,optimization=p2.optimization(),iterations=iterations,modes=modes,source_sha256=hashes,images=images,
                   compiler=subprocess.check_output([tools+'gcc','--version'],text=True).splitlines()[0])
     write(bundle/'manifest.json',manifest)
