@@ -1,7 +1,7 @@
 # hgb-aisystem
 
 RV32 优先的双发射 Core 与多时钟 SoC。RV64 跟随共享 RTL 做功能和 ISA 验证。
-当前公共候选采用 ROB16、int8/mem4、LQ4/SQ4、forward3、Tournament1、RAS0、OOO0；
+当前公共基线采用 ROB16、int8/mem4、LQ4/SQ4、forward3、Tournament1、RAS0、OOO0；
 正常 ALU/Load/DSP 路径为 8/10/10 级，C 扩展尚未实现。
 
 ## 四个发布分支
@@ -13,7 +13,7 @@ RV32 优先的双发射 Core 与多时钟 SoC。RV64 跟随共享 RTL 做功能�
 | baseline-minimind | 同一 Core/SoC，加 MiniMind 算子和原作者软件；无 CoreMark/RT | `make minimind` |
 | baseline-all | 上述全部源码，RT-Thread 只有一份；每次选择一种加速器或无加速器 | 上述入口均提供 |
 
-本树为 **baseline-all 公共候选**。main 的内容通过 PR 交由维护者合并。
+本树为 **baseline-all 源码基线**。main 的内容通过 PR 交由维护者合并。
 两种加速器共用 `0x20000000` 设备窗口，分别实例化；`0x10050000` 始终用于 Flash 控制。
 Core/SYS/DDR 用户口/外设目标为 **100/80/125/25 MHz**，加速器独立域目标为 **100 MHz**。
 这些数值是配置目标；综合估计和布局布线结果分别记录。
@@ -45,7 +45,8 @@ M0 使用一周期 TB 存储；其他层使用实际 TCM/Cache/总线。每层�
 RT-Thread 双宽通过四域 DDR 系统运行、Timer 切换和 DMA 热代码搬运。
 YOLO 双宽完成卷积核对，并观察到 28 个 MAC 工作沿与独立 DDR DMA 重叠。
 MiniMind 双宽通过五域单层 38 命令、运行库和并发 DMA；尚未完成本轮全模型多 Token 验证。
-本轮只运行标准综合，不运行布局布线或上板。
+本轮四组标准综合完成；MiniMind 出现多写 RAM 推断警告，按维护者决定停止并列为待修，未取得其 Fmax/资源。
+不运行布局布线或上板。
 
 目录、测量和边界见[项目介绍](docs/PROJECT_INTRO.md)，系统结构见[文档索引](docs/README.md)，
 FPGA 流程见[适配说明](docs/fpga/FPGA_ADAPTATION.md)。

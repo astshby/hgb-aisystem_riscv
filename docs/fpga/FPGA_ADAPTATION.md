@@ -13,7 +13,8 @@ C1 目标 Core/SYS/DDR-user/外设 = 100/80/125/25 MHz。
 `prepare_project.py --core-backend scoreboard --board-clock-profile 1` 暂存无加速器板级工程；
 加 `--npu-enable` 或 `--mm3-enable` 选择对应加速器。两标志互斥，分支未保留的设备不能选择。
 加速器专用分支从 `branch_profile.json` 读取默认设备，all 默认无设备。
-暂存前需 `make loader XLEN=32` 与完整生成 DDR IP 目录。
+默认入口已选择 scoreboard/C1；显式 legacy 使用原共同时钟，仍可显式覆盖时钟档。
+四分支各 64 项 PDS 工具测试通过。暂存前需 `make loader XLEN=32` 与完整生成 DDR IP 目录。
 
 含 CoreMark 的分支可用 `prepare_benchmark.py` 对 `core_tcm/soc_tcm/soc_ddr` 暂存与仿真
 同配置、同 bundle 的工程；all 还支持 soc_npu。必须提供 `--bundle`、`--sim-receipt`，
@@ -21,6 +22,69 @@ DDR 组另需 `--ip-dir`。TCM 组使用真实 TCM RTL/BRAM 初值和外部时�
 
 标准综合使用 ADS `synthesize -ads -selected_syn_tool_opt 2`，单线程，增加路径报告深度；
 不启用快速布局布线，本轮不执行 P&R。每个工程保留编译 Tcl、FDC、镜像、源码哈希和原始报告。
+
+## 2026-10-27 标准综合实测
+
+Windows PDS 2025.2 ADS，PG2L200H-6IFBB676，selected_syn_tool_opt=2、单线程、max_path=100。
+下表每格为 **综合估计 Fmax MHz / 同域 setup WNS ns**；目标依次为 100/80/125/25/100 MHz。
+各域最高值独立统计，不能同时替换测试时钟后沿用原 CoreMark/MHz。
+
+| 硬件 | Core | SYS | DDR-user | 外设 | NPU |
+|---|---:|---:|---:|---:|---:|
+| Core+TCM | 103.8853 / +0.374 | — | — | — | — |
+| SoC+TCM | 95.0299 / -0.523 | 88.7311 / +1.230 | — | 93.1966 / +29.270 | — |
+| SoC+Cache/DDR | 85.1064 / -1.750 | 83.8504 / +0.574 | 144.7178 / +1.090 | 87.5197 / +28.574 | — |
+| SoC+YOLO | 88.1368 / -1.346 | 83.8293 / +0.571 | 144.7387 / +1.091 | 79.9552 / +27.493 | 106.5871 / +0.618 |
+
+| 硬件 | LUT | FF | DRM36K | APM |
+|---|---:|---:|---:|---:|
+| Core+TCM | 26239 | 19665 | 32.0 | 4.0 |
+| SoC+TCM | 46748 | 39193 | 32.0 | 4.0 |
+| SoC+Cache/DDR | 61438 | 54342 | 36.0 | 4.0 |
+| SoC+YOLO | 71569 | 66789 | 162.5 | 86.0 |
+
+DDR-user 125 MHz 是控制器用户接口；本轮 IP 配置为 DDR 数据率 1000 Mbps、外部 CK 500 MHz。
+TCM 两组没有 DDR PHY，不填 DDR-user 数值。
+各组 RTL、时钟、ROM/TCM 初值和完整原生报告均单独冻结。
+
+原生工程位于 `$PDS_WORK_ROOT/work/four-branches-20261027/`，目录与表行分别为
+`core_tcm`、`soc_tcm`、`soc_ddr-v2`、`soc_npu-v2`。摘要、命令和报告哈希见本地
+`logs/four-branches-20261027/synthesis-*.json`；工具输出不入源码仓库。
+CoreMark 硬件组绑定 edc2349 公共硬件与 O3 TCM CoreMark 镜像。
+最终分支裁剪移除未启用设备/应用，公共 Core、包和 BSP 的 100 份文件相同，应用在裁剪树另行复测。
+报告绑定原测量输入，不把文档提交或裁剪树 SHA 写成未经运行的新综合。
+
+| 硬件/域 | 最差起点 → 终点（末三级层次） | 逻辑级 | 最高扇出 |
+|---|---|---:|---:|
+| Core+TCM/Core | `u_core/u_issue/packet_q[658]/CLK` → `g_split_iq.u_scoreboard/g_ordered_integer.u_integer/packet_q[257]/D` | 22 | 39 |
+| SoC+TCM/Core | `u_lsu/u_store/valid_q[3]/CLK` → `g_split_iq.u_scoreboard/g_ordered_integer.u_integer/packet_q[260]/D` | 17 | 32 |
+| SoC+TCM/SYS | `g_target[0].u_exit/u_r/read_q[0]/CLK` → `g_soc.u_soc/u_fabric/r_next_q[3][0]/CE` | 14 | 274 |
+| SoC+TCM/外设 | `g_soc.u_soc/u_reset/g_domain[3].release_q[2]/CLK` → `u_peripherals/u_irq/priority_q[1][0]/CE` | 14 | 1681 |
+| SoC+Cache/DDR/Core | `u_tcm_target/u_target/write_q[15]/CLK` → `u_soc/g_tcm[0].u_ram/g_bank[0].mem_0/WEA` | 18 | 106 |
+| SoC+Cache/DDR/SYS | `u_soc/u_reset/g_domain[1].release_q[2]/CLK` → `u_soc/u_fabric/r_next_q[1][0]/CE` | 17 | 1847 |
+| SoC+Cache/DDR/DDR-user | `u_ddr_bridge/wr_cmd_q[3]/CLK` → `u_ddr_bridge/wr_error_q_reg[1]/D` | 11 | 57 |
+| SoC+Cache/DDR/外设 | `u_soc/u_reset/g_domain[3].release_q[2]/CLK` → `u_peripherals/u_mtime/time_q[63]/D` | 16 | 1724 |
+| SoC+YOLO/Core | `u_tcm_target/u_target/write_q[15]/CLK` → `u_soc/g_tcm[0].u_ram/g_bank[0].mem_0/CEA` | 16 | 104 |
+| SoC+YOLO/SYS | `g_npu.u_reset/g_domain[1].release_q[2]/CLK` → `u_fabric/g_master[2].u_write_route/occupancy[0]/CE` | 17 | 1934 |
+| SoC+YOLO/DDR-user | `u_ddr_bridge/wr_cmd_q[3]/CLK` → `u_ddr_bridge/wr_error_q_reg[1]/D` | 11 | 56 |
+| SoC+YOLO/外设 | `u_soc/u_reset/g_domain[3].release_q[2]/CLK` → `u_peripherals/u_mtime/time_q[63]/D` | 17 | 1703 |
+| SoC+YOLO/NPU | `g_npu.u_target/u_device/request_addr_q[10]/CLK` → `g_npu.u_target/u_device/bias_q[64]/CE` | 13 | 34 |
+
+| 硬件 | 原始跨域 setup 最差 ns | 原始跨域 hold 最差 ns | 同域 hold 最差 ns | 未指定 input/output delay 数 |
+|---|---:|---:|---:|---:|
+| Core+TCM | — | — | +0.569 | 3/2 |
+| SoC+TCM | -2.400 | +0.321 | +0.274 | 4/2 |
+| SoC+Cache/DDR | -6.063 | -4.770 | -0.006 | 35/73 |
+| SoC+YOLO | -6.063 | -4.680 | -0.006 | 35/73 |
+
+上述跨域数值是保留全部真实路径时的原始报告，尚未完成 FIFO/Gray/payload 端点约束及 DDR PHY/I/O 检查。
+域内最差路径的完整端点/逻辑级/扇出，以及原始跨域 setup、hold 和未约束 I/O 均保存在摘要。
+负 WNS 表示对应目标未达到；跨域、DDR PHY 和 I/O 约束仍需逐端点检查，不能据域内 Fmax 宣称整体时序闭合。
+本轮未执行 P&R，布线 Fmax/WNS、未布通数和板级结果均为未测。
+
+MiniMind 五域仿真通过；本次 PDS 出现 14 个加速器数组多写 RAM 推断警告，约 59 分钟后按维护者决定停止。
+MiniMind 的 LUT/FF/DRM/APM、Fmax/WNS 均未取得结果，100 MHz 只作为目标；保留源码，列为存储结构待修。
+原生目录 soc_minimind 的 user-stop.json 和完整日志保留，不能用 YOLO 数值替代 MiniMind。
 
 ## 结果解释
 

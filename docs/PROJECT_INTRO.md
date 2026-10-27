@@ -85,3 +85,10 @@ RV32/RV64 为 4,680,438/4,678,859 TB 周期，各 59,857 次外部主口读命�
 标准综合按五种实际硬件分别测资源和域内 Fmax，不将核级最高值用作完整系统频率。
 本轮没有 P&R、bitstream 或板级结果。原生综合与内存检查位于 `$PDS_WORK_ROOT/work/four-branches-20261027/`。
 CDC/PHY/I/O 的原始跨域报告与域内路径分别呈现，不用 false path 隐藏真实同步路径。
+
+## 本轮标准综合
+
+本轮各配置的 Fmax/WNS、LUT/FF/DRM/APM、最差路径和未完成项，
+见 [FPGA 实测表](fpga/FPGA_ADAPTATION.md#2026-10-27-标准综合实测)。本分支表只列自身保留的硬件。
+四组标准综合已完成：Core+TCM 103.8853 MHz；SoC+TCM Core 95.0299 MHz；完整 DDR SoC Core 85.1064 MHz；YOLO Core/NPU 88.1368/106.5871 MHz。MiniMind 仿真通过，PDS 因多写 RAM 推断问题按维护者决定停止，列为待修，未取得 Fmax 和资源。
+没有本轮布局布线或上板成绩。已完成的仿真和原生综合绑定各自冻结输入，文档更新不改变测量来源。
