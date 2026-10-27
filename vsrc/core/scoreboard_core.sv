@@ -348,9 +348,9 @@ module scoreboard_core (
         end
         issue_count = {1'b0, issue_fire[0]} + {1'b0, issue_fire[1]};
     end
-    // 宽操作数只按已寄存的指令类别路由；晚异常/取消仍关闭 issue_fire，
-    // 不经 lane_class 的异常选择再进入 DSP 数据多路器。
-    assign mdu_lane = schedule_class(scheduled[0]) != SCHED_MDU;
+    // 宽操作数直接按 ISS 中的 FU 类型路由，避免 CSR/分支/异常分类进入 DSP 输入。
+    // 异常和串行指令仍由 lane_class 与 issue_fire 授权；串行 lane0 不允许 lane1 发射。
+    assign mdu_lane = scheduled[0].uop.fu != FU_MULDIV;
     assign mdu_req_valid = issue_fire[mdu_lane] && lane_class[mdu_lane] == SCHED_MDU;
     assign mdu_request = '{operation:scheduled[mdu_lane].uop.muldiv_op,
         op_width:scheduled[mdu_lane].uop.op_width,

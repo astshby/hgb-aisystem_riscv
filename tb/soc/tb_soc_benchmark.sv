@@ -11,8 +11,6 @@ module tb_soc_benchmark #(
     parameter bit DCACHE_ENABLE = 1'b1,
     parameter bit LOCAL_TCM_ENABLE = 1'b0,
     parameter int unsigned SOC_PROFILE = soc_config_pkg::SOC_PROFILE_FULL,
-    parameter bit MM3_ACCEL_ENABLE = 1'b0,
-    parameter int unsigned MM3_MAC_LANES = 16,
     parameter int unsigned RESULT_BYTES = 4
 );
     timeunit 1ns;
@@ -86,7 +84,7 @@ module tb_soc_benchmark #(
         assign gpio_in[g] = gpio_loopback ? (gpio_out[g] & gpio_oe[g]) : '0;
     end
 
-    mm3_soc_compat #(.DDR_BYTES(DDR_BYTES), .MM3_ACCEL_ENABLE(MM3_ACCEL_ENABLE), .MM3_MAC_LANES(MM3_MAC_LANES), .DMA_WIDE_ENABLE(DMA_WIDE_ENABLE), .DMA_BLOCK_ENABLE(DMA_BLOCK_ENABLE), .CACHE_BLOCK_ENABLE(CACHE_BLOCK_ENABLE), .DCACHE_ENABLE(DCACHE_ENABLE),
+    soc_top #(.DDR_BYTES(DDR_BYTES), .DMA_WIDE_ENABLE(DMA_WIDE_ENABLE), .DMA_BLOCK_ENABLE(DMA_BLOCK_ENABLE), .CACHE_BLOCK_ENABLE(CACHE_BLOCK_ENABLE), .DCACHE_ENABLE(DCACHE_ENABLE),
               .LOCAL_TCM_ENABLE(LOCAL_TCM_ENABLE), .SOC_PROFILE(SOC_PROFILE),
               .CLOCK_HZ(CLOCK_HZ), .UART_DIVISOR(UART_DIVISOR)) dut (.*);
     if (DDR_BYTES != 0) begin : g_external

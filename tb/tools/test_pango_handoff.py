@@ -110,16 +110,28 @@ class HandoffTests(unittest.TestCase):
         self.env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ["PATH"],
                         PYTHONDONTWRITEBYTECODE="1")
 
-    def stage(self, width=32, profile="full", local=None, output=None, success=True, backend="legacy", extra=()):
+    def stage(self, width=32, profile="full", local=None, output=None, success=True, backend="legacy", clock=0, extra=()):
         output = output or self.root / f"rv{width}-{profile}-ltcm{local}"
         result = subprocess.run([sys.executable, "-B", str(self.repo / "scripts/pango/prepare_project.py"),
                                  "--xlen", str(width), "--soc-profile", profile,
                                  *(("--local-tcm", str(local)) if local is not None else ()),
-                                 "--core-backend", backend,
+                                 *(("--core-backend", backend) if backend is not None else ()),
+                                 *(("--board-clock-profile", str(clock)) if clock is not None else ()),
                                  "--output", str(output), "--ip-dir", str(self.ip), *extra],
                                 text=True, capture_output=True, env=self.env)
         self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
         return output, result
+
+    def test_default_entry_selects_measured_core_and_four_clocks(self):
+        output, _ = self.stage(backend=None, clock=None)
+        manifest = json.loads((output / "manifest.json").read_text())
+        configuration = verify_staged_manifest(output, manifest)
+        self.assertEqual(configuration["core_backend"], "scoreboard")
+        self.assertEqual(configuration["core_retire_entries"], 16)
+        self.assertEqual(configuration["board_clock_profile"], 1)
+        self.assertEqual(configuration["board_clock_domains_hz"],
+                         {"core": 100000000, "sys": 80000000,
+                          "ddr": 125000000, "periph": 25000000})
 
     def test_p1_defaults_match_simulation_profile(self):
         # 两种入口独立读取的参数必须一致，避免 FPGA 与仿真只共用 P1 名称。
@@ -153,7 +165,7 @@ class HandoffTests(unittest.TestCase):
                     for name in MEMORY_SCRIPTS:
                         self.assertIn(name, manifest["files"])
                     self.assertEqual(configuration["core_backend"], "scoreboard")
-                    self.assertEqual(configuration["core_retire_entries"], 32)
+                    self.assertEqual(configuration["core_retire_entries"], 16)
                     self.assertEqual(configuration["core_split_issue_queue"], 1)
                     self.assertEqual(configuration["core_memory_queue_entries"], 4)
                     self.assertEqual(configuration["core_limited_integer_ooo"], 0)
@@ -198,7 +210,7 @@ class HandoffTests(unittest.TestCase):
         manifest = json.loads((output / "manifest.json").read_text())
         path = output / "compile.tcl"
         original = path.read_text()
-        for before, after in (("CORE_SCOREBOARD=1", ""), ("CORE_RETIRE_ENTRIES=32", "CORE_RETIRE_ENTRIES=4"),
+        for before, after in (("CORE_SCOREBOARD=1", ""), ("CORE_RETIRE_ENTRIES=16", "CORE_RETIRE_ENTRIES=4"),
                               ("CORE_SPLIT_ISSUE_QUEUE=1", "CORE_SPLIT_ISSUE_QUEUE=0"),
                               ("CORE_LOAD_QUEUE_ENTRIES=4", "CORE_LOAD_QUEUE_ENTRIES=1")):
             altered = copy.deepcopy(manifest)

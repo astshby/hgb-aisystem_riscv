@@ -29,6 +29,7 @@ static int maintain(unsigned command)
     return 1;
 }
 
+
 int main(void)
 {
     if (REG(0x10040000) != __riscv_xlen) return 10;

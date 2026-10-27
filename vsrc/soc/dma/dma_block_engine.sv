@@ -2,6 +2,7 @@
 // Description: Two bounded DDR blocks overlap one read and one ordered write with exact narrow fallback and completion prefix.
 module dma_block_engine #(
     parameter int unsigned DDR_BYTES = 0,
+    parameter bit NPU_ENABLE = 0,
     parameter bit WIDE_ENABLE = 1'b0,
     parameter bit UNIFIED_BUS = 1'b0,
     parameter int unsigned FLASH_BYTES = 0
@@ -63,9 +64,19 @@ module dma_block_engine #(
     logic [32:0] src_end, dst_end;
     logic src_allowed, dst_allowed, config_valid;
     logic [31:0] plan_src, plan_dst, plan_remaining, plan_beats, plan_bytes;
-    logic wide_plan, narrow_word, idle_channels;
+    logic wide_plan, narrow_word, idle_channels, npu_transfer;
     logic read_command_fire, read_data_fire, write_command_fire, write_data_fire, write_response_fire;
     logic narrow_request_fire, narrow_response_fire, bad_read_frame;
+
+    // DMA 只能碰无动作的装载/读回窗口。索引、提交、START、POP 由同一软件所有者管理。
+    function automatic logic npu_range(input logic [31:0] address,
+        input logic [32:0] limit, input logic writing);
+        if (!NPU_ENABLE || address[1:0] != 0 || limit[1:0] != 0) return 0;
+        if (writing)
+            return (address >= NPU_SRAM_BASE+32'h60 && limit <= 33'(NPU_SRAM_BASE)+33'h68) ||
+                   (address >= NPU_SRAM_BASE+32'h100 && limit <= 33'(NPU_SRAM_BASE)+33'h180);
+        return (address >= NPU_SRAM_BASE+32'h200 && limit <= 33'(NPU_SRAM_BASE)+33'h250);
+    endfunction
 
     // 与旧引擎同样先验证整个区间；预读不能扩大范围或引入MMIO副作用。
     always_comb begin
@@ -79,7 +90,12 @@ module dma_block_engine #(
         dst_allowed = (start_dst >= ITCM_BASE && dst_end <= 33'(ITCM_BASE) + ITCM_BYTES) ||
                       (start_dst >= DTCM_BASE && dst_end <= 33'(DTCM_BASE) + DTCM_BYTES) ||
                       (DDR_BYTES != 0 && start_dst >= DDR_BASE && dst_end <= 33'(DDR_BASE) + DDR_BYTES);
+        npu_transfer = UNIFIED_BUS && (npu_range(start_src, src_end, 1'b0) ||
+                                      npu_range(start_dst, dst_end, 1'b1));
+        src_allowed |= UNIFIED_BUS && npu_range(start_src, src_end, 1'b0);
+        dst_allowed |= UNIFIED_BUS && npu_range(start_dst, dst_end, 1'b1);
         config_valid = start_length != 0 && src_allowed && dst_allowed &&
+                       (!npu_transfer || ((start_src | start_dst | start_length) & 3) == 0) &&
                        (src_end <= {1'b0, start_dst} || dst_end <= {1'b0, start_src});
     end
 
@@ -129,12 +145,13 @@ module dma_block_engine #(
     always_comb begin
         request = '0;
         request.addr = xlen_t'(32'((narrow_state_q == N_WRITE_REQUEST ? dst_q : src_q) + confirmed_q));
-        request.size = narrow_word ? mem_size_e'($clog2(DBUS_BYTES)) : MEM_BYTE;
+        request.size = narrow_word ? mem_size_e'($clog2(DBUS_BYTES)) :
+                       narrow_bytes_q == 4 ? MEM_WORD : MEM_BYTE;
         if (narrow_state_q == N_WRITE_REQUEST) begin
             request.write = 1'b1;
-            request.wdata = narrow_word ? xlen_t'(data_q[0][0]) :
-                (xlen_t'(8'(data_q[0][0])) << (8 * (request.addr & xlen_t'(32'(DBUS_BYTES-1)))));
-            request.wstrb = narrow_word ? '1 : DBUS_BYTES'(1 << (request.addr & xlen_t'(32'(DBUS_BYTES-1))));
+            request.wdata = xlen_t'(data_q[0][0]) << (8 * (request.addr & xlen_t'(DBUS_BYTES-1)));
+            request.wstrb = DBUS_BYTES'(((1 << narrow_bytes_q)-1) <<
+                (request.addr & xlen_t'(DBUS_BYTES-1)));
         end
     end
     assign req_valid = !rst && (narrow_state_q == N_READ_REQUEST || narrow_state_q == N_WRITE_REQUEST);
@@ -240,7 +257,9 @@ module dma_block_engine #(
                     end else if (idle_channels && slot_valid_q == 0 && reserved_q == confirmed_q) begin
                         narrow_bytes_q <= ((plan_src & (DBUS_BYTES-1)) == 0 &&
                                            (plan_dst & (DBUS_BYTES-1)) == 0 && plan_remaining >= DBUS_BYTES) ?
-                                           32'(DBUS_BYTES) : 32'd1;
+                                           32'(DBUS_BYTES) :
+                                          (NPU_ENABLE && plan_src[1:0] == 0 && plan_dst[1:0] == 0 &&
+                                           plan_remaining >= 4) ? 32'd4 : 32'd1;
                         narrow_state_q <= N_READ_REQUEST;
                     end
                 end
@@ -271,8 +290,8 @@ module dma_block_engine #(
                 N_READ_RESPONSE: if (narrow_response_fire) begin
                     if (response.error != BUS_OK) narrow_state_q <= N_IDLE;
                     else begin
-                        data_q[0][0] <= DDR_DATA_W'(narrow_word ? response.rdata :
-                            xlen_t'(8'(response.rdata >> (8 * ((src_q + confirmed_q) & (DBUS_BYTES-1))))));
+                        data_q[0][0] <= DDR_DATA_W'(response.rdata >>
+                            (8 * ((src_q + confirmed_q) & (DBUS_BYTES-1))));
                         narrow_state_q <= N_WRITE_REQUEST;
                     end
                 end

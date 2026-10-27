@@ -48,7 +48,7 @@ def stage(output, config, bundle, sim_receipt, ip_dir=None):
     image=next(im for im in firmware['images'] if im['scenario']=='tcm' and im['mode']=='performance')
     for name,digest in image['image_sha256'].items():
         if sha(bundle/name)!=digest: raise ValueError('modified frozen firmware: '+name)
-    if config['platform']=='soc_ddr':
+    if config['ddr_bytes'] != 0:
         if config['native_board_profile'] is None or ip_dir is None:
             raise ValueError('full DDR staging requires generated DDR IP and a supported native board clock profile')
         m=config['macros']
@@ -75,6 +75,7 @@ def stage(output, config, bundle, sim_receipt, ip_dir=None):
             command=[sys.executable,str(source/'scripts/pango/prepare_project.py'),'--output',str(output),
                      '--ip-dir',str(ip_dir.resolve()),'--core-backend','scoreboard',
                      '--board-clock-profile',str(config['native_board_profile'])]
+            if config.get('npu_enable'): command += ['--npu-enable']
             for name,macro in flags.items(): command += ['--'+name,str(m[macro])]
             subprocess.run(command,check=True,cwd=source)
         native_manifest=json.loads((output/'manifest.json').read_text())
@@ -100,7 +101,7 @@ def stage(output, config, bundle, sim_receipt, ip_dir=None):
         words=(output/'firmware'/name).read_text().split()
         for bank in (0,1):
             (output/'firmware'/f'{name}.bank{bank}').write_text('\n'.join(words[bank::2])+'\n')
-    if config['platform']=='soc_ddr':
+    if config['ddr_bytes'] != 0:
         # 保留通用板级核验器的文件名；清单明确该 ELF 已换为同份 TCM CoreMark。
         shutil.copyfile(output/'firmware/program.elf',output/'firmware/loader.elf')
         native_manifest['firmware_role']='unified TCM CoreMark, not production Flash loader'
@@ -113,11 +114,11 @@ def stage(output, config, bundle, sim_receipt, ip_dir=None):
         '-File [file join $bench_root memory_gate.ps1] -LogDirectory [file join $bench_root memory] -Phase synthesis]\n'
         'source [file join $bench_root compile.tcl]\nset_option max_threads 1\n'
         'synthesize -ads -selected_syn_tool_opt 2 -max_path 100 -nworst 3 -report_logic_level_distribution -report_exception TRUE\n')
-    for name in ('benchmark_config.py','benchmark_platforms.json'):
+    for name in ('benchmark_config.py','benchmark_platforms.json','hardware_config.py','hardware_profile.json'):
         shutil.copyfile(ROOT/'scripts'/name,output/name)
     shutil.copyfile(sim_receipt,output/'simulation-build.json')
     manifest=dict(schema=1,config=config,firmware=image,firmware_manifest_sha256=sha(bundle/'manifest.json'),
-                  backend='real DDR3 controller and PHY' if config['platform']=='soc_ddr' else 'production TCM RTL; external clock inputs',
+                  backend='real DDR3 controller and PHY' if config['ddr_bytes'] != 0 else 'production TCM RTL; external clock inputs',
                   status='staged inputs only; no synthesis or timing result',
                   simulation_receipt_sha256=sha(sim_receipt),
                   source_branch=subprocess.check_output(['git','branch','--show-current'],cwd=ROOT,text=True).strip(),
@@ -139,7 +140,7 @@ def verify(root):
     for name,digest in sim['source_sha256'].items():
         if name in manifest['files'] and manifest['files'][name]!=digest:
             raise ValueError('synthesis source differs from paired simulation: '+name)
-    if c['platform']=='soc_ddr':
+    if c['ddr_bytes'] != 0:
         board.verify_staged_manifest(root,json.loads((root/'manifest.json').read_text()))
     elif compile_tcm(c) not in (root/'compile.tcl').read_text() or constraints(c)!=(root/'benchmark.fdc').read_text():
         raise ValueError('compiled clocks/macros differ from paired configuration')

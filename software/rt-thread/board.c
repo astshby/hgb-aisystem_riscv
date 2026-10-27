@@ -152,7 +152,7 @@ void hgb_boot(void)
     if (hgb_soc_read_clocks(INFO_BASE, discovery, &hgb_clocks)) hgb_finish(161);
     const unsigned required[] = {HGB_TARGET_ITCM, HGB_TARGET_DTCM, HGB_TARGET_MTIME,
                                 HGB_TARGET_IRQ, HGB_TARGET_UART0, HGB_TARGET_GPIO0, HGB_TARGET_DMA,
-                                HGB_TARGET_SOC};
+                                HGB_TARGET_SOC, HGB_TARGET_DDR};
     for (unsigned n = 0; n < sizeof(required) / sizeof(required[0]); n++)
         if (!hgb_soc_has(hgb_soc_presence, required[n])) hgb_finish(150);
     load_hot_code();

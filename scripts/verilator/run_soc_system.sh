@@ -18,8 +18,8 @@ commands="$log_root/${SYSTEM_TEST_NAME:-soc-system}-rv$xlen.commands.txt"
 : > "$commands"
 image_dir="${SYSTEM_IMAGE_DIR:-build/p2/software-rv$xlen}"
 if [[ -z "${SYSTEM_IMAGE_DIR:-}" ]]; then
-    SOC=1 SOC_DDR="${SOC_DDR:-0}" bash scripts/verilator/build_benchmark_image.sh "$xlen" "$image_dir" \
-        benchmark/bsp/crt0.S benchmark/bsp/runtime.c benchmark/bsp/softarith.c tb/software/soc_system.c \
+    SOC=1 SOC_DDR="${SOC_DDR:-0}" bash scripts/verilator/build_baremetal_image.sh "$xlen" "$image_dir" \
+        software/common/baremetal/crt0.S software/common/baremetal/runtime.c software/common/baremetal/softarith.c tb/software/soc_system.c \
         >"${log_root}/software-build$xlen.log" 2>&1
 fi
 ddr_args=()

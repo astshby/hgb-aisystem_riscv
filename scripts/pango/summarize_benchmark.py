@@ -31,7 +31,7 @@ def summarize(root):
     retained={}
     for row in tables['resource_utilization']:
         name=row.get('Module Inst Name','')
-        if any(token in name for token in ('g_tcm[','u_icache(','u_dcache(','u_ddr_cdc(','I_ips_ddr_top(')):
+        if any(token in name for token in ('g_tcm[','u_icache(','u_dcache(','u_ddr_cdc(','I_ips_ddr_top(','g_npu[','g_npu.','u_npu(')):
             retained[name]={k:v for k,v in row.items() if k in ('LUT','FF','Distributed RAM','APM','DRM','DDR_PHY')}
     worst={}
     same_domain={}

@@ -68,6 +68,10 @@ module tb_core_m_boundary;
             dsp_capture_q <= launch_q && dsp_launch_q;
             if (dut.u_core.mdu_req_valid && dut.u_core.mdu_req_ready) begin
                 launches <= launches + 1;
+                // 请求有效时，简化的 FU 路由必须与完整分类选出的操作数和 ID 相同。
+                assert (dut.u_core.mdu_lane ==
+                        (scoreboard_pkg::schedule_class(dut.u_core.scheduled[0]) != scoreboard_pkg::SCHED_MDU))
+                    else $fatal(1, "MDU payload selector disagrees with authorized lane");
                 launch_pc_q <= dut.observed_mdu_packet.pc;
                 launch_id_q <= dut.observed_mdu_packet.retire_id;
                 assert (dut.observed_mdu_packet.pc inside {xlen_t'(24), xlen_t'(32),

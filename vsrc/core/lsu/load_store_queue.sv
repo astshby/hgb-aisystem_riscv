@@ -51,11 +51,23 @@ module load_store_queue #(
     xlen_t formatted_forward [LQ], forwarded_data [2];
     logic load_busy, store_busy, load_draining, store_draining, store_state_valid;
     retire_id_t store_state_id;
+    logic [1:0] queued_req_valid, admission_valid, admission_request_fire, port_used;
+    logic admission_lane [2];
+    logic [$clog2(LQ)-1:0] allocation_slot [2];
+    logic [$clog2(SQ)-1:0] store_allocation_slot [2];
+    logic [IDX_W-1:0] incoming_slot [2];
+    logic [ENTRIES-1:0] allocated_valid;
+    logic allocated_lane [ENTRIES];
+    logic [ENTRIES-1:0] incoming_after [2];
+    logic incoming_pair_after;
+    memory_request_t queued_request [2];
+    logic admission_eligible [2];
 
     // LQ/SQ 分别拥有容量、描述符、请求状态、返回和完成；此层只路由外部端口与全局仲裁。
     load_queue u_load (
-        .clk, .rst, .flush, .recovery, .head_slot, .head_valid, .head_id,
-        .offer_valid, .issue_fire, .descriptor, .issue_ready(load_ready), .stores, .view(loads),
+        .clk, .rst, .flush, .recovery, .head_slot, .age_order(older), .head_valid, .head_id,
+        .offer_valid, .issue_fire, .descriptor, .issue_ready(load_ready),
+        .admission_request_fire, .allocation_slot, .stores, .view(loads),
         .eligible(eligible[LQ-1:0]), .forwarded(forwarded[LQ-1:0]),
         .done(done_candidates[LQ-1:0]), .kill_now(kill_now[LQ-1:0]),
         .forwarded_data(formatted_forward), .presented(presented[LQ-1:0]),
@@ -65,8 +77,9 @@ module load_store_queue #(
         .response_forward, .completion(slot_completion[0:LQ-1]), .busy(load_busy), .draining(load_draining)
     );
     store_queue u_store (
-        .clk, .rst, .flush, .recovery, .head_slot, .head_valid, .head_id,
-        .offer_valid, .issue_fire, .descriptor, .issue_ready(store_ready), .loads, .view(stores),
+        .clk, .rst, .flush, .recovery, .head_slot, .age_order(older), .head_valid, .head_id,
+        .offer_valid, .issue_fire, .descriptor, .issue_ready(store_ready),
+        .allocation_slot(store_allocation_slot), .loads, .view(stores),
         .eligible(eligible[ENTRIES-1:LQ]), .done(done_candidates[ENTRIES-1:LQ]),
         .kill_now(kill_now[ENTRIES-1:LQ]), .presented(presented[ENTRIES-1:LQ]),
         .request_fire(slot_request_fire[ENTRIES-1:LQ]), .complete_ready(completed_slots[ENTRIES-1:LQ]),
@@ -104,9 +117,40 @@ module load_store_queue #(
         assign slot_forward_fire[slot] =
             (forward_fire[0] && request_select[0][slot]) || (forward_fire[1] && request_select[1][slot]);
         // 统一年龄只用于两类候选的端口仲裁；各队列的读写状态不在此层更新。
-        for (genvar other = 0; other < ENTRIES; other++) begin : g_age
-            assign older[slot][other] = younger_than(entry_q[slot].id, entry_q[other].id, head_slot) ||
-                (entry_q[other].id.slot == entry_q[slot].id.slot && other < slot);
+
+    end
+
+    // 分配沿记录共同存活项的相对年龄；退休头前进不改变它们之间的先后。
+    // 每对仅存一个方向，槽重用与同拍双分配更新对应行/列，不再重复比较整个矩阵。
+    for (genvar lane = 0; lane < 2; lane++) begin : g_incoming_age
+        assign incoming_slot[lane] = descriptor[lane].write ?
+            IDX_W'(LQ) + IDX_W'(store_allocation_slot[lane]) : IDX_W'(allocation_slot[lane]);
+        for (genvar slot = 0; slot < ENTRIES; slot++) begin : g_resident
+            assign incoming_after[lane][slot] = younger_than(descriptor[lane].id, entry_q[slot].id, head_slot);
+        end
+    end
+    assign incoming_pair_after = younger_than(descriptor[0].id, descriptor[1].id, head_slot);
+    for (genvar slot = 0; slot < ENTRIES; slot++) begin : g_age_owner
+        assign allocated_valid[slot] = (issue_fire[0] && incoming_slot[0] == IDX_W'(slot)) ||
+                                      (issue_fire[1] && incoming_slot[1] == IDX_W'(slot));
+        assign allocated_lane[slot] = !(issue_fire[0] && incoming_slot[0] == IDX_W'(slot));
+        assign older[slot][slot] = 0;
+        for (genvar other = 0; other < slot; other++) begin : g_pair
+            logic slot_after_q;
+            assign older[slot][other] = slot_after_q;
+            assign older[other][slot] = !slot_after_q;
+            always_ff @(posedge clk) begin
+                if (!rst) begin
+                    if (allocated_valid[slot] && allocated_valid[other])
+                        slot_after_q <= descriptor[0].id.slot == descriptor[1].id.slot ||
+                            (allocated_lane[slot] ? !incoming_pair_after : incoming_pair_after);
+                    else if (allocated_valid[slot])
+                        slot_after_q <= incoming_after[allocated_lane[slot]][other] ||
+                            descriptor[allocated_lane[slot]].id.slot == entry_q[other].id.slot;
+                    else if (allocated_valid[other])
+                        slot_after_q <= !incoming_after[allocated_lane[other]][slot];
+                end
+            end
         end
     end
 
@@ -142,7 +186,7 @@ module load_store_queue #(
             !(|(load_preceding[slot] & ~request_first));
     end
     always_comb begin
-        mem_req_valid = 0; forward_fire = 0;
+        queued_req_valid = 0; forward_fire = 0;
         for (int portno = 0; portno < 2; portno++) begin
             selected[portno] = '0; selected_descriptor[portno] = '0;
             for (int slot = 0; slot < ENTRIES; slot++) begin
@@ -150,16 +194,76 @@ module load_store_queue #(
                 selected_descriptor[portno] |= entry_q[slot] &
                     {$bits(lsu_descriptor_t){request_select[portno][slot]}};
             end
-            mem_request[portno] = '{id:selected_descriptor[portno].id,
+            queued_request[portno] = '{id:selected_descriptor[portno].id,
                 address:selected_descriptor[portno].address, write:selected_descriptor[portno].write,
                 size:selected_descriptor[portno].size, wdata:selected_descriptor[portno].wdata,
                 wstrb:selected_descriptor[portno].wstrb};
+            // 第二数据口只承接 Load，写载荷不跨请求寄存边界。
+            if (portno == 1) begin
+                queued_request[portno].write = 0;
+                queued_request[portno].wdata = 0;
+                queued_request[portno].wstrb = 0;
+            end
             if ((|request_select[portno]) && (request_locked_q[portno] || (!flush && !recovery.valid))) begin
                 if (!request_locked_q[portno] && (|(forwarded & request_select[portno])))
                     forward_fire[portno] = !rst;
-                else mem_req_valid[portno] = !rst;
+                else queued_req_valid[portno] = !rst;
             end
         end
+    end
+
+    // 利用原有 LQ 分配沿预发无冲突 Load；CPU memory adapter 的请求寄存边界仍保留。
+    // 原队列请求优先。预发受反压时锁定刚分配的槽，下拍地址/ID 保持并照常取消排空。
+    // 同字的老 Store 留给原逐字节转发逻辑；MMIO 读继续等待队头。
+    always_comb begin
+        admission_valid = 0;
+        port_used[0] = |request_select[0];
+        port_used[1] = |request_select[1];
+        for (int portno = 0; portno < 2; portno++) admission_lane[portno] = 0;
+        for (int lane = 0; lane < 2; lane++) begin
+            admission_eligible[lane] = issue_fire[lane] && !descriptor[lane].write &&
+                speculative_ram(descriptor[lane].address) && !rst && !flush && !recovery.valid;
+            for (int store = 0; store < SQ; store++)
+                if (stores[store].valid && !stores[store].killed &&
+                    (!speculative_ram(stores[store].descriptor.address) ||
+                     (descriptor[lane].address >> $clog2(DBUS_BYTES)) ==
+                     (stores[store].descriptor.address >> $clog2(DBUS_BYTES))))
+                    admission_eligible[lane] = 0;
+            for (int load = 0; load < LQ; load++)
+                if (loads[load].valid && !loads[load].killed &&
+                    !speculative_ram(loads[load].descriptor.address)) admission_eligible[lane] = 0;
+            if (lane == 1 && issue_fire[0] &&
+                (!speculative_ram(descriptor[0].address) ||
+                 (descriptor[0].write &&
+                  (descriptor[0].address >> $clog2(DBUS_BYTES)) ==
+                  (descriptor[1].address >> $clog2(DBUS_BYTES))))) admission_eligible[lane] = 0;
+            if (admission_eligible[lane]) begin
+                if (!port_used[0]) begin
+                    admission_valid[0] = 1; admission_lane[0] = 1'(lane); port_used[0] = 1;
+                end else if (!port_used[1]) begin
+                    admission_valid[1] = 1; admission_lane[1] = 1'(lane); port_used[1] = 1;
+                end
+            end
+        end
+    end
+    always_comb begin
+        mem_req_valid = queued_req_valid;
+        mem_request = queued_request;
+        for (int portno = 0; portno < 2; portno++) begin
+            if (admission_valid[portno]) begin
+                mem_req_valid[portno] = 1;
+                mem_request[portno] = '{id:descriptor[admission_lane[portno]].id,
+                    address:descriptor[admission_lane[portno]].address, write:1'b0,
+                    size:descriptor[admission_lane[portno]].size, wdata:'0, wstrb:'0};
+            end
+        end
+    end
+
+    always_comb begin
+        admission_request_fire = 0;
+        for (int portno = 0; portno < 2; portno++)
+            if (admission_valid[portno])
+                admission_request_fire[admission_lane[portno]] = mem_req_ready[portno];
     end
 
     if (COMPLETION_PORTS == ENTRIES) begin : g_slot_completion
@@ -248,7 +352,8 @@ module load_store_queue #(
             for (int portno = 0; portno < 2; portno++) begin
                 request_locked_q[portno] <= mem_req_valid[portno] && !mem_req_ready[portno];
                 if (mem_req_valid[portno] && !mem_req_ready[portno])
-                    request_owner_q[portno] <= selected[portno];
+                    request_owner_q[portno] <= admission_valid[portno] ?
+                        IDX_W'(allocation_slot[admission_lane[portno]]) : selected[portno];
             end
         end
     end

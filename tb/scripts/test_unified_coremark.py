@@ -2,15 +2,28 @@
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
+import tempfile
+import json
+import os
 
 ROOT=Path(__file__).resolve().parents[2]
 sys.path[:0]=[str(ROOT/'scripts'),str(ROOT/'scripts/pango'),str(ROOT/'scripts/verilator')]
 from benchmark_config import CONFIG, configuration, score
 from prepare_benchmark import compile_tcm, constraints
 import run_p2_coremark as p2
+import run_unified_coremark as unified
 
 
 class UnifiedCoreMarkTest(unittest.TestCase):
+    def test_optimization_level_cannot_reuse_other_firmware(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bundle=Path(directory)
+            (bundle/'manifest.json').write_text(json.dumps(dict(iterations=2,modes=['performance'],optimization='O2')))
+            with patch.dict(os.environ,SOFTWARE_OPT='O3'):
+                with self.assertRaisesRegex(ValueError,'selection differs'):
+                    unified.freeze(bundle,2,['performance'])
+
     def test_three_platform_domains(self):
         self.assertEqual(configuration('core_tcm')['domains'],['core'])
         self.assertEqual(configuration('soc_tcm')['domains'],['core','sys','periph'])

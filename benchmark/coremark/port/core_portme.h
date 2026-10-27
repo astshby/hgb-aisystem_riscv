@@ -9,10 +9,13 @@
 #define HAS_PRINTF 0
 
 #define COMPILER_VERSION "GCC " __VERSION__
+#ifndef HGB_OPT_LEVEL
+#define HGB_OPT_LEVEL "-O2"
+#endif
 #if __riscv_xlen == 32
-#define COMPILER_FLAGS "-O2 -march=rv32im_zicsr -mabi=ilp32"
+#define COMPILER_FLAGS HGB_OPT_LEVEL " -march=rv32im_zicsr -mabi=ilp32"
 #else
-#define COMPILER_FLAGS "-O2 -march=rv64im_zicsr -mabi=lp64"
+#define COMPILER_FLAGS HGB_OPT_LEVEL " -march=rv64im_zicsr -mabi=lp64"
 #endif
 #ifndef MEM_LOCATION
 #define MEM_LOCATION "Static data in one-cycle simulated DMem"

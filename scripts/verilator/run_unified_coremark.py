@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Three runnable hardware configurations, frozen firmware and explicit clock ratios."""
+"""Runnable Core/SoC/NPU hardware configurations, frozen firmware and explicit clock ratios."""
 import argparse
 import json
 import os
@@ -35,7 +35,7 @@ def run(command, log, cwd=ROOT, env=None):
 def freeze(bundle, iterations, modes):
     if bundle.exists():
         manifest = json.loads((bundle / 'manifest.json').read_text())
-        if manifest['iterations'] != iterations or not set(modes).issubset(manifest['modes']):
+        if manifest['iterations'] != iterations or manifest.get('optimization', 'O2') != p2.optimization() or not set(modes).issubset(manifest['modes']):
             raise ValueError('existing firmware selection differs; choose a new bundle')
         p2.verify_hashes(bundle / 'source', manifest['source_sha256'])
         for im in manifest['images']:
@@ -43,8 +43,8 @@ def freeze(bundle, iterations, modes):
         return manifest
     bundle.mkdir(parents=True)
     inputs = set(p2.SOFTWARE_INPUTS) | {Path(p) for p in TCM_SOURCES} | {
-        Path('benchmark/bsp/link_soc.ld'), Path('benchmark/p2/link_soc_coremark_tcm.ld'),
-        Path('scripts/verilator/build_benchmark_image.sh')}
+        Path('software/common/baremetal/link_soc.ld'), Path('benchmark/p2/link_soc_coremark_tcm.ld'),
+        Path('scripts/verilator/build_baremetal_image.sh')}
     hashes = p2.copy_sources(sorted(inputs), bundle / 'source')
     tools = str(Path(os.environ['RISCV_TOOL_ROOT']) / 'riscv64-unknown-elf-')
     images = []
@@ -56,14 +56,14 @@ def freeze(bundle, iterations, modes):
             flags = ['-Ibenchmark/coremark/port', '-Ibenchmark/coremark/vendor/coremark',
                      f'-DITERATIONS={iterations}', '-DTOTAL_DATA_SIZE=2000', f'-D{mode.upper()}_RUN=1']
             if scenario == 'tcm':
-                command = ['bash', 'scripts/verilator/build_benchmark_image.sh', '32', str(out),
+                command = ['bash', 'scripts/verilator/build_baremetal_image.sh', '32', str(out),
                            *flags, '-DMEM_LOCATION="ITCM code and DTCM static data/stack"', *TCM_SOURCES]
                 run(command, out / 'build.log', source, dict(os.environ, SOC='1', SOC_DDR='0'))
             else:
                 command = [tools+'gcc', '-march=rv32im_zicsr', '-mabi=ilp32', '-mcmodel=medany',
-                    '-mno-relax', '-std=gnu99', '-O2', '-g', '-ffreestanding', '-fno-builtin', '-fno-common',
+                    '-mno-relax', '-std=gnu99', '-'+p2.optimization(), '-DHGB_OPT_LEVEL="-'+p2.optimization()+'"', '-g', '-ffreestanding', '-fno-builtin', '-fno-common',
                     '-fno-pie', '-fno-tree-loop-distribute-patterns', '-mstrict-align', '-nostdlib', '-nostartfiles',
-                    '-static', '-no-pie', '-Ibenchmark/p2', '-Ibenchmark/bsp', *flags,
+                    '-static', '-no-pie', '-Ibenchmark/p2', '-Isoftware/common/baremetal', *flags,
                     '-DP2_TCM=1', '-DP2_WARM=0', '-DP2_BACKGROUND=1', '-DP2_TIMER_MODE=0',
                     '-DP2_INTERVAL_PS=100000000', '-DDMA_SOURCE=0x01108000u', '-DDMA_DESTINATION=0x01008000u',
                     '-Wl,--build-id=none,--no-relax', '-Wl,-T,benchmark/p2/link_soc_coremark_tcm.ld',
@@ -94,7 +94,13 @@ def freeze(bundle, iterations, modes):
             im=p2.build_image(args,layer,mode,tools,bundle)
             im['scenario']=layer
             images.append(im)
-    manifest=dict(schema=1,iterations=iterations,modes=modes,source_sha256=hashes,images=images,
+    if 'soc_npu' in CONFIG['platforms']:
+        args.npu=True
+        for mode in modes:
+            im=p2.build_image(args,'background',mode,tools,bundle)
+            im['scenario']='npu_background'
+            images.append(im)
+    manifest=dict(schema=1,optimization=p2.optimization(),iterations=iterations,modes=modes,source_sha256=hashes,images=images,
                   compiler=subprocess.check_output([tools+'gcc','--version'],text=True).splitlines()[0])
     write(bundle/'manifest.json',manifest)
     print(f'PASS unified firmware {len(images)} images: {bundle}',flush=True)
@@ -105,7 +111,7 @@ def build(config, root):
     top=config['sim_top']
     binary=root/('V'+top)
     sources=p2.rtl_sources()
-    sources.update({p:sha(ROOT/p) for p in ('scripts/benchmark_config.py','scripts/benchmark_platforms.json',
+    sources.update({p:sha(ROOT/p) for p in ('scripts/benchmark_config.py','scripts/benchmark_platforms.json','scripts/hardware_profile.json','scripts/hardware_config.py',
                                            'scripts/verilator/run_unified_coremark.py')})
     if binary.exists():
         receipt=json.loads((root/'build.json').read_text())
@@ -125,7 +131,8 @@ def build(config, root):
                     f'-GCORE_PERIOD_PS={periods["core"]}']
     else:
         command += ['tb/soc/axi_system_memory_model.sv','tb/soc/spi_flash_model.sv','tb/soc/tb_soc_system.sv',
-                    f'-GDDR_BYTES={config["ddr_bytes"]}', '-GDDR_MODEL_BYTES=262144', '-GFLASH_BYTES=0',
+                    f'-GDDR_BYTES={config["ddr_bytes"]}', f'-GNPU_ENABLE={config.get("npu_enable",0)}',
+                    f'-GNPU_PERIOD_PS={config.get("npu_period_ps",10000)}', '-GDDR_MODEL_BYTES=262144', '-GFLASH_BYTES=0',
                     f'-GICACHE_ENABLE={config["cache_enable"]}',f'-GDCACHE_ENABLE={config["cache_enable"]}',
                     '-GCLOCK_HZ=125000000',f'-GUART_DIVISOR={(10**12//periods["periph"]+57600)//115200}',
                     *[f'-G{d.upper()}_PERIOD_PS={periods[d]}' for d in DOMAINS]]
@@ -190,7 +197,7 @@ def replay(binary, config, bundle, image, output, receipt):
     name=f'{config["platform"]}-{config["clock"]}-{image["scenario"]}-{image["mode"]}'
     log=output/'results'/(name+'.log')
     im=bundle/image['directory']
-    ddr=image['scenario'] in p2.LAYERS
+    ddr=image['scenario'] in (*p2.LAYERS,'npu_background')
     test=('p2-coremark-' if ddr else 'unified-')+name
     command=[str(binary),f'+IMEM={im}/imem.hex',f'+DMEM={im}/dmem.hex',
              f'+TOHOST={image["symbols"]["tohost"]:x}',f'+CONSOLE={image["symbols"]["sim_console"]:x}',
@@ -199,15 +206,32 @@ def replay(binary, config, bundle, image, output, receipt):
     if ddr or image['scenario']=='tcm_background': command += ['+P2_ROI=01100100','+P2_METRICS','+P2_PLATFORM']
     run(command,log)
     text=log.read_text()
+    if config.get('npu_enable') and f'NPU_HARDWARE enabled=1 period_ps={config["npu_period_ps"]}' not in text:
+        raise ValueError('missing NPU clock/configuration receipt')
     periods=[config['periods_ps'][d] for d in DOMAINS]
-    result=(p2.parse_result(text,image['mode'],image['iterations'],image['scenario'],
+    result=(p2.parse_result(text,image['mode'],image['iterations'],
+                           'background' if image['scenario']=='npu_background' else image['scenario'],
                            expected_core=core_record(config),expected_periods_ps=periods)
             if ddr else parse_tcm(text,image,config))
     result.update(score(image['iterations'],result['cycles'],periods[0]))
+    if config.get('npu_enable'):
+        activity=re.search(r'^NPU_ACTIVITY (.*)$',text,re.M)
+        if not activity: raise ValueError('missing NPU activity record')
+        counters={k:int(v) for k,v in re.findall(r'(\w+)=(\d+)',activity[1])}
+        result['npu_activity']=counters
+        if image['scenario']=='npu_background':
+            work=re.search(r'^NPU_BACKGROUND (.*)$',text,re.M)
+            if not work: raise ValueError('missing checked NPU outputs')
+            values={k:int(v) for k,v in re.findall(r'(\w+)=(\d+)',work[1])}
+            if values.get('errors')!=0 or any(values.get(k,0)<=0 for k in ('roi_tasks','roi_vectors')) or any(counters.get(k,0)<=0 for k in ('roi_cycles','busy','starts','outputs')):
+                raise ValueError('NPU did not compute checked results during CoreMark')
+            result['npu_workload']=dict(values,shape='4x1 Ci8 Co16 kernel1 resident raw INT32; timer polls outputs; independent DDR DMA')
+        elif any(counters.get(k,0) for k in ('busy','starts','outputs')):
+            raise ValueError('idle NPU comparison contained compute activity')
     result.update(config=config,scenario=image['scenario'],mode=image['mode'],iterations=image['iterations'],
         image_sha256=image['image_sha256'],command=shlex.join(command),log=str(log),log_sha256=sha(log),
         binary_sha256=receipt['binary_sha256'],source_commit=receipt['source_commit'],source_branch=receipt['source_branch'],
-        memory_backend='AXI verification RAM, 256 KiB, deterministic stalls; no controller/PHY' if config['platform']=='soc_ddr' else 'production TCM RTL')
+        memory_backend='AXI verification RAM, 256 KiB, deterministic stalls; no controller/PHY' if config['ddr_bytes'] else 'production TCM RTL')
     write(log.with_suffix('.json'),result)
     print(f'PASS {name} cycles={result["cycles"]} CM/MHz={result["coremark_per_core_mhz"]:.6f} CM/s(sim)={result["coremark_per_second_simulated"]:.3f}',flush=True)
     return result
@@ -217,10 +241,10 @@ def functional(binary, config, output, receipt):
     name=f'{config["platform"]}-{config["clock"]}-rv{config["xlen"]}'
     image=output/'functional'/name
     image.mkdir(parents=True,exist_ok=True)
-    sources=['benchmark/bsp/crt0.S','benchmark/bsp/runtime.c','benchmark/bsp/softarith.c',
-             'benchmark/smoke/main.c' if config['platform']=='core_tcm' else 'tb/software/benchmark_platform.c']
-    command=['bash','scripts/verilator/build_benchmark_image.sh',str(config['xlen']),str(image),
-             f'-DBENCH_DDR={int(config["platform"]=="soc_ddr")}',*sources]
+    sources=['software/common/baremetal/crt0.S','software/common/baremetal/runtime.c','software/common/baremetal/softarith.c',
+             'software/common/smoke.c' if config['platform']=='core_tcm' else 'tb/software/benchmark_platform.c']
+    command=['bash','scripts/verilator/build_baremetal_image.sh',str(config['xlen']),str(image),
+             f'-DBENCH_DDR={int(bool(config["ddr_bytes"]))}',f'-DBENCH_NPU={config.get("npu_enable",0)}',*sources]
     build_command=shlex.join(command)
     run(command,image/'build.log',env=dict(os.environ,SOC='1',SOC_DDR='0'))
     nm=subprocess.check_output([str(Path(os.environ['RISCV_TOOL_ROOT'])/'riscv64-unknown-elf-nm'),
@@ -237,7 +261,8 @@ def functional(binary, config, output, receipt):
     write(image/'result.json',dict(config=config,command=shlex.join(command),
         image_build_command=build_command,source_commit=receipt['source_commit'],source_branch=receipt['source_branch'],
         binary_sha256=receipt['binary_sha256'],image_sha256={p.name:sha(p) for p in image.glob('*.hex')},
-        elf_sha256=sha(image/'program.elf'),source_sha256={s:sha(ROOT/s) for s in sources},
+        elf_sha256=sha(image/'program.elf'),source_sha256={s:sha(ROOT/s) for s in
+            sources + (['software/yolo/npu_workload.h'] if config.get('npu_enable') else [])},
         log_sha256=sha(image/'run.log'),status='PASS'))
     print('PASS paired functional '+name,flush=True)
 
@@ -246,9 +271,10 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--bundle',type=Path)
+    parser.add_argument('--models',type=Path,help='Shared immutable RTL model directory across software optimization levels')
     parser.add_argument('--platforms',nargs='+',choices=CONFIG['platforms'],default=list(CONFIG['platforms']))
     parser.add_argument('--clocks',nargs='+',choices=CONFIG['clock_periods_ps'],default=['target'])
-    parser.add_argument('--scenarios',nargs='+',choices=['tcm','tcm_background',*p2.LAYERS])
+    parser.add_argument('--scenarios',nargs='+',choices=sorted({s for p in CONFIG['platforms'].values() for s in p['scenarios']}))
     parser.add_argument('--modes',nargs='+',choices=p2.EXPECTED,default=list(p2.EXPECTED))
     parser.add_argument('--iterations',type=int,default=2)
     parser.add_argument('--build-only',action='store_true')
@@ -258,6 +284,9 @@ def main():
     if args.iterations<=0: parser.error('iterations must be positive')
     if args.build_only and args.functional: parser.error('choose --build-only or --functional')
     if args.xlen==64 and not (args.build_only or args.functional): parser.error('RV64 is functional-only; use --functional')
+    if not (args.build_only or args.functional) and args.scenarios and not any(
+            set(CONFIG['platforms'][p]['scenarios']) & set(args.scenarios) for p in args.platforms):
+        parser.error('selected platforms have no requested scenario')
     os.chdir(ROOT)
     output=args.output.resolve()
     bundle=args.bundle.resolve() if args.bundle else output/'firmware'
@@ -266,7 +295,7 @@ def main():
     for platform in args.platforms:
         for clock in args.clocks:
             config=configuration(platform,clock,args.xlen)
-            binary,receipt=build(config,output/'models'/f'{platform}-{clock}-rv{args.xlen}')
+            binary,receipt=build(config,(args.models.resolve() if args.models else output/'models')/f'{platform}-{clock}-rv{args.xlen}')
             if args.functional:
                 functional(binary,config,output,receipt)
             if firmware:

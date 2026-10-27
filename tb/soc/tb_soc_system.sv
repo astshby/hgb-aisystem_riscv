@@ -12,6 +12,11 @@ module tb_soc_system #(
     parameter int SYS_PERIOD_PS=0,
     parameter int DDR_PERIOD_PS=0,
     parameter int PERIPH_PERIOD_PS=0,
+    parameter bit NPU_ENABLE=0,
+    parameter bit MM3_ENABLE=0,
+    parameter int MM3_MAC_LANES=16,
+    parameter bit AUTO_FINISH=1,
+    parameter int NPU_PERIOD_PS=10000,
     parameter int SOC_PROFILE=soc_config_pkg::SOC_PROFILE_FULL,
     parameter bit ICACHE_ENABLE=1,
     parameter bit DCACHE_ENABLE=1,
@@ -90,7 +95,8 @@ module tb_soc_system #(
     logic test_done,test_pass;
     logic [31:0] test_code;
     logic [31:0] fault_read_addr=32'hffffffff,fault_write_addr=32'hffffffff;
-    int cycles=0,max_cycles;
+    longint unsigned cycles=0,max_cycles;
+    int expected_exit=0;
     string imem_path,dmem_path,ddr_path,test_name;
     logic trace_enable;
     logic completed=0;
@@ -423,13 +429,16 @@ module tb_soc_system #(
             $clog2(dut.u_memory.u_dcache.LINE_BYTES),dut.u_memory.u_dcache.BANK_BIT-1);
     end
 
-    assign external_req='0;
-    assign npu_rsp='0;
+    initial assert (!(NPU_ENABLE || MM3_ENABLE)) else $fatal(1,"accelerator unavailable in this branch");
+    if (1) begin : g_no_npu
+        assign external_req='0;
+        assign npu_rsp='0;
+    end
     assign uart_rx=$test$plusargs("UART_LOOPBACK") ? uart_tx : 2'b11;
     for(genvar g=0;g<3;g++) begin : g_gpio
         assign gpio_in[g]=$test$plusargs("GPIO_LOOPBACK") ? gpio_out[g]&gpio_oe[g] : '0;
     end
-    soc_system #(.DDR_BYTES(DDR_BYTES),.FLASH_BYTES(FLASH_BYTES),.UART_DIVISOR(UART_DIVISOR),
+    soc_system #(.DDR_BYTES(DDR_BYTES),.FLASH_BYTES(FLASH_BYTES),.NPU_BYTES((NPU_ENABLE || MM3_ENABLE) ? 65536 : 0),.UART_DIVISOR(UART_DIVISOR),
         .CLOCK_INFO_ENABLE(1),.CORE_CLOCK_HZ(frequency_hz(0)),.SYS_CLOCK_HZ(frequency_hz(1)),
         .DDR_CLOCK_HZ(DDR_BYTES!=0 ? frequency_hz(2) : 0),.PERIPH_CLOCK_HZ(frequency_hz(3)),
         .SOC_PROFILE(SOC_PROFILE),.ICACHE_ENABLE(ICACHE_ENABLE),.DCACHE_ENABLE(DCACHE_ENABLE),.CLOCK_HZ(CLOCK_HZ)) dut(.*);
@@ -465,7 +474,8 @@ module tb_soc_system #(
         if(!$value$plusargs("CONSOLE=%h",console_addr)) console_addr='1;
         if(!$value$plusargs("TEST=%s",test_name)) test_name="soc-system";
         if(!$value$plusargs("MAX_CYCLES=%d",max_cycles)) max_cycles=3000000;
-        trace_enable=$test$plusargs("TRACE");
+        trace_enable=$test$plusargs("TRACE_CORE");
+        void'($value$plusargs("EXPECTED_EXIT=%d",expected_exit));
         void'($value$plusargs("FAULT_READ=%h",fault_read_addr));
         void'($value$plusargs("FAULT_WRITE=%h",fault_write_addr));
         p2_metrics_enable=$test$plusargs("P2_METRICS");
@@ -529,7 +539,7 @@ module tb_soc_system #(
                     assert(p2_metrics_enable&&roi_ddr_retired==0&&roi_ddr_if==0&&roi_ddr_data==0)
                         else $fatal(1,"M1 measured window executed/accessed DDR or metrics disabled");
                 end
-                assert(test_pass) else $fatal(1,"FAIL %s code=%0d pc=%h",test_name,test_code,commit_pc);
+                assert(test_code==((32'(expected_exit)<<1)|32'd1)) else $fatal(1,"FAIL %s code=%0d pc=%h",test_name,test_code,commit_pc);
                 if(p2_roi_enable) begin
                     assert(p2_roi_seen && p2_roi_phase==2) else $fatal(1,"P2 ROI did not start/end");
                     $display("P2_ROI core_cycles=%0d sys_cycles=%0d cpu_ddr_ar=%0d cpu_ddr_aw=%0d dma_ar=%0d dma_aw=%0d dma_rbeats=%0d dma_wbeats=%0d max_cpu_ar_wait=%0d max_dma_ar_wait=%0d",
@@ -543,6 +553,6 @@ module tb_soc_system #(
             end
         end
         if (!completed) $fatal(1,"TIMEOUT %s pc=%h inst=%h cycles=%0d",test_name,commit_pc,commit_inst,cycles);
-        $finish;
+        if (AUTO_FINISH) $finish;
     end
 endmodule

@@ -51,6 +51,13 @@ def check_core_profile(config, expected):
         raise ValueError(f'Core configuration does not match explicit {expected} profile')
 
 
+def optimization():
+    value = os.environ.get('SOFTWARE_OPT', 'O3')
+    if value not in ('O2', 'O3', 'Ofast'):
+        raise ValueError('SOFTWARE_OPT must be O2, O3 or Ofast')
+    return value
+
+
 def soc_build_configuration(clock_profile=1, icache_fill_bytes=4):
     if clock_profile not in CLOCKS or icache_fill_bytes not in (4, 8):
         raise ValueError('invalid static SoC clock profile or I-cache install width')
@@ -464,13 +471,13 @@ def parse_result(text, mode, iterations, layer, expected_core=None, expected_soc
 
 
 SOFTWARE_SOURCES = [Path(p) for p in (
-    'benchmark/bsp/crt0.S', 'benchmark/bsp/runtime.c', 'benchmark/bsp/softarith.c',
+    'software/common/baremetal/crt0.S', 'software/common/baremetal/runtime.c', 'software/common/baremetal/softarith.c',
     'benchmark/p2/timing.S', 'benchmark/p2/core_portme.c', 'benchmark/coremark/port/ee_printf.c',
     *('benchmark/coremark/vendor/coremark/' + name for name in
       ('core_list_join.c', 'core_main.c', 'core_matrix.c', 'core_state.c', 'core_util.c')))]
 SOFTWARE_INPUTS = SOFTWARE_SOURCES + [Path(p) for p in (
     'benchmark/p2/core_portme.h', 'benchmark/coremark/port/core_portme.h',
-    'benchmark/p2/link_soc_coremark_ddr.ld', 'benchmark/bsp/benchmark_runtime.h',
+    'benchmark/p2/link_soc_coremark_ddr.ld', 'software/common/baremetal/benchmark_runtime.h',
     'benchmark/coremark/vendor/coremark/coremark.h', 'benchmark/coremark/vendor/coremark/LICENSE.md',
     'scripts/verilator/verilog_hex_to_mem.py', 'scripts/verilator/run_p2_coremark.py')]
 
@@ -502,22 +509,24 @@ def verify_hashes(base, hashes):
 
 
 def build_image(args, layer, mode, tools, frozen):
-    output = frozen / f'{layer}-{mode}'
+    output = frozen / f'{"npu_" if getattr(args,"npu",False) else ""}{layer}-{mode}'
     output.mkdir()
     source_root = frozen / 'source'
     warm, background = LAYERS[layer]
     vendor = source_root / 'benchmark/coremark/vendor/coremark'
     elf = output / 'program.elf'
     command = [tools + 'gcc', '-march=rv32im_zicsr', '-mabi=ilp32', '-mcmodel=medany',
-        '-mno-relax', '-std=gnu99', '-O2', '-g', '-ffreestanding', '-fno-builtin', '-fno-common',
+        '-mno-relax', '-std=gnu99', '-'+optimization(), '-DHGB_OPT_LEVEL="-'+optimization()+'"', '-g', '-ffreestanding', '-fno-builtin', '-fno-common',
         '-fno-pie', '-fno-tree-loop-distribute-patterns', '-mstrict-align', '-nostdlib', '-nostartfiles',
         '-static', '-no-pie', '-I' + str(source_root / 'benchmark/p2'),
-        '-I' + str(source_root / 'benchmark/bsp'), '-I' + str(vendor),
+        '-I' + str(source_root / 'software/common/baremetal'), '-I' + str(vendor),
         '-DITERATIONS=' + str(args.iterations), '-DTOTAL_DATA_SIZE=2000', '-D' + mode.upper() + '_RUN=1',
         '-DP2_WARM=' + str(warm), '-DP2_BACKGROUND=' + str(background),
         '-DP2_TIMER_MODE=' + str(int(args.timer_mode == 'legacy')), '-DP2_INTERVAL_PS=' + str(args.irq_period_us * 1000000),
         '-Wl,--build-id=none,--no-relax', '-Wl,-T,' + str(source_root / 'benchmark/p2/link_soc_coremark_ddr.ld'),
         '-Wl,-Map,' + str(output / 'program.map'), *[str(source_root / p) for p in SOFTWARE_SOURCES], '-o', str(elf)]
+    if getattr(args, 'npu', False):
+        command.insert(1, '-DP2_NPU=1')
     run(command, output / 'build.log')
     if subprocess.check_output([tools + 'nm', '-u', str(elf)], text=True).strip():
         raise ValueError('unresolved ELF symbols')
@@ -601,7 +610,7 @@ def load_frozen(path):
 
 
 def rtl_sources():
-    return {str(p): sha(p) for pattern in ('vsrc/**/*.sv', 'vsrc/**/*.svh', 'vsrc/**/*.vh',
+    return {str(p): sha(p) for pattern in ('vsrc/**/*.sv', 'vsrc/**/*.svh', 'vsrc/**/*.vh', 'third_party/yolo_npu128/**/*.sv',
                                           'tb/soc/*.sv', 'tb/soc/*.svh', 'tb/common/*.sv',
                                           'tb/common/*.svh', 'tb/common/*.vh', 'tb/benchmark/*.sv', 'scripts/*.f',
                                           'scripts/verilator/p2_core_config.sh',

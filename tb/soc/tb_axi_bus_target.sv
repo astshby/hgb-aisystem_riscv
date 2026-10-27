@@ -1,7 +1,8 @@
 // Module: tb_axi_bus_target
 // Description: Cycle comparison of AXI scalar addressing under burst, overlap, errors and backpressure.
 module tb_axi_bus_target #(
-    parameter bit READ_ONLY = 0
+    parameter bit READ_ONLY = 0,
+    parameter int LOCAL_BYTES = core_config_pkg::DBUS_BYTES
 );
     timeunit 1ns;
     timeprecision 1ps;
@@ -20,8 +21,8 @@ module tb_axi_bus_target #(
     int local_reads = 0, local_writes = 0, stalls = 0, overlaps = 0;
 
     always #5 clk = ~clk;
-    axi_bus_target #(.READ_ONLY(READ_ONLY)) dut (.*);
-    axi_bus_target_reference #(.READ_ONLY(READ_ONLY)) reference_target (
+    axi_bus_target #(.READ_ONLY(READ_ONLY), .LOCAL_BYTES(LOCAL_BYTES)) dut (.*);
+    axi_bus_target_reference #(.READ_ONLY(READ_ONLY), .LOCAL_BYTES(LOCAL_BYTES)) reference_target (
         .clk, .rst, .axi_req, .axi_rsp(reference_rsp), .request(reference_request),
         .req_valid(reference_valid), .req_ready, .rsp_valid,
         .rsp_ready(reference_ready), .response
@@ -162,8 +163,8 @@ module tb_axi_bus_target #(
         join
         assert (local_reads > 0 && stalls > 0 && overlaps > 0 && read_errors > 0 && write_errors > 0 &&
                 (READ_ONLY ? local_writes == 0 : local_writes > 0)) else $fatal(1, "AXI coverage missing");
-        $display("PASS tb_axi_bus_target RV%0d RO%0d checks=%0d reads=%0d writes=%0d beats=%0d local=%0d/%0d errors=%0d/%0d stalls=%0d overlaps=%0d",
-                 XLEN,READ_ONLY,checks,reads,writes,read_beats,local_reads,local_writes,read_errors,write_errors,stalls,overlaps);
+        $display("PASS tb_axi_bus_target RV%0d RO%0d local_bytes=%0d checks=%0d reads=%0d writes=%0d beats=%0d local=%0d/%0d errors=%0d/%0d stalls=%0d overlaps=%0d",
+                 XLEN,READ_ONLY,LOCAL_BYTES,checks,reads,writes,read_beats,local_reads,local_writes,read_errors,write_errors,stalls,overlaps);
         $finish;
     end
     initial begin #5ms; $fatal(1, "AXI target timeout"); end

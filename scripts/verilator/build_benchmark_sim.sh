@@ -32,9 +32,6 @@ if [[ "${SOC:-0}" == "1" ]]; then
                     "-GDMA_BLOCK_ENABLE=${bench_dma_block_enable}"
                     "-GCACHE_BLOCK_ENABLE=${bench_cache_block_enable}"
                     "-GSOC_PROFILE=${bench_soc_profile_id}")
-    if [[ "$bench_top" == tb_soc_benchmark ]]; then
-        extra_options+=("-GMM3_ACCEL_ENABLE=${bench_mm3_accel_enable}" "-GMM3_MAC_LANES=${bench_mm3_mac_lanes}")
-    fi
 fi
 verilator -Wall -Wno-fatal --assert --timing --binary -j 2 \
     "${core_microarch_flags[@]}" \

@@ -14,13 +14,17 @@ source scripts/verilator/benchmark_platform.sh
 tool_root="${RISCV_TOOL_ROOT:?set RISCV_TOOL_ROOT to the toolchain bin directory}"
 tool_prefix="${tool_root}/riscv64-unknown-elf-"
 sim_dir="build/verilator/benchmark-rv${xlen}-${config}"
+opt="${SOFTWARE_OPT:-O3}"
+case "$opt" in O2|O3|Ofast) ;; *) echo "SOFTWARE_OPT must be O2, O3 or Ofast" >&2; exit 2;; esac
+# RTL 模型与优化等级无关；软件镜像及日志各自保存。
+config="${config}-${opt}"
 coremark_root="benchmark/coremark/vendor/coremark"
 target_ticks=11000000
 
 coremark_sources=(
-    benchmark/bsp/crt0.S
-    benchmark/bsp/runtime.c
-    benchmark/bsp/softarith.c
+    software/common/baremetal/crt0.S
+    software/common/baremetal/runtime.c
+    software/common/baremetal/softarith.c
     benchmark/coremark/port/core_portme.c
     benchmark/coremark/port/ee_printf.c
     "${coremark_root}/core_list_join.c"
@@ -41,7 +45,7 @@ build_image() {
     else
         mode_define="-DVALIDATION_RUN=1"
     fi
-    bash scripts/verilator/build_benchmark_image.sh "${xlen}" "${output_dir}" \
+    bash scripts/verilator/build_baremetal_image.sh "${xlen}" "${output_dir}" \
         -I benchmark/coremark/port \
         -I "${coremark_root}" \
         -DITERATIONS="${iterations}" \
