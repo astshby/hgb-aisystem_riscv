@@ -11,17 +11,17 @@ module tb_soc_profile #(
     import bus_types_pkg::*;
     import soc_addr_pkg::*;
     // 独立期望表，不能从 DUT 读到的 mask 推导同一测试的期望值。
-    localparam logic [14:0] EXPECT_PRESENT = (SOC_PROFILE == 0 ? 15'h3fff : 15'h327f) |
-                                           (DDR_BYTES == 0 ? 15'h0000 : 15'h4000);
+    localparam logic [15:0] EXPECT_PRESENT = (SOC_PROFILE == 0 ? 16'h3fff : 16'h327f) |
+                                           (DDR_BYTES == 0 ? 16'h0000 : 16'h4000);
     localparam logic [31:0] OPTIONAL_BASE [4] = '{UART1_BASE, TIMER_BASE, GPIO1_BASE, GPIO2_BASE};
     logic clk = 0, rst = 1;
     logic [1:0] m_req_valid = '0, m_req_ready, m_rsp_valid, m_rsp_ready = '0;
     bus_req_t m_request [2];
     bus_rsp_t m_response [2];
-    logic [14:0] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready;
-    bus_req_t s_request [15];
-    bus_rsp_t s_response [15];
-    bus_error_e s_error [15];
+    logic [15:0] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready;
+    bus_req_t s_request [16];
+    bus_rsp_t s_response [16];
+    bus_error_e s_error [16];
     logic [1:0] uart_rx = '1, uart_tx;
     logic [31:0] gpio_in [3] = '{default:'0}, gpio_out [3], gpio_oe [3];
     logic irq_software, irq_timer, irq_external;
@@ -142,7 +142,7 @@ module tb_soc_profile #(
         read32(SOC_BASE, 32'(XLEN));
         read32(SOC_BASE + 8, 65536);
         read32(SOC_BASE + 12, 65536);
-        read32(SOC_BASE + 'h38, {17'b0, EXPECT_PRESENT});
+        read32(SOC_BASE + 'h38, {16'b0, EXPECT_PRESENT});
         read32(SOC_BASE + 'h3c, 32'h00010000 | SOC_PROFILE);
         transfer(xlen_t'(SOC_BASE + 'h38), 1, '1, MEM_WORD, 0, 4'hf, BUS_SLVERR, value);
         transfer(xlen_t'(SOC_BASE + 'h3c), 1, '1, MEM_WORD, 0, 4'hf, BUS_SLVERR, value);

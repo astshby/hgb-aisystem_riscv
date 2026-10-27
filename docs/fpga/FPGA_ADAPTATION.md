@@ -2,6 +2,10 @@
 
 > 写作约束：[skills/regulation.md](../../../skills/regulation.md)。本文记录工具、流程、约束和结果，不把工具 Fmax 写成板上频率。
 
+当前公共合并分支为 `baseline-all`，加速路线分为 `baseline-yolo` 与
+`baseline-minimind`。本轮没有运行 PDS；下文已有频率/资源表按各自旧版本阅读，
+不能作为合并版或 MiniMind 的时序验收。后续两路线使用独立工程和相同测量规则。
+
 当前开发基线固定为 `baseline-rv32-soc-npu-20261027`，采用下面 `aaf63f9` 的系统
 地址优化及 ROB16/四平台/NPU 配置；`e1598be` 只作为本地比较。发布快照与选定
 测量源逐文件匹配，本次冻结未新增 RTL 或重跑 PDS。核级 104.7120 MHz 仍属于

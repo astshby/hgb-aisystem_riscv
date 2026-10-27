@@ -23,10 +23,10 @@ module tb_soc_local_tcm #(
     logic [2:0] f_req_valid, f_req_ready, f_rsp_valid, f_rsp_ready;
     bus_req_t f_request [3];
     bus_rsp_t f_response [3];
-    logic [14:0] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready;
-    bus_req_t s_request [15];
-    bus_rsp_t s_response [15];
-    bus_error_e s_error [15];
+    logic [15:0] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready;
+    bus_req_t s_request [16];
+    bus_rsp_t s_response [16];
+    bus_error_e s_error [16];
     logic [1:0] bank_allow, bank_ready, bank_req_valid, bank_rsp_valid, bank_rsp_ready;
     bus_req_t bank_request [2];
     bus_rsp_t bank_response [2];
@@ -44,9 +44,9 @@ module tb_soc_local_tcm #(
     bus_req_t accepted_request [3], held_m_request [3], held_f_request [3];
     bus_rsp_t expected_response [3], held_m_response [3], held_f_response [3];
     logic [2:0] hold_m_req, hold_f_req, hold_m_rsp, hold_f_rsp;
-    bus_req_t held_s_request [15];
-    bus_rsp_t held_s_response [15];
-    logic [14:0] hold_s_req, hold_s_rsp;
+    bus_req_t held_s_request [16];
+    bus_rsp_t held_s_response [16];
+    logic [15:0] hold_s_req, hold_s_rsp;
     int accepted [3], issued [3], returned [3], completed [3], quota [3];
     int accept_cycle [3], last_accept [3], first_accept [3], last_complete [3];
     int interval_min [3], interval_max [3], interval_sum [3];
@@ -99,7 +99,7 @@ module tb_soc_local_tcm #(
                 else $fatal(1, "hot/slow paths simultaneously own a master");
         end
     end
-    bus_interconnect #(.MASTERS(3), .PRESENT(LOCAL_TCM_ENABLE ? 15'h0001 : 15'h000d),
+    bus_interconnect #(.MASTERS(3), .PRESENT(LOCAL_TCM_ENABLE ? 16'h0001 : 16'h000d),
                        .DATA_PRIORITY(1'b1)) u_fabric (
         .clk, .rst, .m_req_valid(slow_f_req_valid), .m_req_ready(slow_f_req_ready), .m_request(slow_f_request),
         .m_rsp_valid(slow_f_rsp_valid), .m_rsp_ready(slow_f_rsp_ready), .m_response(slow_f_response),
@@ -158,7 +158,7 @@ module tb_soc_local_tcm #(
                         else $fatal(1, "memory side effect bank=%0d word=%0d cycle=%0d", bank, w, cycle_count);
         end
     end
-    for (genvar s = 1; s < 15; s++) begin : g_absent
+    for (genvar s = 1; s < 16; s++) begin : g_absent
         if (s != 2 && s != 3) begin
             assign s_req_ready[s] = 1'b0;
             assign s_rsp_valid[s] = 1'b0;
@@ -222,7 +222,7 @@ module tb_soc_local_tcm #(
             cycle_count++;
             master_fires = 0;
             slave_fires = 0;
-            for (int s = 0; s < 15; s++) begin
+            for (int s = 0; s < 16; s++) begin
                 if (hold_s_req[s])
                     assert (s_req_valid[s] && s_request[s] === held_s_request[s]) else $fatal(1, "slave request changed s=%0d", s);
                 if (hold_s_rsp[s])

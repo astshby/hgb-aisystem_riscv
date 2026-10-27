@@ -15,10 +15,10 @@ module tb_bus_locked_grant #(
     logic [2:0] m_req_valid, m_req_ready, m_rsp_valid, m_rsp_ready;
     bus_req_t m_request[3];
     bus_rsp_t m_response[3];
-    logic [14:0] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready;
-    bus_req_t s_request[15];
-    bus_rsp_t s_response[15];
-    bus_error_e s_error[15];
+    logic [15:0] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready;
+    bus_req_t s_request[16];
+    bus_rsp_t s_response[16];
+    bus_error_e s_error[16];
     logic allow_request;
     logic [2:0] accepted_this_edge, pending;
     xlen_t expected_response[3];
@@ -33,7 +33,7 @@ module tb_bus_locked_grant #(
 
     // 通用从端可任意反压，不依赖 TCM ready 的特殊实现；响应寄存并保持至接收。
     assign s_req_ready[BANK] = allow_request && (!s_rsp_valid[BANK] || s_rsp_ready[BANK]);
-    for (genvar s = 0; s < 15; s++) begin : g_other_bank
+    for (genvar s = 0; s < 16; s++) begin : g_other_bank
         if (s != BANK) begin
             assign s_req_ready[s] = 1'b0;
             assign s_rsp_valid[s] = 1'b0;

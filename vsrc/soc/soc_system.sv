@@ -52,9 +52,9 @@ module soc_system #(
     import bus_types_pkg::*;
     import block_types_pkg::*;
     import axi_types_pkg::*;
-    localparam logic [14:0] DEVICE_PRESENT =
+    localparam logic [15:0] DEVICE_PRESENT =
         (SOC_PROFILE == soc_config_pkg::SOC_PROFILE_LITE ? soc_config_pkg::SOC_LITE_PRESENT : soc_config_pkg::SOC_FULL_PRESENT) |
-        (DDR_BYTES != 0 ? 15'h4000 : 15'h0000);
+        (DDR_BYTES != 0 ? 16'h4000 : 16'h0000);
     logic rst_core, rst_sys, rst_ddr, rst_periph;
     soc_reset_controller u_reset (.reset_async,.clk_core,.clk_sys,.clk_ddr,.clk_periph,
         .rst_core,.rst_sys,.rst_ddr,.rst_periph);

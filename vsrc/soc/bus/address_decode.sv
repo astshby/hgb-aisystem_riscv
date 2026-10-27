@@ -25,7 +25,7 @@ module address_decode #(
 
     logic [64:0] address;
     // 参数设定命中区域（其实就是枚举常量）
-    logic [TARGET_DDR:TARGET_ROM] region_hit;
+    logic [TARGET_MM3:TARGET_ROM] region_hit;
     logic [2:0] alignment_mask;
     logic executable, writable, word_only, is_word;
     logic misaligned, ddr_boundary_error;
@@ -48,6 +48,7 @@ module address_decode #(
     assign region_hit[TARGET_GPIO2] = (address & MMIO_MASK) == 65'(GPIO2_BASE);
     assign region_hit[TARGET_DMA] = (address & MMIO_MASK) == 65'(DMA_BASE);
     assign region_hit[TARGET_SOC] = (address & MMIO_MASK) == 65'(SOC_BASE);
+    assign region_hit[TARGET_MM3] = (address & MMIO_MASK) == 65'(MM3_BASE);
     // DDR 实际容量未必为二次幂；满足窗口对齐时使用高位匹配，否则保留起始地址范围比较。
     if (DDR_BYTES == 0) begin : g_no_ddr
         assign region_hit[TARGET_DDR] = 1'b0;
@@ -77,13 +78,14 @@ module address_decode #(
             region_hit[TARGET_DMA]: target = TARGET_DMA;
             region_hit[TARGET_SOC]: target = TARGET_SOC;
             region_hit[TARGET_DDR]: target = TARGET_DDR;
+            region_hit[TARGET_MM3]: target = TARGET_MM3;
             default: ;
         endcase
     end
     // 默认不可取指、可写；普通内存支持字节/半字/字及 RV64 双字，IRQ/MMIO 只支持字。
     assign executable = region_hit[TARGET_ROM] || region_hit[TARGET_ITCM] || region_hit[TARGET_DDR];
     assign writable = !region_hit[TARGET_ROM];
-    assign word_only = region_hit[TARGET_IRQ] || (|region_hit[TARGET_SOC:TARGET_UART0]);
+    assign word_only = region_hit[TARGET_MM3] || region_hit[TARGET_IRQ] || (|region_hit[TARGET_SOC:TARGET_UART0]);
 
     // 访问自然对齐；固定窗口和 8 B 对齐的 DDR 末端无需逐次算访问终点。
     always_comb begin

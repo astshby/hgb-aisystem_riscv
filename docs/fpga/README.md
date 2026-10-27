@@ -2,8 +2,10 @@
 
 > 写作约束：[skills/regulation.md](../../../skills/regulation.md)。详细流程、结果和边界见 [FPGA_ADAPTATION.md](FPGA_ADAPTATION.md)。
 
-当前开发基线为 `baseline-rv32-soc-npu-20261027`，固定下述地址递增单项、ROB16
-和 128-MAC NPU；工作时钟目标保持 100/80/125/25/100 MHz。当前版本未布局布线。
+公共集成分支现为 `baseline-all`，`baseline-yolo` 与 `baseline-minimind` 分别开发。
+本轮只运行仿真，未重新综合或布线。下述数值属于冻结标签
+`baseline-rv32-soc-npu-20261027` 的 YOLO 路线，工作时钟目标为
+100/80/125/25/100 MHz；MiniMind 单时钟兼容系统尚无匹配 FPGA 测量。
 
 2026-10-27 系统路径选择 `soc/tcm-stream-address@aaf63f9`：完整 SoC+NPU 综合
 Core/SYS/DDR-user/periph/NPU 为 89.3096/83.8926/144.6969/89.0076/112.3343 MHz，

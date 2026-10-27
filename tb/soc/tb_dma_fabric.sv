@@ -19,10 +19,10 @@ module tb_dma_fabric #(
     logic [2:0] fabric_req_valid, fabric_req_ready, fabric_rsp_valid, fabric_rsp_ready;
     bus_req_t fabric_request [3];
     bus_rsp_t fabric_response [3];
-    logic [14:0] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready;
-    bus_req_t s_request [15];
-    bus_rsp_t s_response [15];
-    bus_error_e s_error [15];
+    logic [15:0] s_req_valid, s_req_ready, s_rsp_valid, s_rsp_ready;
+    bus_req_t s_request [16];
+    bus_rsp_t s_response [16];
+    bus_error_e s_error [16];
     logic dma_irq, external_irq;
     logic [31:0] fault_read_addr = '1, fault_write_addr = '1;
     logic awvalid, awready, awid, awlock, wvalid, wready, wlast;
@@ -62,7 +62,7 @@ module tb_dma_fabric #(
         end
     end
 
-    bus_interconnect #(.MASTERS(3), .PRESENT(15'h503f),
+    bus_interconnect #(.MASTERS(3), .PRESENT(16'h503f),
                        .DATA_PRIORITY(1'b1), .DDR_BYTES(EXTERNAL_BYTES)) u_fabric (
         .clk, .rst, .m_req_valid(fabric_req_valid), .m_req_ready(fabric_req_ready), .m_request(fabric_request),
         .m_rsp_valid(fabric_rsp_valid), .m_rsp_ready(fabric_rsp_ready), .m_response(fabric_response),

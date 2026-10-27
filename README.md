@@ -4,23 +4,32 @@ RV32 优先的 RISC-V Core/SoC 协作仓库。目标是 RT-Thread 上的文本�
 推理、文本输出；RV64 跟随共享架构验证。近期不把 Linux、MMU、F/V、图像链路作为
 交付前提。
 
-最新开发基线为 **`baseline-rv32-soc-npu-20261027`**。本基线固定经验证的 ROB16
-Core、四组可运行平台、128-MAC NPU 和 AXI 地址递增优化；选定代码树来自 `ec85d36`，
-其中地址优化为 `aaf63f9`。正常 ALU/Load/DSP 流水为 **8/10/10**，C 尚未实现。
-Core 配置为 scoreboard 双发射/双退休、int8/mem4、LQ4/SQ4、forward3、Tournament1、
-RAS0、OOO0；RV32 优化，RV64 做功能/ISA/SoC 验证。
+当前公共集成分支为 **`baseline-all`**，合并已发布的
+`baseline-rv32-soc-npu-20261027@0e7c994` 与 MiniMind `main@e240c48`；共同基点为
+`a84ab1a`。原基线标签保留。MiniMind 与 YOLO 是两条替代路线，分别在
+`baseline-minimind`、`baseline-yolo` 继续开发。
 
-真实 Core+TCM 的 64 次仿真为 **3.015015 CoreMark/MHz**（validation 2.996395）。
-核级综合 **104.7120 MHz** 来自相同 Core 的 `6cb7535` 测量，本轮未重跑；完整
-SoC+NPU 综合 Core/SYS/DDR-user/periph/NPU 为
-**89.3096/83.8926/144.6969/89.0076/112.3343 MHz**，71,659 LUT/66,825 FF/162.5 DRM/86 APM。
-工作时钟目标保持 100/80/125/25/100 MHz；整机 Core 的 100 MHz 目标仍未满足。
-以上是仿真与综合估计，当前版本未布局布线、未合体上板，短仿真未满足正式十秒规则。
+| 分支 | 系统与用途 | 主要验证入口 |
+|---|---|---|
+| `baseline-all` | 公共 Core、两条加速路线源码与合并回归 | 下述双宽回归及各路线入口 |
+| `baseline-minimind` | 单时钟 `mm3_soc_compat`，整数 GEMV/GEMM 与语言模型算子链 | `make mm3-accel-unit`、`make mm3-layer-soc` |
+| `baseline-yolo` | 四域 `soc_system` 加独立第五 NPU 域，128-MAC 卷积 | `make npu-test`、`make coremark-platforms` |
 
-本次以单个汇总提交和基线标签发布选定快照；原优化提交、未采用的 TCM 专用译码
-比较分支及原始报告保留在开发者本地。旧 `baseline-rv32-soc-20261025` 保留作比较。
-后续工作从新标签建立用途分支。配置、结果、构建命令与证据边界见
-[项目介绍](docs/PROJECT_INTRO.md)和[FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。
+两个加速器不在同一顶层同时实例化。MiniMind 的 `0x10050000` 是算子寄存器，
+YOLO 主 SoC 的该窗口是 Flash 控制；软件必须使用对应路线的地址表。MiniMind 尚无
+匹配 FPGA 顶层与综合频率，不能沿用 YOLO 五域结果。两条路线都使用 ROB16、int8/mem4、
+LQ4/SQ4、forward3、Tournament1、RAS0、OOO0，正常 ALU/Load/DSP 流水仍为 **8/10/10**，
+C 尚未实现。RV32 优化，RV64 验证功能/ISA/SoC。
+
+本次合并重测 M0 64 次为 **3.526520 CoreMark/MHz**（validation 3.507011），采用
+一周期 Harvard 存储模型；四平台短测 24 项与原周期记录一致。原基线真实 Core+TCM
+64 次为 **3.015015**（validation 2.996395），本次真实 TCM 短测为 3.012983/2.994267。
+原核级标准综合为 104.7120 MHz，完整 SoC+YOLO 为 Core 89.3096 MHz。本次合并
+不运行 PDS，上述频率属于原基线；合并后频率、资源与布局布线均待分别测量。
+旧日志已由维护者清理，历史摘要保留；本轮重建的镜像与回归记录放在
+`build/baseline-all/`、`logs/baseline-all-20261027/`，不随 Git 发布。
+详细配置、结果和命令见[项目介绍](docs/PROJECT_INTRO.md)、
+[FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)和[MiniMind 说明](software/minimind3/README.md)。
 
 在检出的分支上加载对应 Core 参数：
 
@@ -58,6 +67,7 @@ CoreMark/Core-MHz、按本次频率计算的仿真每秒成绩和镜像/源哈�
 - 2 路 I$/D$，WB/WA D$，FENCE.I、维护命令、DMA 所有权交接。
 - DMA 两块 128B 双槽引擎与统一 AXI 主口，读写可重叠；legacy 控制组保留。
 - 标准 AXI 与 Pango 原生 DDR 桥；RT-Thread BSP、UART loader、CoreMark。
+- 可选 MiniMind 整数算子：16 路 W8A16 GEMV、8×8 Attention GEMM、Norm/RoPE/Softmax/SwiGLU/KV 及单 Token 单层入口，默认关闭。采用独立单时钟 `mm3_soc_compat` 路线；本轮合并回归与完整模型待办见 `software/minimind3/README.md`。
 
 ## 上一基线状态（2026-10-25）
 

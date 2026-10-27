@@ -5,7 +5,7 @@ module mmio_bus #(
     parameter int unsigned FLASH_BYTES = 0,
     parameter int unsigned NPU_BYTES = 0,
     parameter int unsigned SOC_PROFILE = soc_config_pkg::SOC_PROFILE_FULL,
-    parameter logic [14:0] PRESENT = soc_config_pkg::SOC_FULL_PRESENT | (DDR_BYTES != 0 ? 15'h4000 : 15'h0),
+    parameter logic [15:0] PRESENT = soc_config_pkg::SOC_FULL_PRESENT | (DDR_BYTES != 0 ? 16'h4000 : 16'h0),
     parameter bit DCACHE_ENABLE = 1,
     parameter int unsigned DCACHE_BYTES = 4096,
     parameter int unsigned DCACHE_LINE_BYTES = 32,

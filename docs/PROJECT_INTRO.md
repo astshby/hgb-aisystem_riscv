@@ -2,6 +2,59 @@
 
 > 写作约束：[skills/regulation.md](../../skills/regulation.md)。本文给项目目录、参数、环境、仿真和 FPGA 的当前状态，不把规划写成已实现。
 
+2026-10-27 公共合并分支更新为 `baseline-all`，父版本为已冻结 YOLO/ROB16 基线
+`0e7c994` 和 MiniMind `e240c48`，共同基点 `a84ab1a`。`baseline-minimind` 与
+`baseline-yolo` 分别选择语言模型算子链和卷积加速器，使用同一优化 Core。
+MiniMind 沿用单时钟 `mm3_soc_compat`；YOLO 沿用五域系统。两者尚未同时挂载，
+MiniMind 的原生 AXI4/异频/FPGA 接入仍待后续独立实现。公共设备发现接口统一为
+16 位，低 15 位编号与取值保持；AXI 专项 runner 补齐干净目录创建。
+
+本轮使用 GCC 16.1.0、Verilator 5.052 和 `p1_core_config.sh` 的 ROB16 参数重新验证。
+Core 目录、scoreboard 包、Core 参数、YOLO 固定源及已优化 AXI beat 地址共 91 份文件
+与 `0e7c994` 逐字节相同。下面计数按测试场景计，不重复计算日志内比较器的 PASS。
+
+| 本次合并回归 | RV32 PASS / SKIP | RV64 PASS / SKIP |
+|---|---:|---:|
+| `make test` | 82 / 2 | 82 / 2 |
+| `make riscv-tests` | 58 / 2 | 78 / 2 |
+| `make benchmark-smoke` | 1 / 0 | 1 / 0 |
+| `make soc-test` | 12 / 0 | 12 / 0 |
+| `make soc-riscv-tests` | 59 / 1 | 79 / 1 |
+| `make soc-system-test` | 5 / 0 | 5 / 0 |
+| `make soc-axi-test` | 12 / 0 | 14 / 0 |
+| 四平台功能 | 4 / 0 | 4 / 0 |
+| YOLO NPU 异频/背压/复位 | 4 / 0 | 4 / 0 |
+
+RV32 M0 两模式 64 次各通过，ROI 为 18,148,201/18,249,159 拍，
+**3.526520/3.507011 CoreMark/MHz**。四平台两模式共 **24 PASS**，下表中
+TCM、DDR cold/warm 与后台负载的周期和比值均重新得到相同数值，CRC 验证通过。
+M0 使用一周期 Harvard TB 存储；24 项使用真实 TCM/Cache/DDR 仿真路径，分别报告。
+M0 的 1 MHz 软件归一化时基不代表 FPGA 主频；本轮未测正式硬件十秒成绩。
+工具配置、平台脚本与 NPU staging 共 18 PASS；八份平台仿真源快照与合并源码逐项匹配。
+
+MiniMind 的双宽算子链与 DMA 补测结果见 [MiniMind 说明](../software/minimind3/README.md)。本轮不运行 PDS。
+用户已删除上一轮原始日志，后续旧数值保留为历史摘要；合并版本不继承其综合/布线验收。
+原基线标签与独立优化历史保留。本轮证据为 `logs/baseline-all-20261027/` 中的
+`test-counts.json`、`platform-source-cycle-check.json`、`coremark-m0.json`、
+`mm3-regressions.json`、`mm3-dma-regressions-final.json`，保存命令、镜像和日志哈希；
+平台与 MiniMind 源快照分别在 `build/baseline-all/`、`build/mm3-ops/`、`build/mm3/`。
+运行时 HEAD 仍是合并前 `0e7c994`；最终 `final-acceptance.json` 将源快照核对至合并提交。
+旧 ELF/HEX 已清理，因此相同周期可复现，不能据此声明新旧 ELF 字节相同。
+
+重跑入口（先将 `RISCV_TOOL_ROOT` 设为工具链 bin 目录）：
+
+```bash
+source scripts/verilator/p1_core_config.sh
+COREMARK_ITERATIONS=64 make coremark XLEN=32
+python3 scripts/verilator/run_unified_coremark.py --output build/baseline-all/rv32 --functional --xlen 32
+python3 scripts/verilator/run_unified_coremark.py --output build/baseline-all/rv32 --iterations 2
+python3 scripts/verilator/run_unified_coremark.py --output build/baseline-all/rv64 --functional --xlen 64
+python3 scripts/verilator/run_npu_tests.py --output build/baseline-all/npu-rv32 --xlen 32
+python3 scripts/verilator/run_npu_tests.py --output build/baseline-all/npu-rv64 --xlen 64
+```
+
+以下内容按日期和提交记录原测量。
+
 2026-10-27 用户确认新开发基线为 **`baseline-rv32-soc-npu-20261027`**：采用
 `ec85d36` 的代码树，包含 `aaf63f9` 地址递增，保留 ROB16/四平台/第五 NPU 时钟域。
 本次以单个汇总提交发布选定快照，原阶段提交和比较分支保留在开发者本地；下文的
