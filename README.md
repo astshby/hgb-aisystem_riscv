@@ -25,3 +25,7 @@ CPU 经 0x20000000 配置算子；NPU 独立 AXI 主口读写共享 DDR，系统
 说明见[项目介绍](docs/PROJECT_INTRO.md)、[系统结构](docs/understand/SOC_SYSTEM.md)、
 [FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。全部源码与可选应用集中保存在 baseline-all；
 本分支只保留上述应用。历史分支已保存为本地 archive 标签，详细变更用 git log/git show 查询。
+
+MiniMind 的五域仿真通过；本次 PDS 出现多写 RAM 推断警告，约 59 分钟后按维护者决定停止。
+资源与 Fmax 尚未取得，独立域 100 MHz 为目标。存储 bank/写端口/同步读结构列为待修，
+详见 [FPGA 状态](docs/fpga/FPGA_ADAPTATION.md#2026-10-27-标准综合状态)。

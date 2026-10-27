@@ -1,5 +1,8 @@
 # MiniMind-3：FP32 与全整数 C 推理
 
+本轮五域集成仿真通过；PDS 多写 RAM 推断待修，未取得资源/Fmax。100 MHz 为配置目标。
+详见 [FPGA 状态](../../docs/fpga/FPGA_ADAPTATION.md#2026-10-27-标准综合状态)。
+
 2026-10-27：本轮已迁移到主 SoC 五域接口，原作者 C 算法、模型锁和导出工具保留。
 Core/SYS/DDR-user/外设/NPU 目标为 100/80/125/25/100 MHz，设备控制窗口为 `0x20000000`。
 CPU 配置算子，算子通过独立 AXI 主口读写 DDR，系统 DMA 可并发搬运；Cache 所有权由软件维护。
