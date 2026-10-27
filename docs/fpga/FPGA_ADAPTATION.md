@@ -19,6 +19,9 @@ C1 目标 Core/SYS/DDR-user/外设 = 100/80/125/25 MHz。
 含 CoreMark 的分支可用 `prepare_benchmark.py` 对 `core_tcm/soc_tcm/soc_ddr` 暂存与仿真
 同配置、同 bundle 的工程；all 还支持 soc_npu。必须提供 `--bundle`、`--sim-receipt`，
 DDR 组另需 `--ip-dir`。TCM 组使用真实 TCM RTL/BRAM 初值和外部时钟端口。
+Cache 容量通过 `--icache-bytes`、`--dcache-bytes` 指定，默认各 4096 B，可选 4–64 KiB 的 2 次幂。
+容量同时写入板级参数和清单，并核对仿真 build receipt、实际顶层参数转发和编译 Tcl；
+不能只改测量标签而沿用旧硬件。比较容量时冻结同一固件、FDC、DDR IP 和综合选项。
 
 标准综合使用 ADS `synthesize -ads -selected_syn_tool_opt 2`，单线程，增加路径报告深度；
 不启用快速布局布线，本轮不执行 P&R。每个工程保留编译 Tcl、FDC、镜像、源码哈希和原始报告。
@@ -73,6 +76,43 @@ CoreMark 硬件组绑定 edc2349 公共硬件与 O3 TCM CoreMark 镜像。
 域内最差路径的完整端点/逻辑级/扇出，以及原始跨域 setup、hold 和未约束 I/O 均保存在摘要。
 负 WNS 表示对应目标未达到；跨域、DDR PHY 和 I/O 约束仍需逐端点检查，不能据域内 Fmax 宣称整体时序闭合。
 本轮未执行 P&R，布线 Fmax/WNS、未布通数和板级结果均为未测。
+
+## Cache 容量综合对照
+
+实验分支 `soc/cache-capacity-sweep`，起点 main `62e2d0f`，参数贯通 `cf25b9a`，
+两份原生清单均记录 `1d9efff`。243 份 HDL、O3 TCM CoreMark 初值、DDR IP、FDC 与 ADS 参数相同，
+仅 I$ 从 4 增至 16 KiB，D$ 保持 4 KiB。编译参数和实际顶层转发已核对。
+
+| I$/D$ KiB | Core Fmax/WNS | SYS Fmax/WNS | DDR-user Fmax/WNS | 外设 Fmax/WNS |
+|---|---:|---:|---:|---:|
+| 4/4 | 85.1064 / -1.750 | 83.8504 / +0.574 | 144.7178 / +1.090 | 87.5197 / +28.574 |
+| 16/4 | 86.8282 / -1.517 | 83.6960 / +0.552 | 150.4664 / +1.354 | 88.0747 / +28.646 |
+
+Fmax 单位 MHz，WNS 单位 ns。Core 综合估计提高 2.0231%，SYS 降低约 0.1841%，仍达到 80 MHz。
+四域估计值没有全部保持或提高；完整 DDR 系统的 Core 100 MHz 目标仍未达到。
+CoreMark 固定用 100/80/125/25 MHz 做功能仿真，不能将本表各域独立 Fmax 代入原跑分。
+
+| I$/D$ KiB | 总 LUT | 总 FF | 总 DRM36K | APM | I$ LUT/FF/分布式 RAM/DRM |
+|---|---:|---:|---:|---:|---:|
+| 4/4 | 61438 | 54342 | 36 | 4 | 594 / 659 / 42 / 2 |
+| 16/4 | 61775 | 54918 | 38 | 4 | 1430 / 1235 / 152 / 4 |
+
+总增量为 337 LUT（0.5485%）、576 FF（1.0600%）、2 DRM，latch 均为 0。
+I$ 局部 LUT 增量为 836，整 SoC 的增量较小，其他模块的映射也发生了变化。
+Core 最差路径现为 SQ `valid_q[3]` → 前递/请求选择 → `broadcast[8].valid` → IQ `packet_q[225]`，
+18 逻辑级、扇出 49，数据延迟 11.031 ns，其中估计连线 9.127 ns。
+报告的前 100 条 Core 路径均从该 SQ 有效位出发，以 IQ 为终点；原 TCM 系统写路径不再排在这组前列。
+SYS 最差为 reset release → fabric write-route FIFO 的 CE，16 级、扇出 1838。
+本轮只改 Cache 容量，未修改 SQ、TCM 或总线逻辑，频率变化包含综合映射变化。
+
+原生目录为 `$PDS_WORK_ROOT/work/cache-capacity-20261027/baseline-i4-d4` 和 `candidate-i16-d4-v2`。
+基线 Linux launcher 异常退出，Windows 子进程完成了综合；其 run.log、snr、完整网表和全部报告保留，
+恢复摘要另记完成证据及提取脚本哈希，没有补写外层成功日志。候选有正常的外层完成标记。
+候选旧目录在编译前被内存门禁拦截，失败记录保留；新目录外层余量 14.30/7.858 GiB，工具内部检查通过。
+基线/候选综合耗时 51m44s/52m23s，工具报告峰值 3406/3306 MB。
+摘要、报告哈希和输入对照在 `logs/cache-capacity-20261027/` 的 synthesis-*.json、paired-inputs-v2.json、cache-selection.json。
+原始 DDR→SYS、外设→SYS setup WNS 仍为 -6.063/-2.998 ns，SYS→DDR hold 为 -4.770 ns；
+DDR-user 同域 hold -0.006 ns、3 个端点，未指定 I/O delay 35/73。没有布局布线结果，未布通数为未测。
 
 ## 结果解释
 

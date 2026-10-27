@@ -35,6 +35,10 @@ CPU 提交地址/长度/方向、启动、核对完成和处理 Cache 所有权�
 本分支应用入口以 `make help` 为准。
 软件默认 O3，用 `SOFTWARE_OPT=O2|O3|Ofast` 覆盖。Ofast 本轮没有稳定额外收益，未设为默认。
 
+Cache 容量实验共用上述软件入口。`coremark-platforms`、独立 RT 测试和 PDS 暂存均支持
+`--icache-bytes` / `--dcache-bytes`，未指定时各为 4096。实际实例参数、固件和时钟写入测量清单。
+批量容量测试使用 `scripts/verilator/run_cache_sweep.py`，命令见[联合优化](understand/OPTIMIZATION.md)。
+
 ## CoreMark 口径
 
 `make score` 保留 M0（TB 一周期存储）及 `scripts/benchmark_platforms.json` 定义的平台。
@@ -57,6 +61,14 @@ O3 提升 M0/TCM，但 DDR 略低；同表保留取舍。短仿真未满足正�
 完整记录在工作区 `2-coremark/record.md`，镜像及日志在本仓库忽略目录
 `build/four-branches/`、`logs/four-branches-20261027/`。记录包含命令、CRC、ELF/HEX/源码哈希。
 历史日志曾被维护者删除，旧摘要不能替代本轮原始报告。
+
+Cache 容量实验保持 Core 与上述时钟比例，O3 64 次迭代共 18 项通过。
+I$16/D$4 KiB 的 cold、warm、DMA/IRQ performance 为 2.507487、2.508556、2.187186 CoreMark/MHz；
+六个场景/种子的跑分几何均值比 4/4 KiB 提高 4.8455%，8/4 KiB 提高 4.5763%。
+32/4 KiB 的两次迭代初筛周期与 16/4 完全相同；D$8/32 KiB 出现回退，保留 D$4 KiB。
+默认配置仍为 4/4 KiB，16/4 为本实验推荐的显式配置，尚未替换正式 baseline。
+真实 TCM 重放周期不变，RV64 候选功能通过；RT32 的 I$ miss 6048→1635，总周期减少约 0.44%。
+后者包含 tick 等待，单独记录。
 
 ## RT-Thread 独立运行
 
@@ -82,3 +94,5 @@ DDR 退休计数均超过 260 万，I$/D$ 命中和 DMA 热代码搬运均被检
 Core+TCM 达到 103.8853 MHz；SoC+TCM 为 95.0299 MHz，完整 DDR SoC 的 Core 为 85.1064 MHz。
 只有 Core+TCM 达到 Core 100 MHz 综合目标，完整系统尚未达到。
 没有本轮布局布线或上板成绩。已完成的仿真和原生综合绑定各自冻结输入，文档更新不改变测量来源。
+Cache 候选的完整 DDR SoC Core 为 86.8282 MHz；SYS 为 83.6960 MHz，比同输入基线小幅下降。
+资源代价与各域 WNS 见 [Cache 综合对照](fpga/FPGA_ADAPTATION.md#cache-容量综合对照)。
