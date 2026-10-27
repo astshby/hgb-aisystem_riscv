@@ -166,7 +166,7 @@ MiniMind 专用裸机 ELF 复用 BSP 启动、TCM 和 tohost：代码位于 64 K
 
 ## 整数算子扩展（2026-10-27）
 
-本节描述 `codex/mm3-integer-operators` 新增实现，**仅完成静态检查，功能仿真待用户运行**。旧版 GEMV 的已执行结果见前节；不能作为本节算子链的数值证据。使用命令、配置表和待验收记录集中在 [MiniMind 使用说明](../../software/minimind3/README.md#整数算子扩展交付2026-10-27)。
+本节描述 `codex/mm3-integer-operators` 新增实现，**后续用户运行的RV32单算子、T=4 Attention和单Token第0层独立链/CPU链已通过比较，综合/上板未验收**。旧版 GEMV 的已执行结果见前节；不能作为本节算子链的数值证据。使用命令、配置表和待验收记录集中在 [MiniMind 使用说明](../../software/minimind3/README.md#整数算子扩展交付2026-10-27)。
 
 ### 目录、计算与调度
 

@@ -33,11 +33,11 @@ compile_cpu(){
   benchmark/bsp/crt0.S benchmark/bsp/runtime.c software/minimind3/baremetal/platform.c "$ops/mm3_layer_main.c" "$ops/mm3_driver.c" "${csources[@]}" -lgcc -o "$build/layer-rv$width.elf" > "$logs/cpu-rv$width-build.log" 2>&1
  "${tool}objdump" -d "$build/layer-rv$width.elf" > "$logs/cpu-rv$width.dump"
  "${tool}nm" -u "$build/layer-rv$width.elf" > "$logs/cpu-rv$width-unresolved.txt";[[ ! -s "$logs/cpu-rv$width-unresolved.txt" ]]
- if rg -n '\b(f(add|sub|mul|div|sqrt|cvt|mv|sgnj|min|max|eq|lt|le|class)\.|f(madd|msub|nmadd|nmsub)\.|fl[wd]\b|fs[wd]\b)|__(add|sub|mul|div|float|fix|extend|trunc).*(sf|df)' "$logs/cpu-rv$width.dump";then echo 'FAIL floating-point ELF';exit 1;fi
+ python3 scripts/verilator/mm3_audit.py no-float "$logs/cpu-rv$width.dump"
  "${tool}gcc" "${cflags[@]}" -march="rv${width}im_zicsr_zifencei" -mabi="$abi" -ffreestanding -Isoftware/minimind3/baremetal/include -c "$ops/mm3_ops.c" -o "$build/operators-rv$width.o" >> "$logs/cpu-rv$width-build.log" 2>&1
  "${tool}objdump" -d "$build/operators-rv$width.o" > "$logs/operators-rv$width.dump"
  "${tool}nm" -u "$build/operators-rv$width.o" > "$logs/operators-rv$width-unresolved.txt"
- if rg -n '\b(f(add|sub|mul|div|sqrt|cvt|mv|sgnj|min|max|eq|lt|le|class)\.|f(madd|msub|nmadd|nmsub)\.|fl[wd]\b|fs[wd]\b)|__(add|sub|mul|div|float|fix|extend|trunc).*(sf|df)' "$logs/operators-rv$width.dump" "$logs/operators-rv$width-unresolved.txt";then echo 'FAIL floating-point integer core';exit 1;fi
+ python3 scripts/verilator/mm3_audit.py no-float "$logs/operators-rv$width.dump" "$logs/operators-rv$width-unresolved.txt"
  "${tool}size" "$build/layer-rv$width.elf"
 }
 load_profile(){ source scripts/verilator/p1_core_config.sh;source scripts/verilator/core_build_config.sh; }
@@ -51,12 +51,12 @@ if [p for p in soc if p.startswith('vsrc/soc/mm3/')]!=ops:raise SystemExit('MM3 
 FILES
  python3 scripts/verilator/mm3_config.py --check
  bash -n scripts/verilator/run_mm3_ops.sh scripts/verilator/run_mm3.sh
- python3 -m py_compile scripts/verilator/mm3_config.py scripts/verilator/mm3_integer_reference.py scripts/verilator/mm3_fixture_ops.py scripts/verilator/mm3_compare_ops.py
+ python3 -m py_compile scripts/verilator/mm3_audit.py scripts/verilator/mm3_config.py scripts/verilator/mm3_integer_reference.py scripts/verilator/mm3_fixture_ops.py scripts/verilator/mm3_compare_ops.py
  compile_host;compile_cpu 32;compile_cpu 64;need_verilator;load_profile
  for width in 32 64;do
   "$verilator" --lint-only --timing --assert -Wall -Wno-fatal -DCORE_XLEN="$width" -f scripts/soc_files.f tb/soc/axi_block_memory_model.sv tb/unit/mm3/tb_mm3_accel.sv --top-module tb_mm3_accel > "$logs/lint-legacy-unit-rv$width.log" 2>&1
   "$verilator" --lint-only --timing --assert -Wall -Wno-fatal -DCORE_XLEN="$width" -f scripts/soc_files.f tb/soc/axi_block_memory_model.sv tb/unit/mm3/tb_mm3_program.sv --top-module tb_mm3_program > "$logs/lint-program-rv$width.log" 2>&1
-  if rg '%Warning-(LATCH|MULTIDRIVEN|UNOPTFLAT|ALWCOMBORDER)' "$logs/lint-program-rv$width.log";then exit 1;fi
+  python3 scripts/verilator/mm3_audit.py structure "$logs/lint-program-rv$width.log"
   for enabled in 0 1;do
    "$verilator" --lint-only --timing --assert -Wall -Wno-fatal -DCORE_XLEN="$width" -DCORE_MUL_IMPL=0 -DCORE_DIV_IMPL=1 "${core_microarch_flags[@]}" -f scripts/soc_files.f tb/soc/axi_block_memory_model.sv tb/common/store_result_monitor.sv tb/soc/tb_mm3_soc.sv tb/soc/tb_mm3_layer_soc.sv --top-module tb_mm3_layer_soc -GACCEL_ENABLE="$enabled" > "$logs/lint-soc-rv$width-enable$enabled.log" 2>&1
   done

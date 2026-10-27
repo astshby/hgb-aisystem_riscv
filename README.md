@@ -21,7 +21,7 @@ P1 使用 `source scripts/verilator/p1_core_config.sh`，选择 ROB32、int8/mem
 - 2 路 I$/D$，WB/WA D$，FENCE.I、维护命令、DMA 所有权交接。
 - DMA legacy 和两块 128B 双槽引擎，256 位 DDR 口，读写可重叠。
 - 标准 AXI 与 Pango 原生 DDR 桥；RT-Thread BSP、UART loader、CoreMark。
-- 可选 MiniMind 整数算子：16 路 W8A16 GEMV、8×8 Attention GEMM、Norm/RoPE/Softmax/SwiGLU/KV 及单 Token 单层入口，默认关闭。新增扩展完成静态检查，功能仿真待运行；配置和验收边界见 `software/minimind3/README.md`。
+- 可选 MiniMind 整数算子：16 路 W8A16 GEMV、8×8 Attention GEMM、Norm/RoPE/Softmax/SwiGLU/KV 及单 Token 单层入口，默认关闭。新增扩展已通过RV32单算子和单层功能简测，综合/上板未验收；配置和验收边界见 `software/minimind3/README.md`。
 
 ## 当前状态
 
