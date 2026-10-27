@@ -66,7 +66,7 @@ Cache 容量实验保持 Core 与上述时钟比例，O3 64 次迭代共 18 项�
 I$16/D$4 KiB 的 cold、warm、DMA/IRQ performance 为 2.507487、2.508556、2.187186 CoreMark/MHz；
 六个场景/种子的跑分几何均值比 4/4 KiB 提高 4.8455%，8/4 KiB 提高 4.5763%。
 32/4 KiB 的两次迭代初筛周期与 16/4 完全相同；D$8/32 KiB 出现回退，保留 D$4 KiB。
-默认配置仍为 4/4 KiB，16/4 为本实验推荐的显式配置，尚未替换正式 baseline。
+默认配置仍为 4/4 KiB，16/4 是上述容量实验的显式配置；后续bank候选见下文，尚未替换正式baseline。
 真实 TCM 重放周期不变，RV64 候选功能通过；RT32 的 I$ miss 6048→1635，总周期减少约 0.44%。
 后者包含 tick 等待，单独记录。
 
@@ -87,12 +87,29 @@ DDR 退休计数均超过 260 万，I$/D$ 命中和 DMA 热代码搬运均被检
 本树无加速器。三层硬件标准综合分别测资源、域内 Fmax/WNS 和最差路径。
 本轮没有 P&R、bitstream 或板级结果；CDC/PHY/I/O 的原始报告仍需后续处理。
 
-## 本轮标准综合
+## 最新路径实验
 
-五组测量的对应配置、各域 Fmax/WNS、LUT/FF/DRM/APM、最差路径和原始 CDC/hold 问题，
-见 [FPGA 实测表](fpga/FPGA_ADAPTATION.md#2026-10-27-标准综合实测)。本分支表只列自身保留的硬件。
-Core+TCM 达到 103.8853 MHz；SoC+TCM 为 95.0299 MHz，完整 DDR SoC 的 Core 为 85.1064 MHz。
-只有 Core+TCM 达到 Core 100 MHz 综合目标，完整系统尚未达到。
-没有本轮布局布线或上板成绩。已完成的仿真和原生综合绑定各自冻结输入，文档更新不改变测量来源。
-Cache 候选的完整 DDR SoC Core 为 86.8282 MHz；SYS 为 83.6960 MHz，比同输入基线小幅下降。
-资源代价与各域 WNS 见 [Cache 综合对照](fpga/FPGA_ADAPTATION.md#cache-容量综合对照)。
+收尾分支integrate/soc-path-selected基于47aec08，保留SYS独热控制和可配置bank入口，不含A/B；正式baseline未升级。
+I16/D8/mask2是显式性能候选，默认I4/D4/mask0保持。六项64次DDR与bank-only对照同周期，TCM周期保持。
+
+| 当前无A配置 | performance / validation，每MHz | Core综合估计MHz | LUT / FF |
+|---|---:|---:|---:|
+| M0，64次 | 3.590617 / 3.570731 | 不单列裸Core测频 | 不适用 |
+| Core+TCM，2次 | 3.052755 / 3.035846 | 105.0641 | 26130 / 19665 |
+| SoC+TCM，2次 | 3.052755 / 3.035846 | 93.6067 | 39908 / 39165 |
+| SoC+TCM＋DMA/IRQ，2次 | 2.642689 / 2.618037 | 同上 | 同上 |
+| DDR cold，64次 | 2.530971 / 2.513669 | 89.3336 | 52571 / 55207 |
+| DDR warm，64次 | 2.532010 / 2.514682 | 同上 | 同上 |
+| DDR＋DMA/IRQ，64次 | 2.207225 / 2.193928 | 同上 | 同上 |
+
+SoC+TCM的SYS/外设为112.9433/98.8045 MHz，DDR完整系统SYS/DDR-user/外设为106.6894/150.4664/86.3185 MHz。
+三层DRM分别32/32/38、APM均4；各域WNS、最差路径和约束缺口见 [路径实验综合](fpga/FPGA_ADAPTATION.md#路径实验的三层结果与取舍)。
+四分支整理时Core+TCM/SoC+TCM/DDR Core为103.8853/95.0299/85.1064 MHz；随后I16/D4容量实验为86.8282 MHz。
+当前Core+TCM频率与资源改善；SoC+TCM Core比旧95.0299下降1.4976%，因此本轮未验收所有层主频不退，正式baseline保持。
+SYS单项I16/D4/mask0的Core90.1307 MHz高于D8联合89.3336；D8六项每MHz几何均值+0.8207%，两项取舍分开记录。
+A单项曾得到92.2594 MHz，但联合三层的Core频率与LUT均由无A控制取得较好结果；B在相同SYS底座使Core90.1307→88.3470、增加492 LUT/155 FF且每MHz回退，均不采用。
+D4/mask1联合Core85.4920 MHz，低于起点86.8282，被拒绝。没有本轮布局布线或上板成绩。
+
+47aec08完整双宽test各82 PASS/2 SKIP、scoreboard31/0，ISA58/2与78/2，smoke各1/0，M0各2/0通过。
+I16/D8/mask2独立RT双宽通过，总周期2741313/2753088，各39次trap；该功能耗时不作为RT跑分。
+完整短/长矩阵、两份源码对照、三层标准综合与哈希保存在本地record和final-summary.json。

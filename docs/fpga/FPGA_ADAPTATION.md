@@ -114,6 +114,67 @@ SYS 最差为 reset release → fabric write-route FIFO 的 CE，16 级、扇出
 原始 DDR→SYS、外设→SYS setup WNS 仍为 -6.063/-2.998 ns，SYS→DDR hold 为 -4.770 ns；
 DDR-user 同域 hold -0.006 ns、3 个端点，未指定 I/O delay 35/73。没有布局布线结果，未布通数为未测。
 
+## SYS 控制路径综合对照
+
+分支 `soc/fabric-onehot-control@0f66bf1`，同一I16/D4配置、固定O3初值、DDR IP、FDC与标准ADS选项。
+固定编号的资格与独热授权替换旋转下标宽选择链，保留入口/出口FIFO、反压锁定、AW/W所有权和同ID排序。
+双宽AXI/CDC测试及旧实现逐拍比较通过；六项短CoreMark周期完全相同。
+
+| 配置 | Core Fmax/WNS | SYS Fmax/WNS | DDR-user Fmax/WNS | 外设 Fmax/WNS | LUT/FF/DRM/APM |
+|---|---:|---:|---:|---:|---:|
+| I16/D4原路径 | 86.8282/-1.517 | 83.6960/+0.552 | 150.4664/+1.354 | 88.0747/+28.646 | 61775/54918/38/4 |
+| SYS独热授权 | 90.1307/-1.095 | 104.7449/+2.953 | 144.7387/+1.091 | 86.1104/+28.387 | 52625/54886/38/4 |
+
+Fmax为MHz，WNS为ns。LUT减少9150（14.81%）、FF减少32，DRM/APM不变、latch为0。
+模块资源表中fabric自身LUT14260→5047、FF8285→8278；同输入清单仅fabric RTL及两份来源元数据不同，固件/FDC/IP一致。
+
+SYS最差reset release→fabric `r_next_q[0][0]/CE`为12级、扇出1730，对照16级/1838。
+Core最差SQ valid→前递资格/请求选择→LQ state为17级、扇出50，数据延迟10.609ns。
+Core 100MHz仍未达到；DDR-user和外设估计值下降，但高于125/25MHz目标，不能称四域全部不降。
+DDR→SYS setup -6.064ns、外设→SYS -2.998ns，SYS→DDR hold -4.771ns、DDR同域hold -0.006ns/3端点；未约束I/O35/73。
+没有P&R，布线Fmax/WNS和未布通数量未测。
+
+原生工程 `$PDS_WORK_ROOT/work/path-tuning-20261027/sys-onehot`，摘要 `logs/path-tuning-20261027/sys-onehot-synthesis.json`。
+启动与暂存收尾曾重叠，原清单误含5个运行文件；原清单与异常保留，266项静态输入逐一校验一致后移出运行项，复核通过。
+A独立实验 `f8a72c2` 已在同一I16/D4原路径上完成标准综合；Core92.2594/-0.839、SYS84.0477/+0.602、DDR-user150.3759/+1.350、外设88.2613/+28.670（MHz/ns）。
+资源61834 LUT/54917 FF/38 DRM/4 APM：LUT比原路径增加59、FF减少1；Load Queue自身LUT1234→1249、FF仍440。
+A最差Core路径转为TCM目标r_valid→TCM RAM写使能，20级、扇出50。它改善Core估计频率，未实现提案预期的LUT下降。
+B在SYS底座的对照 `c2a71e0` 为Core88.3470/-1.319、SYS101.9680/+2.693、DDR-user150.3759/+1.350、外设87.9430/+28.629。
+53117 LUT/55041 FF/38 DRM/4 APM，比SYS增加492 LUT、155 FF；Core由90.1307降到88.3470 MHz，且每MHz跑分回退，本轮不采用。
+SYS＋A＋bank及无A控制现已完成，取舍见下节。
+
+## 路径实验的三层结果与取舍
+
+测量代码47aec08，收尾分支integrate/soc-path-selected，保留SYS独热控制和bank参数入口，不含A/B。
+默认仍I4/D4/mask0；DDR D8表项显式使用I16/D8/mask2。固定O3、原两次TCM初值、相同FDC和标准ADS选项，未运行P&R。
+
+| 无A/B配置，测量源码47aec08 | Core MHz / WNS ns | SYS MHz | DDR-user MHz | 外设 MHz | LUT / FF / DRM / APM |
+|---|---:|---:|---:|---:|---:|
+| Core+TCM | 105.0641 / +0.482 | 不适用 | 不适用 | 不适用 | 26130 / 19665 / 32 / 4 |
+| SoC+TCM | 93.6067 / -0.683 | 112.9433 | 不适用 | 98.8045 | 39908 / 39165 / 32 / 4 |
+| 完整DDR，I16/D8/mask2 | 89.3336 / -1.194 | 106.6894 | 150.4664 | 86.3185 | 52571 / 55207 / 38 / 4 |
+
+SYS是本轮主要收益；保留独热控制和可配置bank入口，A/B不进入收尾源码。D8/mask2保留显式候选，默认仍I4/D4/mask0。
+SYS单项I16/D4/mask0的Core为90.1307 MHz，D8联合为89.3336 MHz，低0.8844%；D8六项每MHz几何均值提高0.8207%。不能写成相对SYS单项两项同时提升。
+D4/mask1联合为85.4920 MHz，低于本轮起点86.8282，拒绝该映射。D8相对起点同时改善Core频率与每MHz性能，但外设Fmax下降、仍高于25 MHz目标。
+SoC+TCM的Core由旧95.0299降到93.6067 MHz，下降1.4976%，同时LUT减少6840、FF减少28。**本轮未达到所有层Core主频不退的验收条件，正式baseline不升级。**
+Core+TCM由旧103.8853提高到105.0641 MHz、LUT减少109、FF不变；该层>100 MHz，真实TCM每MHz仍>3。
+
+含A对照8a0d8f7的Core+TCM/SoC+TCM/DDR为104.0042/93.1532/87.0701 MHz，LUT26449/39979/53056。
+去掉A后三层分别少319/71/485 LUT、FF不变，Core均提高；逐文件配对只有Load Queue RTL和来源元数据不同。
+D4/mask1的联合对照为Core85.4920、SYS104.6025、DDR150.4664、外设86.9414 MHz，52013 LUT/54887 FF/38 DRM/4 APM，保留负结果。
+无A三层SYS WNS分别不适用/+3.646/+3.127 ns，外设WNS不适用/+29.879/+28.415 ns，DDR D8 WNS+1.354 ns；全部0 latch。
+
+无A Core+TCM最差ISS packet→ISS packet，21级/扇出33；SoC+TCM最差ISS packet→TCM RAM地址，20级/扇出28。
+DDR D8最差ISS packet→IQ packet，19级/扇出818；SYS最差AW decode→write-route FIFO CE，13级/扇出163。
+Core+TCM无负setup/hold，缺I/O delay3/2；SoC+TCM外设→SYS setup -2.036ns，缺I/O4/2。
+DDR D8跨域setup DDR→SYS -6.064、外设→SYS -2.998；hold SYS→DDR -4.771、DDR→PHY -1.137、DDR同域 -0.006ns/3端点；缺I/O35/73。
+布线Fmax/WNS和未布通数量未测，不能写成0；目标时钟100/80/125/25 MHz与各域独立Fmax分别呈现。
+
+原生工程 `$PDS_WORK_ROOT/work/path-tuning-20261027/{control-core-tcm,control-soc-tcm,control-sys-i16-d8-h2}`。
+摘要、命令、源/镜像/日志哈希见 `logs/path-tuning-20261027/final-summary.json`，原始报告和两种源码对照均保留。
+十组标准综合结束后再次核验静态输入全部通过；启动前物理/提交余量各至少6 GiB，未修改分页或终止无关进程。
+
 ## 结果解释
 
 Fmax 是对应域内路径的综合估计，不等于已上板频率。WNS、资源、最差路径、跨域报告分别呈现。
