@@ -35,7 +35,7 @@ def run(command, log, cwd=ROOT, env=None):
 def freeze(bundle, iterations, modes):
     if bundle.exists():
         manifest = json.loads((bundle / 'manifest.json').read_text())
-        if manifest['iterations'] != iterations or not set(modes).issubset(manifest['modes']):
+        if manifest['iterations'] != iterations or manifest.get('optimization', 'O2') != p2.optimization() or not set(modes).issubset(manifest['modes']):
             raise ValueError('existing firmware selection differs; choose a new bundle')
         p2.verify_hashes(bundle / 'source', manifest['source_sha256'])
         for im in manifest['images']:
@@ -61,7 +61,7 @@ def freeze(bundle, iterations, modes):
                 run(command, out / 'build.log', source, dict(os.environ, SOC='1', SOC_DDR='0'))
             else:
                 command = [tools+'gcc', '-march=rv32im_zicsr', '-mabi=ilp32', '-mcmodel=medany',
-                    '-mno-relax', '-std=gnu99', '-O2', '-g', '-ffreestanding', '-fno-builtin', '-fno-common',
+                    '-mno-relax', '-std=gnu99', '-'+p2.optimization(), '-DHGB_OPT_LEVEL="-'+p2.optimization()+'"', '-g', '-ffreestanding', '-fno-builtin', '-fno-common',
                     '-fno-pie', '-fno-tree-loop-distribute-patterns', '-mstrict-align', '-nostdlib', '-nostartfiles',
                     '-static', '-no-pie', '-Ibenchmark/p2', '-Ibenchmark/bsp', *flags,
                     '-DP2_TCM=1', '-DP2_WARM=0', '-DP2_BACKGROUND=1', '-DP2_TIMER_MODE=0',
@@ -99,7 +99,7 @@ def freeze(bundle, iterations, modes):
         im=p2.build_image(args,'background',mode,tools,bundle)
         im['scenario']='npu_background'
         images.append(im)
-    manifest=dict(schema=1,iterations=iterations,modes=modes,source_sha256=hashes,images=images,
+    manifest=dict(schema=1,optimization=p2.optimization(),iterations=iterations,modes=modes,source_sha256=hashes,images=images,
                   compiler=subprocess.check_output([tools+'gcc','--version'],text=True).splitlines()[0])
     write(bundle/'manifest.json',manifest)
     print(f'PASS unified firmware {len(images)} images: {bundle}',flush=True)
@@ -270,6 +270,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--bundle',type=Path)
+    parser.add_argument('--models',type=Path,help='Shared immutable RTL model directory across software optimization levels')
     parser.add_argument('--platforms',nargs='+',choices=CONFIG['platforms'],default=list(CONFIG['platforms']))
     parser.add_argument('--clocks',nargs='+',choices=CONFIG['clock_periods_ps'],default=['target'])
     parser.add_argument('--scenarios',nargs='+',choices=['tcm','tcm_background',*p2.LAYERS,'npu_background'])
@@ -290,7 +291,7 @@ def main():
     for platform in args.platforms:
         for clock in args.clocks:
             config=configuration(platform,clock,args.xlen)
-            binary,receipt=build(config,output/'models'/f'{platform}-{clock}-rv{args.xlen}')
+            binary,receipt=build(config,(args.models.resolve() if args.models else output/'models')/f'{platform}-{clock}-rv{args.xlen}')
             if args.functional:
                 functional(binary,config,output,receipt)
             if firmware:

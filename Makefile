@@ -1,5 +1,7 @@
 VERILATOR ?= verilator
 XLEN ?= 32
+OPT ?= O2
+export OPT
 MUL_IMPL ?= 0
 DIV_IMPL ?= 0
 PREDICTOR_MODE ?= 0

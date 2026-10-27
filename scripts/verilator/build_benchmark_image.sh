@@ -4,6 +4,8 @@ set -euo pipefail
 xlen="$1"
 output_dir="$2"
 shift 2
+opt="${OPT:-O2}"
+case "$opt" in O2|O3|Ofast) ;; *) echo "OPT must be O2, O3 or Ofast" >&2; exit 2;; esac
 
 tool_root="${RISCV_TOOL_ROOT:?set RISCV_TOOL_ROOT to the toolchain bin directory}"
 tool_prefix="${tool_root}/riscv64-unknown-elf-"
@@ -46,7 +48,7 @@ dmem_depth=$((dmem_bytes / dmem_word_bytes))
 mkdir -p "${output_dir}"
 "${tool_prefix}gcc" \
     -march="${march}" -mabi="${mabi}" -mcmodel=medany -mno-relax \
-    -std=gnu99 -O2 -g -ffreestanding -fno-builtin -fno-common \
+    -std=gnu99 "-$opt" -DHGB_OPT_LEVEL=\"-$opt\" -g -ffreestanding -fno-builtin -fno-common \
     -fno-pie -fno-tree-loop-distribute-patterns -mstrict-align \
     -nostdlib -nostartfiles -static -no-pie \
     -I benchmark/bsp \

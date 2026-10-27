@@ -51,6 +51,13 @@ def check_core_profile(config, expected):
         raise ValueError(f'Core configuration does not match explicit {expected} profile')
 
 
+def optimization():
+    value = os.environ.get('OPT', 'O2')
+    if value not in ('O2', 'O3', 'Ofast'):
+        raise ValueError('OPT must be O2, O3 or Ofast')
+    return value
+
+
 def soc_build_configuration(clock_profile=1, icache_fill_bytes=4):
     if clock_profile not in CLOCKS or icache_fill_bytes not in (4, 8):
         raise ValueError('invalid static SoC clock profile or I-cache install width')
@@ -509,7 +516,7 @@ def build_image(args, layer, mode, tools, frozen):
     vendor = source_root / 'benchmark/coremark/vendor/coremark'
     elf = output / 'program.elf'
     command = [tools + 'gcc', '-march=rv32im_zicsr', '-mabi=ilp32', '-mcmodel=medany',
-        '-mno-relax', '-std=gnu99', '-O2', '-g', '-ffreestanding', '-fno-builtin', '-fno-common',
+        '-mno-relax', '-std=gnu99', '-'+optimization(), '-DHGB_OPT_LEVEL="-'+optimization()+'"', '-g', '-ffreestanding', '-fno-builtin', '-fno-common',
         '-fno-pie', '-fno-tree-loop-distribute-patterns', '-mstrict-align', '-nostdlib', '-nostartfiles',
         '-static', '-no-pie', '-I' + str(source_root / 'benchmark/p2'),
         '-I' + str(source_root / 'benchmark/bsp'), '-I' + str(vendor),
