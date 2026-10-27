@@ -14,9 +14,6 @@ bench_dma_block_enable="${SOC_DMA_BLOCK_ENABLE:-0}"
 [[ "$bench_dma_block_enable" =~ ^[01]$ ]] || { echo 'SOC_DMA_BLOCK_ENABLE must be 0 or 1' >&2; exit 2; }
 bench_cache_block_enable="${SOC_CACHE_BLOCK_ENABLE:-0}"
 bench_ddr_model_bytes="${SOC_DDR_MODEL_BYTES:-${SOC_DDR_BYTES:-0}}"
-bench_mm3_accel_enable="${SOC_MM3_ACCEL_ENABLE:-0}"
-bench_mm3_mac_lanes="${MM3_MAC_LANES:-16}"
-[[ "$bench_mm3_accel_enable" =~ ^[01]$ && "$bench_mm3_mac_lanes" =~ ^(1|2|4|8|16|32)$ ]] || { echo "Invalid MiniMind accelerator configuration" >&2; exit 2; }
 bench_clock_hz="${SOC_CLOCK_HZ:-50000000}"
 bench_uart_divisor="${SOC_UART_DIVISOR:-434}"
 [[ "$bench_ddr_model_bytes" =~ ^[0-9]+$ ]] || { echo 'SOC_DDR_MODEL_BYTES must be a nonnegative integer' >&2; exit 2; }
@@ -42,11 +39,10 @@ if [[ "${SOC:-0}" == "1" ]]; then
     if [[ "${SOC_DCACHE_ENABLE:-1}" != 1 ]]; then
         config="${config}-dcache${SOC_DCACHE_ENABLE}"
     fi
-    if [[ "$bench_mm3_accel_enable" == 1 ]]; then config="${config}-mm3l${bench_mm3_mac_lanes}"; fi
     bench_top=tb_soc_benchmark
     bench_tb=tb/soc/tb_soc_benchmark.sv
     bench_files=scripts/soc_files.f
-    if [[ "$core_backend" == scoreboard && "$bench_mm3_accel_enable" == 0 ]]; then
+    if [[ "$core_backend" == scoreboard ]]; then
         config="${config}-axi4"
         bench_top=tb_soc_system
         bench_tb=tb/soc/tb_soc_system.sv

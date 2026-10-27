@@ -80,4 +80,4 @@ DDR 原生目标测试；DDR 测试包含 11 个检查，覆盖时钟停止时�
 
 后续按 M2 数据评估：SPI 连续读取减少重复头部、TCM 系统宽口、DDR owner 周转、
 Cache 安装和 refill 等待。M2 cold/warm、M2-B 并发带宽和等待须独立测量；
-当前没有这些正式 CoreMark 成绩，没有真实 DDR 带宽、Fmax、ECC 或硬件一致性结果。
+当前没有真实 DDR 板级带宽、ECC 或硬件 Cache 一致性结果；综合域内估计另列。

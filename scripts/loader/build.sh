@@ -13,9 +13,11 @@ out="build/loader/rv$xlen"
 if [[ "${LOADER_BAUD:-115200}" != 115200 || "${LOADER_QUIET_MS:-100}" != 100 ]]; then
     out="build/loader/sim-rv$xlen"
 fi
+opt="${SOFTWARE_OPT:-O3}"
+[[ "$opt" =~ ^(O2|O3|Ofast)$ ]] || exit 2
 mkdir -p "$out"
 "${prefix}gcc" -march="rv${xlen}im_zicsr_zifencei" -mabi="$abi" -mcmodel=medany \
-    -Os -g -ffreestanding -fno-builtin -fno-pie -fno-stack-protector -mno-relax \
+    -"$opt" -g -ffreestanding -fno-builtin -fno-pie -fno-stack-protector -mno-relax \
     -Wall -Wextra -Werror -nostdlib -nostartfiles -static -no-pie \
     -DLOADER_BAUD="${LOADER_BAUD:-115200}" -DLOADER_QUIET_MS="${LOADER_QUIET_MS:-100}" \
     -Wl,--build-id=none,--no-relax,-T,software/loader/link.ld,-Map,"$out/loader.map" \

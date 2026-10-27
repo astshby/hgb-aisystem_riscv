@@ -1,0 +1,9 @@
+{
+  "variant": "yolo",
+  "default_accelerator": "yolo",
+  "accelerators": [
+    "yolo"
+  ],
+  "coremark": false,
+  "rt_thread": false
+}

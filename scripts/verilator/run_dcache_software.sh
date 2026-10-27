@@ -13,9 +13,9 @@ for enabled in 1 0; do
     sim_dir="build/verilator/benchmark-rv${xlen}-${config}"
     log="logs/soc-dcache-rv${xlen}-${config}.log"
     bash scripts/verilator/build_benchmark_sim.sh "${xlen}"
-    bash scripts/verilator/build_benchmark_image.sh "${xlen}" "${image_dir}" \
+    bash scripts/verilator/build_baremetal_image.sh "${xlen}" "${image_dir}" \
         -march="rv${xlen}im_zicsr_zifencei" -DTEST_DCACHE_ENABLE="${enabled}" \
-        benchmark/bsp/crt0.S tb/cache/dcache_smoke.c benchmark/bsp/runtime.c benchmark/bsp/softarith.c \
+        software/common/baremetal/crt0.S tb/cache/dcache_smoke.c software/common/baremetal/runtime.c software/common/baremetal/softarith.c \
         >"logs/soc-dcache-build-rv${xlen}-${config}.log" 2>&1
     tohost_addr="$("${tool_prefix}nm" -n "${image_dir}/program.elf" | awk '$3 == "tohost" { print $1; exit }')"
     console_addr="$("${tool_prefix}nm" -n "${image_dir}/program.elf" | awk '$3 == "sim_console" { print $1; exit }')"

@@ -2,6 +2,9 @@
 
 > 写作约束：[skills/regulation.md](../../../skills/regulation.md)。本文记录频率、边界和 PDS 的经验，不把工具估计写成板上结果。
 
+当前为四域 SoC，选用加速器时增加第五域；详细当前配置见 FPGA_ADAPTATION.md。
+以下十三轮/P0 数值按原版本保存，所述单时钟和旧门槛属于历史配置。
+
 ## 1. 为什么加寄存器边界
 
 长组合路径通常跨 Core、fabric、DDR 桥。把请求、响应、IRQ 各寄存一次可以切断

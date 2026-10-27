@@ -64,10 +64,10 @@ print(json.dumps({{'runner':sys.argv[1:], 'profile':result.stdout.splitlines()}}
         self.assertEqual(record['runner'], [runner, '32'])
         self.assertEqual(dict(zip(FIELDS, record['profile'])), dict(zip(FIELDS, expected)))
 
-    def test_bare_p2_targets_use_p0_control_defaults(self):
+    def test_bare_targets_use_reviewed_profile(self):
         for target, runner in [('soc-system-test', 'run_soc_system.sh'), ('soc-axi-test', 'run_axi_system.sh')]:
             with self.subTest(target=target):
-                self.expect_profile(self.invoke(target), P0, 'scripts/verilator/' + runner)
+                self.expect_profile(self.invoke(target), P1, 'scripts/verilator/' + runner)
 
     def test_sourced_p1_reaches_both_targets(self):
         for target, runner in [('soc-system-test', 'run_soc_system.sh'), ('soc-axi-test', 'run_axi_system.sh')]:
@@ -83,9 +83,9 @@ print(json.dumps({{'runner':sys.argv[1:], 'profile':result.stdout.splitlines()}}
             expected, 'scripts/verilator/run_soc_system.sh')
 
     def test_explicit_environment_is_not_replaced(self):
-        expected = list(P0)
+        expected = list(P1)
         expected[2], expected[4] = '8', '0'
-        expected[12] = 'm0d0-p0r0q8i2-scoreboard'
+        expected[12] = 'm0d0-p1r0q8i2-scoreboard-s1j8m4-f3'
         self.expect_profile(self.invoke('soc-axi-test',
             environment={'CORE_BACKEND': 'scoreboard', 'ISSUE_WIDTH': '2', 'RETIRE_ENTRIES': '8', 'DIV_IMPL': '0'}),
             expected, 'scripts/verilator/run_axi_system.sh')

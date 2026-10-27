@@ -1,3 +1,0 @@
-numpy==2.2.6
-safetensors==0.6.2
-regex==2026.9.29
