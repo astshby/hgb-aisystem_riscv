@@ -74,3 +74,11 @@ DDR 退休计数均超过 260 万，I$/D$ 命中和 DMA 热代码搬运均被检
 
 本树无加速器。三层硬件标准综合分别测资源、域内 Fmax/WNS 和最差路径。
 本轮没有 P&R、bitstream 或板级结果；CDC/PHY/I/O 的原始报告仍需后续处理。
+
+## 本轮标准综合
+
+五组测量的对应配置、各域 Fmax/WNS、LUT/FF/DRM/APM、最差路径和原始 CDC/hold 问题，
+见 [FPGA 实测表](fpga/FPGA_ADAPTATION.md#2026-10-27-标准综合实测)。本分支表只列自身保留的硬件。
+Core+TCM 达到 103.8853 MHz；SoC+TCM 为 95.0299 MHz，完整 DDR SoC 的 Core 为 85.1064 MHz。
+只有 Core+TCM 达到 Core 100 MHz 综合目标，完整系统尚未达到。
+没有本轮布局布线或上板成绩。已完成的仿真和原生综合绑定各自冻结输入，文档更新不改变测量来源。
