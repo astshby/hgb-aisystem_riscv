@@ -20,3 +20,14 @@
 # Python bytecode
 __pycache__/
 *.pyc
+
+# MiniMind: preserve sources/configuration/manifests, ignore generated large files.
+/software/minimind3/model/*.safetensors
+/software/minimind3/model/*.bin
+/software/minimind3/model/.cache/
+/software/minimind3/.cache/
+/software/minimind3/.venv*/
+/software/minimind3/c_runtime/assets/*.bin
+/software/minimind3/c_runtime/assets/*.hex
+/software/minimind3/c_runtime/build/
+/software/minimind3/c_runtime/minimind3.elf
