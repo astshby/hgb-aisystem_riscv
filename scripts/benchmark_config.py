@@ -14,11 +14,11 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def configuration(platform, clock='target', xlen=32, icache_bytes=None, dcache_bytes=None):
+def configuration(platform, clock='target', xlen=32, icache_bytes=None, dcache_bytes=None, bank_xor_mask=0):
     if xlen not in (32, 64):
         raise ValueError('XLEN must be 32 or 64')
     result = dict(CONFIG['platforms'][platform])
-    memory = cache_memory(icache_bytes, dcache_bytes)
+    memory = cache_memory(icache_bytes, dcache_bytes, bank_xor_mask)
     identity = sha(CONFIG_PATH) + sha(PROFILE_PATH)
     if memory != CONFIG['memory']:
         identity += json.dumps(memory, sort_keys=True)
@@ -33,6 +33,8 @@ def configuration(platform, clock='target', xlen=32, icache_bytes=None, dcache_b
                   config_sha256=hashlib.sha256(identity.encode()).hexdigest(),
                   native_board_profile=CONFIG['native_board_profiles'].get(clock),
                   timing_status='unvalidated_target')
+    if bank_xor_mask:
+        result['macros']['SOC_DCACHE_BANK_XOR_MASK'] = bank_xor_mask
     return result
 
 

@@ -5,14 +5,17 @@ xlen="${1:-32}"
 source scripts/verilator/p2_core_config.sh
 expect_turnover="${EXPECT_TURNOVER:-0}"
 expect_block="${EXPECT_BLOCK:--1}"
+bank_mask="${BANK_XOR_MASK:-0}"
+cache_bytes="${DCACHE_BYTES:-256}"
+[[ "$bank_mask" =~ ^[0-3]$ && "$cache_bytes" =~ ^[0-9]+$ ]] || exit 2
 [[ "$xlen" =~ ^(32|64)$ && "$expect_turnover" =~ ^[01]$ && "$expect_block" =~ ^(-1|0|1)$ ]] || {
     echo "usage: EXPECT_TURNOVER=0|1 EXPECT_BLOCK=-1|0|1 bash scripts/verilator/run_dcache_turnover.sh 32|64" >&2
     exit 2
 }
 export CCACHE_TEMPDIR="$PWD/build/ccache-tmp" CCACHE_DIR="$PWD/build/ccache"
 log_root="${P2_LOG_ROOT:-logs/p2/measure-optimize-20261022/review/dcache-turnover-$p2_core_build_tag}"
-out="build/verilator/p2-dcache-turnover-rv${xlen}-$p2_core_build_tag"
-prefix="$log_root/rv${xlen}-expect${expect_turnover}-block${expect_block}"
+out="build/verilator/p2-dcache-turnover-rv${xlen}-$p2_core_build_tag-c${cache_bytes}-h${bank_mask}"
+prefix="$log_root/rv${xlen}-expect${expect_turnover}-block${expect_block}-c${cache_bytes}-h${bank_mask}"
 mkdir -p "$out" "$log_root" "$CCACHE_TEMPDIR" "$CCACHE_DIR"
 sources=(vsrc/pkg/core_config_pkg.sv vsrc/pkg/riscv_unpriv_pkg.sv vsrc/pkg/riscv_priv_pkg.sv
     vsrc/pkg/core_types_pkg.sv vsrc/pkg/soc_config_pkg.sv vsrc/pkg/soc_addr_pkg.sv
@@ -29,7 +32,7 @@ sha256sum "${sources[@]}" scripts/verilator/run_dcache_turnover.sh >"$prefix.sou
     verilator --version
 } >"$prefix.context.txt"
 verilator -Wall -Wno-fatal --assert --timing --binary -j 2 -CFLAGS -O1 \
-    -DCORE_XLEN="$xlen" "${p2_core_flags[@]}" -Mdir "$out" "${sources[@]}" --top-module tb_dcache_turnover \
+    -DCORE_XLEN="$xlen" -DSOC_DCACHE_BANK_XOR_MASK="$bank_mask" -GCACHE_BYTES="$cache_bytes" "${p2_core_flags[@]}" -Mdir "$out" "${sources[@]}" --top-module tb_dcache_turnover \
     >"$prefix.build.log" 2>&1 || { tail -n 45 "$prefix.build.log"; exit 1; }
 if rg -n '%(Error|Warning-(LATCH|UNOPTFLAT|MULTIDRIVEN|ALWCOMBORDER))' "$prefix.build.log"; then exit 1; fi
 # 严格模式的断言失败保留非零退出码；旧 RTL 的预期失败由外层审查记录判定。

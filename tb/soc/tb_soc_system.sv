@@ -281,26 +281,35 @@ module tb_soc_system #(
     for(genvar b=0;b<2;b++) begin : g_dcache_latency
         logic lookup_q=0;
         logic waiting_cached, cached_request_present;
+        logic [1:0] cached_pending;
+        longint unsigned roi_same_bank_compete=0, roi_active_bank_wait=0, roi_response_backpressure=0, roi_maintenance_wait=0;
         longint unsigned request_stall_cycles=0, response_with_request=0, same_cycle_turnover=0;
         longint unsigned roi_request_stall_cycles=0, roi_response_with_request=0, roi_same_cycle_turnover=0;
         // 每 bank 只记一次等待周期；请求地址/尺寸合法且整行可缓存才计入。
         always_comb begin
-            waiting_cached=0; cached_request_present=0;
+            waiting_cached=0; cached_request_present=0; cached_pending=0;
             for(int p=0;p<2;p++) begin
                 if(dut.u_memory.u_dcache.ENABLE&&dut.u_memory.u_dcache.req_valid[p]&&
-                   dut.u_memory.u_dcache.request[p].addr[dut.u_memory.u_dcache.BANK_BIT]==1'(b)&&
+                   dut.u_memory.u_dcache.request_bank[p]==1'(b)&&
                    dut.u_memory.u_dcache.request[p].addr>=XLEN'(soc_addr_pkg::DDR_BASE)&&
                    (65'(dut.u_memory.u_dcache.request[p].addr)&~65'(dut.u_memory.u_dcache.LINE_BYTES-1))+
                        65'(dut.u_memory.u_dcache.LINE_BYTES)<=65'(soc_addr_pkg::DDR_BASE)+65'(DDR_BYTES)&&
                    (XLEN==64||dut.u_memory.u_dcache.request[p].size!=core_types_pkg::MEM_DWORD)&&
                    (dut.u_memory.u_dcache.request[p].addr&((XLEN'(1)<<dut.u_memory.u_dcache.request[p].size)-1))==0) begin
-                    cached_request_present=1;
+                    cached_request_present=1; cached_pending[p]=1;
                     if(!dut.u_memory.u_dcache.req_ready[p]) waiting_cached=1;
                 end
             end
         end
         always @(posedge clk_core) if(!reset_async&&!dut.rst_core&&p2_metrics_enable) begin
             if(waiting_cached) begin request_stall_cycles++; if(metrics_roi) roi_request_stall_cycles++; end
+            // 各原因独立计数，可重叠；不能相加当作总停顿或全部解释成双口竞争。
+            if(metrics_roi) begin
+                if(&cached_pending) roi_same_bank_compete++;
+                if(waiting_cached && dut.u_memory.u_dcache.bank_busy_q[b]) roi_active_bank_wait++;
+                if(waiting_cached && dut.u_memory.u_dcache.b_rsp_valid[b] && !dut.u_memory.u_dcache.b_rsp_ready[b]) roi_response_backpressure++;
+                if(waiting_cached && (dut.u_memory.u_dcache.maintenance_q || dut.u_memory.u_dcache.maint_req_valid)) roi_maintenance_wait++;
+            end
             if(dut.u_memory.u_dcache.response_fire[b]&&cached_request_present) begin
                 response_with_request++; if(metrics_roi) roi_response_with_request++;
             end
@@ -308,9 +317,10 @@ module tb_soc_system #(
                 same_cycle_turnover++; if(metrics_roi) roi_same_cycle_turnover++;
             end
         end
-        final if(p2_metrics_enable) $display("P2_CACHE_BANK name=dcache%0d request_stall_cycles=%0d response_with_request=%0d same_cycle_turnover=%0d roi_request_stall_cycles=%0d roi_response_with_request=%0d roi_same_cycle_turnover=%0d",
+        final if(p2_metrics_enable) $display("P2_CACHE_BANK name=dcache%0d request_stall_cycles=%0d response_with_request=%0d same_cycle_turnover=%0d roi_request_stall_cycles=%0d roi_response_with_request=%0d roi_same_cycle_turnover=%0d roi_same_bank_compete=%0d roi_active_bank_wait=%0d roi_response_backpressure=%0d roi_maintenance_wait=%0d",
             b,request_stall_cycles,response_with_request,same_cycle_turnover,
-            roi_request_stall_cycles,roi_response_with_request,roi_same_cycle_turnover);
+            roi_request_stall_cycles,roi_response_with_request,roi_same_cycle_turnover,
+            roi_same_bank_compete,roi_active_bank_wait,roi_response_backpressure,roi_maintenance_wait);
         // D-cache 在接受 cache 请求后的下一拍作唯一 LOOKUP 决策。
         always_ff @(posedge clk_core) lookup_q<=!dut.rst_core&&dut.u_memory.u_dcache.g_bank[b].u_cache.request_fire;
         soc_cache_latency_metrics #(.NAME($sformatf("dcache%0d",b))) u_latency (
@@ -425,9 +435,9 @@ module tb_soc_system #(
         $display("P2_STACK roi_ddr_sp_writes=%0d roi_tcm_sp_writes=%0d roi_bad_sp_writes=%0d roi_sp_construction_writes=%0d roi_ddr_stack_accesses=%0d roi_tcm_stack_accesses=%0d roi_bad_stack_accesses=%0d",
             roi_ddr_sp_writes,roi_tcm_sp_writes,roi_bad_sp_writes,roi_sp_construction_writes,
             roi_ddr_stack_accesses,roi_tcm_stack_accesses,roi_bad_stack_accesses);
-        $display("P2_CACHE_CONFIG icache_bytes=%0d icache_line_bytes=%0d icache_ways=2 icache_fill_bytes=%0d dcache_bytes=%0d dcache_line_bytes=%0d dcache_ways=2 dcache_banks=2 dcache_bank_bit=%0d dcache_set_low=%0d dcache_set_high=%0d",
+        $display("P2_CACHE_CONFIG icache_bytes=%0d icache_line_bytes=%0d icache_ways=2 icache_fill_bytes=%0d dcache_bytes=%0d dcache_line_bytes=%0d dcache_ways=2 dcache_banks=2 dcache_bank_bit=%0d dcache_bank_xor_mask=%0d dcache_set_low=%0d dcache_set_high=%0d",
             dut.u_memory.u_icache.CACHE_BYTES,dut.u_memory.u_icache.LINE_BYTES,dut.u_memory.u_icache.FILL_BYTES,
-            dut.u_memory.u_dcache.CACHE_BYTES,dut.u_memory.u_dcache.LINE_BYTES,dut.u_memory.u_dcache.BANK_BIT,
+            dut.u_memory.u_dcache.CACHE_BYTES,dut.u_memory.u_dcache.LINE_BYTES,dut.u_memory.u_dcache.BANK_BIT,dut.u_memory.u_dcache.BANK_XOR_MASK,
             $clog2(dut.u_memory.u_dcache.LINE_BYTES),dut.u_memory.u_dcache.BANK_BIT-1);
     end
 

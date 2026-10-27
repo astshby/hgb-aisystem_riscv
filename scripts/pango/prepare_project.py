@@ -171,7 +171,7 @@ def core_profile(configuration):
 def compile_command(xlen, profile_id, local_tcm, dma_wide=1,
                     cache_block=None, dma_block=None, core_issue_width=None, scoreboard=False,
                     scoreboard_config=None, soc_system=False, board_clock_profile=0, npu_enable=False, mm3_enable=False,
-                    icache_bytes=4096, dcache_bytes=4096):
+                    icache_bytes=4096, dcache_bytes=4096, dcache_bank_xor_mask=0):
     if soc_system and not scoreboard:
         raise ValueError("soc_system requires scoreboard")
     # schema 1--7 保持历史 Tcl；schema 8 的 AXI 系统没有这些 legacy 开关。
@@ -201,6 +201,10 @@ def compile_command(xlen, profile_id, local_tcm, dma_wide=1,
                 issue_directive += f" CORE_LIMITED_INTEGER_OOO={scoreboard_config['core_limited_integer_ooo']}"
             if "core_scheduler_forward_mode" in scoreboard_config:
                 issue_directive += f" CORE_SCHEDULER_FORWARD_MODE={scoreboard_config['core_scheduler_forward_mode']}"
+    if dcache_bank_xor_mask:
+        if not soc_system or dcache_bank_xor_mask not in (1, 2, 3):
+            raise ValueError('bank XOR override requires supported soc_system mapping')
+        issue_directive += f" SOC_DCACHE_BANK_XOR_MASK={dcache_bank_xor_mask}"
     # profile 0 不写入 BOARD_CLOCK_PROFILE，保持既有 compile.tcl 逐字节兼容。
     board_directive = "" if board_clock_profile == 0 else f" BOARD_CLOCK_PROFILE {board_clock_profile}"
     if (icache_bytes, dcache_bytes) != (4096, 4096):
@@ -247,6 +251,8 @@ def verify_staged_manifest(root, manifest):
         for key in ("cache_block_enable", "dma_block_enable", "core_issue_width"):
             if type(manifest.get(key)) is not int or manifest.get(key) != 1:
                 raise ValueError(f"invalid staged block/issue configuration: {key}")
+    if type(manifest.get('dcache_bank_xor_mask', 0)) is not int or manifest.get('dcache_bank_xor_mask', 0) not in (0,1,2,3):
+        raise ValueError('invalid staged D-cache bank mapping')
     scoreboard_config = dict(SCOREBOARD_CONFIGURATION)
     if schema in (8, 9):
         for key in ('icache_bytes', 'dcache_bytes'):
@@ -354,7 +360,8 @@ def verify_staged_manifest(root, manifest):
                                        npu_enable=manifest.get("npu_enable", False),
                                        mm3_enable=manifest.get("mm3_enable", False),
                                        icache_bytes=manifest.get('icache_bytes', 4096),
-                                       dcache_bytes=manifest.get('dcache_bytes', 4096))
+                                       dcache_bytes=manifest.get('dcache_bytes', 4096),
+                                       dcache_bank_xor_mask=manifest.get('dcache_bank_xor_mask', 0))
     accepted_commands = [[expected_compile]]
     # P2 在合入 P1 前使用 schema 4。仅其已覆盖哈希的 AXI wrapper 可省略旧参数。
     if schema == 4 and staged_soc_system(root, manifest):
@@ -410,6 +417,7 @@ def main():
     parser.add_argument("--ip-dir", type=Path, required=True, help="generated ddr3_test candidate directory")
     parser.add_argument("--xlen", type=int, choices=(32, 64), default=32)
     parser.add_argument('--icache-bytes', type=int, choices=(4096, 8192, 16384, 32768, 65536), default=4096)
+    parser.add_argument('--dcache-bank-xor-mask', type=int, choices=(0,1,2,3), default=0)
     parser.add_argument('--dcache-bytes', type=int, choices=(4096, 8192, 16384, 32768, 65536), default=4096)
     parser.add_argument("--soc-profile", choices=("full", "lite"), default="full")
     parser.add_argument("--local-tcm", type=int, choices=(0, 1), default=None,
@@ -548,7 +556,7 @@ def main():
                 "status": "candidate; no timing closure or board compatibility claim", "files": {}}
     if scoreboard:
         manifest.update(SCOREBOARD_CONFIGURATION)
-        manifest.update(icache_bytes=args.icache_bytes, dcache_bytes=args.dcache_bytes)
+        manifest.update(icache_bytes=args.icache_bytes, dcache_bytes=args.dcache_bytes, dcache_bank_xor_mask=args.dcache_bank_xor_mask)
         manifest.update(core_retire_entries=args.retire_entries,
                         core_split_issue_queue=args.split_issue_queue,
                         core_limited_integer_ooo=args.limited_integer_ooo,
@@ -616,7 +624,7 @@ def main():
                                  scoreboard_config=manifest if scoreboard else None,
                                  soc_system=scoreboard,
                                  board_clock_profile=args.board_clock_profile,npu_enable=args.npu_enable,mm3_enable=args.mm3_enable,
-                                 icache_bytes=args.icache_bytes,dcache_bytes=args.dcache_bytes)]
+                                 icache_bytes=args.icache_bytes,dcache_bytes=args.dcache_bytes, dcache_bank_xor_mask=args.dcache_bank_xor_mask)]
     (root / "compile.tcl").write_text("\n".join(commands) + "\n", encoding="utf-8")
     (root / "synthesize.tcl").write_text(SYNTHESIZE_COMMANDS, encoding="utf-8")
     shutil.copyfile(repo / "scripts/pango/implement.tcl", root / "implement.tcl")

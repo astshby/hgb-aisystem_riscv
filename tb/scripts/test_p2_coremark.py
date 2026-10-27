@@ -197,6 +197,13 @@ class P2ResultTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'cache size'):
             p2.parse_result(text, 'performance', 2, 'cold')
 
+    def test_explicit_bank_mapping_must_match_instance(self):
+        log = result_log().replace('dcache_banks=2', 'dcache_banks=2 dcache_bank_xor_mask=1')
+        expected = {'icache_bytes':4096, 'dcache_bytes':4096, 'dcache_bank_xor_mask':1}
+        p2.parse_result(log, 'performance', 2, 'cold', expected_cache=expected)
+        with self.assertRaisesRegex(ValueError, 'bank mapping'):
+            p2.parse_result(log, 'performance', 2, 'cold')
+
     def test_explicit_cache_capacity_must_match_both_actual_instances(self):
         text = result_log().replace('icache_bytes=4096', 'icache_bytes=16384').replace('dcache_bytes=4096', 'dcache_bytes=8192')
         expected = dict(icache_bytes=16384, dcache_bytes=8192)

@@ -427,6 +427,8 @@ def parse_result(text, mode, iterations, layer, expected_core=None, expected_soc
                       **({key: expected_cache[key] for key in ('icache_bytes','dcache_bytes')} if expected_cache else {})}
     if any(cache.get(key) != value for key, value in expected_geometry.items()):
         raise ValueError('actual cache size differs from the frozen benchmark contract')
+    if cache.get('dcache_bank_xor_mask', 0) != (expected_cache or {}).get('dcache_bank_xor_mask', 0):
+        raise ValueError('actual D-cache bank mapping differs from the frozen benchmark contract')
     soc = parse_soc_config(text, expected_soc, expected_periods_ps)
     if soc is not None and (soc['clock_profile'] != clock_config or
                            cache.get('icache_fill_bytes') != soc['icache_fill_bytes']):

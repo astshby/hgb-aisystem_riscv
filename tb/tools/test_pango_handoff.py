@@ -147,6 +147,18 @@ class HandoffTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "compile Tcl parameters"):
             verify_staged_manifest(output, manifest)
 
+    def test_bank_mapping_is_bound_to_native_compile(self):
+        output, _ = self.stage(backend="scoreboard", clock=1,
+                               extra=("--dcache-bank-xor-mask", "1"))
+        manifest = json.loads((output / "manifest.json").read_text())
+        verify_staged_manifest(output, manifest)
+        path = output / "compile.tcl"
+        self.assertIn("SOC_DCACHE_BANK_XOR_MASK=1", path.read_text())
+        path.write_text(path.read_text().replace("SOC_DCACHE_BANK_XOR_MASK=1", "SOC_DCACHE_BANK_XOR_MASK=2"))
+        manifest["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(ValueError, "compile Tcl parameters"):
+            verify_staged_manifest(output, manifest)
+
     def test_p1_defaults_match_simulation_profile(self):
         # 两种入口独立读取的参数必须一致，避免 FPGA 与仿真只共用 P1 名称。
         result = subprocess.run(["bash", "-c", 'source "$1"; env', "profile-check",

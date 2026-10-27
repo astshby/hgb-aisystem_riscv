@@ -7,13 +7,17 @@ PROFILE_PATH=ROOT/'scripts/hardware_profile.json'
 PROFILE=json.loads(PROFILE_PATH.read_text())
 
 
-def cache_memory(icache_bytes=None, dcache_bytes=None):
+def cache_memory(icache_bytes=None, dcache_bytes=None, bank_xor_mask=0):
     memory = dict(PROFILE['memory'])
     for key, value in (('icache_bytes', icache_bytes), ('dcache_bytes', dcache_bytes)):
         if value is not None:
             if type(value) is not int or value < 4096 or value > 65536 or value & (value - 1):
                 raise ValueError('cache capacity must be a power of two from 4096 to 65536 bytes')
             memory[key] = value
+    if type(bank_xor_mask) is not int or bank_xor_mask not in (0, 1, 2, 3):
+        raise ValueError('bank XOR mask must be 0, 1, 2 or 3')
+    if bank_xor_mask:
+        memory['dcache_bank_xor_mask'] = bank_xor_mask
     return memory
 
 
