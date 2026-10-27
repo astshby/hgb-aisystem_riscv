@@ -1,235 +1,27 @@
-# hgb-aisystem
+# hgb-aisystem：baseline-minimind
 
-本分支：**`baseline-minimind`**。公共合并起点：`3e838fc`。
+MiniMind 整数算子、原作者软件与五域 SoC，无 CoreMark/RT-Thread。Core 使用 ROB16、int8/mem4、LQ4/SQ4、forward3、Tournament1、RAS0、OOO0。
+RV32 优先优化，RV64 验证功能。正常 ALU/Load/DSP 为 8/10/10 级，C 扩展尚未实现。
 
-当前选择 MiniMind 整数语言模型算子路线。开发与仿真入口为单时钟
-`mm3_soc_compat`，执行 `make mm3-accel-unit XLEN=32`、`make mm3-layer-soc XLEN=32`；
-RV64 使用相同入口跟随验证。五域接入与 FPGA 测量仍待独立完成。
+Core/SYS/DDR-user/外设目标为 100/80/125/25 MHz。所选加速器另用独立 100 MHz 域。
+这些是配置目标，综合估计另列，本轮没有布局布线或上板结果。
 
-两条路线源码保留，硬件顶层独立选择；另一条路线在对应分支继续开发。
-
-RV32 优先的 RISC-V Core/SoC 协作仓库。目标是 RT-Thread 上的文本输入、板上模型
-推理、文本输出；RV64 跟随共享架构验证。近期不把 Linux、MMU、F/V、图像链路作为
-交付前提。
-
-当前公共集成分支为 **`baseline-all`**，合并已发布的
-`baseline-rv32-soc-npu-20261027@0e7c994` 与 MiniMind `main@e240c48`；共同基点为
-`a84ab1a`。原基线标签保留。MiniMind 与 YOLO 是两条替代路线，分别在
-`baseline-minimind`、`baseline-yolo` 继续开发。
-
-| 分支 | 系统与用途 | 主要验证入口 |
-|---|---|---|
-| `baseline-all` | 公共 Core、两条加速路线源码与合并回归 | 下述双宽回归及各路线入口 |
-| `baseline-minimind` | 单时钟 `mm3_soc_compat`，整数 GEMV/GEMM 与语言模型算子链 | `make mm3-accel-unit`、`make mm3-layer-soc` |
-| `baseline-yolo` | 四域 `soc_system` 加独立第五 NPU 域，128-MAC 卷积 | `make npu-test`、`make coremark-platforms` |
-
-两个加速器不在同一顶层同时实例化。MiniMind 的 `0x10050000` 是算子寄存器，
-YOLO 主 SoC 的该窗口是 Flash 控制；软件必须使用对应路线的地址表。MiniMind 尚无
-匹配 FPGA 顶层与综合频率，不能沿用 YOLO 五域结果。两条路线都使用 ROB16、int8/mem4、
-LQ4/SQ4、forward3、Tournament1、RAS0、OOO0，正常 ALU/Load/DSP 流水仍为 **8/10/10**，
-C 尚未实现。RV32 优化，RV64 验证功能/ISA/SoC。
-
-本次合并重测 M0 64 次为 **3.526520 CoreMark/MHz**（validation 3.507011），采用
-一周期 Harvard 存储模型；四平台短测 24 项与原周期记录一致。原基线真实 Core+TCM
-64 次为 **3.015015**（validation 2.996395），本次真实 TCM 短测为 3.012983/2.994267。
-原核级标准综合为 104.7120 MHz，完整 SoC+YOLO 为 Core 89.3096 MHz。本次合并
-不运行 PDS，上述频率属于原基线；合并后频率、资源与布局布线均待分别测量。
-旧日志已由维护者清理，历史摘要保留；本轮重建的镜像与回归记录放在
-`build/baseline-all/`、`logs/baseline-all-20261027/`，不随 Git 发布。
-详细配置、结果和命令见[项目介绍](docs/PROJECT_INTRO.md)、
-[FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)和[MiniMind 说明](software/minimind3/README.md)。
-
-在检出的分支上加载对应 Core 参数：
+设置 `RISCV_TOOL_ROOT` 为交叉编译器 bin。`make help` 显示本分支入口：
 
 ```bash
-source scripts/verilator/p1_core_config.sh
-make test XLEN=32
-make test XLEN=64
+make check XLEN=32
+make check XLEN=64
+make minimind XLEN=32
+make minimind XLEN=64
 ```
 
-关闭 P1 开关时，`CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16` 选择冻结 P0：
-RAT 绑定 ROB 标签、IQ8 顺序双发射、两个完整 ALU、共享分支/MDU、LQ4/SQ4 双 AGU，
-两个完成口与按序双退休。原生 IF64 和双数据口已接入 SoC；MMIO/Store 受队头许可。
-默认 `CORE_BACKEND=legacy` 保留旧 IF→D1→D2→EX→MEM→WB 控制组。
-`source scripts/verilator/p1_core_config.sh` 在当前候选选择 ROB16、int8/mem4、
-按序双退休、OOO0、RAS0、Tournament1、forward3；原基线分支保留 ROB32。
+软件默认 `SOFTWARE_OPT=O3`，可选 O2/Ofast。公共 Core/SoC 配置在
+`scripts/hardware_profile.json`，分支功能在 `scripts/branch_profile.json`。
 
-CoreMark 与综合的新入口共用 [四组配置](scripts/benchmark_platforms.json)：
-`core_tcm` 为 Core 和真实 TCM；`soc_tcm` 增加片上总线/DMA/MMIO；`soc_ddr`
-再增加 Cache 和 DDR3。三组时钟域分别为 1/3/4 个，完整组目标为
-Core/SYS/DDR 用户口/periph = 100/80/125/25 MHz。第四组 `soc_npu` 增加
-独立 NPU 100 MHz 域，分别测空闲与实际工作场景。
-`make coremark-platforms COREMARK_PLATFORM_OUT=build/unified-coremark/new-run` 同时输出
-CoreMark/Core-MHz、按本次频率计算的仿真每秒成绩和镜像/源哈希；默认 2 次迭代仅做
-短仿真适配。综合用 `scripts/pango/prepare_benchmark.py`，必须提供相同软件 bundle
-和仿真 build receipt。详见[项目介绍](docs/PROJECT_INTRO.md)。旧 M0 的一周期 Harvard
-内存和 H0/H1/H2 路径诊断继续保留原定义。
+CPU 经 0x20000000 配置算子；NPU 独立 AXI 主口读写共享 DDR，系统 DMA 可并行运行。
+双宽 38 命令单层与参考一致，运行库 CPU/加速器对照及 32 KiB DMA 并发通过。
+本轮尚未完成全八层、多 Token 和语言质量测试；先按软件 README 恢复锁定模型。
 
-## 当前能力
-
-- RV32/RV64 I/M/Zicsr，精确同步异常、机器中断、CSR、MRET。
-- DSP/Booth-Wallace/移位乘法，SRT/移位除法。
-- BTB、GShare/Local/chooser，正常退休训练；保留可选 4 深 RAS，基线关闭。
-- 唯一退休队列、tagged 完成、逐源捕获；新后端支持 ROB 标签重命名、双 LSU 与字节转发。
-- 64 KiB I/D-TCM、Boot ROM、MMIO、UART0/1、Timer0/1、GPIO0/1/2、IRQ。
-- 2 路 I$/D$，WB/WA D$，FENCE.I、维护命令、DMA 所有权交接。
-- DMA 两块 128B 双槽引擎与统一 AXI 主口，读写可重叠；legacy 控制组保留。
-- 标准 AXI 与 Pango 原生 DDR 桥；RT-Thread BSP、UART loader、CoreMark。
-- 可选 MiniMind 整数算子：16 路 W8A16 GEMV、8×8 Attention GEMM、Norm/RoPE/Softmax/SwiGLU/KV 及单 Token 单层入口，默认关闭。采用独立单时钟 `mm3_soc_compat` 路线；本轮合并回归与完整模型待办见 `software/minimind3/README.md`。
-
-## 上一基线状态（2026-10-25）
-
-2026-10-25：三组可运行平台完成 RV32 短 CoreMark 和标准综合。相同 TCM 镜像均为
-733,915 周期、2.725111 CoreMark/MHz；DDR cold/warm/背景负载分别为
-2.184639/2.197375/1.909776。旧 M0 一周期内存固定重放为 3.151584，保持原定义。
-三组 Core 综合估计为 96.8523/91.7600/84.4523 MHz，尚无此版本布局布线或板级结果。
-完整组 SYS/DDR 用户口/periph 目标为 80/125/25 MHz，Core 目标为 100 MHz。
-RV32 功能回归 220 PASS/5 SKIP、RV64 260 PASS/5 SKIP，另有短 CoreMark 30 PASS；
-RV64 只做功能/ISA/SoC 仿真。性能、资源和原始证据位置见[项目介绍](docs/PROJECT_INTRO.md)。
-TCM/Cache 命中仍在 Core 域，慢路径保留 AXI/CDC 和寄存边界，默认板级 profile0
-保留；完整测量使用显式 C1。后续继续 CDC 物理绑定、标准布局布线、启动和上板。
-RT-Thread 四个镜像编译通过，完整运行受旧测试台层级失配阻塞。
-结构与启动见[SoC系统](docs/understand/SOC_SYSTEM.md)，物理边界见[FPGA适配](docs/fpga/FPGA_ADAPTATION.md)。
-
-以下 P1 开发过程和 P0 数值属于各自原测试树，保留镜像与提交归属。
-
-P1.1a 候选位于 `core/p1-1a-split-lq-sq`，起点为已合入的 `main@094443e`。
-`load_queue.sv` 和 `store_queue.sv` 分别持有描述符、状态和完成数据，
-`load_store_queue.sv` 负责外部双端口仲裁与锁定。保持 ROB16/IQ8、按序发射、
-Store/MMIO 队头许可和 8/10/10 级边界；新增与 P0 LSU 原实现的逐周期比较入口
-`bash scripts/verilator/run_lsq_equivalence.sh 32`，RV64 同入口替换位宽。
-完整仿真已完成：RV32 231 PASS/5 SKIP，RV64 267 PASS/5 SKIP，包含双宽各五项
-P0 LSU 差分；RV32 四次 M0/M1 同镜像比较的周期、CRC 和全部统计保持。
-同镜像入口为 `scripts/verilator/compare_coremark.py`，新镜像使用 GCC 11.4，
-M0/M1 为 2.633659/2.317931 CoreMark/MHz，不能与下文 GCC 16.1 历史镜像混算。
-DDR IP 已生成，32/32 DQ 元数据匹配；完整 SoC 的 228 项暂存输入已校验。
-P1.1a 标准 PDS 已完成：86.1721 MHz、85 MHz WNS +0.160 ns、TNS 0，12 类 STA
-零失败，57,149 条网络全部布通；物理为 40,181 LUT、32,188 FF、36 DRM、4 APM。
-最差路径仍经 Store 地址、转发和 IQ 到分支，20 级、11.135 ns；结果绑定源码 `a23b65c`，
-记录为 `logs/p1/p1-1a/pds-result.json`。85 MHz 为内部 STA，未上板。
-`core/p1-1b-rob32-split-iq@f547da3` 使用 ROB32 和 int8/mem4 IQ，保持按序发射；
-显式选择为 `RETIRE_ENTRIES=32 SPLIT_ISSUE_QUEUE=1`。完整回归为 RV32 228 PASS/5 SKIP、
-RV64 264 PASS/5 SKIP，M0/M1 同镜像 performance 为 2.635803/2.335916 CoreMark/MHz。
-标准 PDS 尚未完成，原始命令和逐项哈希在 `logs/p1/p1-1b-drain/regression/summary.json`。
-P1.2 在 `core/p1-2-limited-integer-ooo` 开发。增加 `LIMITED_INTEGER_OOO=1` 时，
-整数 IQ 按完整标签保存操作数、选择最老就绪项；访存保持 FIFO，CSR/系统指令保留屏障。
-忙 MDU 留在 IQ，独立 ALU 可继续推进；ROB 仍按序退休。双宽各三项定向通过，
-Core 各观察到 30 次越过阻塞整数项。
-精确顺序修正后仅 ALU/MDU 可越过等待项，访存/分支保持接纳顺序及合法同拍配对。
-精确事件增至十场景，原未对齐超时已解决，Core ISA 为 RV32 58 PASS/2 SKIP、RV64 78 PASS/2 SKIP。
-`5963d72` 完整回归为 RV32 229 PASS/5 SKIP、RV64 265 PASS/5 SKIP，四次同镜像比较通过。
-M0/M1 为 2.670535/2.378539 CoreMark/MHz，较重建 P0 提高 1.4002%/2.6147%；
-参数、命令、源码及镜像哈希为 `logs/p1/p1-2-precise/regression/summary.json`。
-P1.3 在 `core/p1-3-iq-forward-timing` 完成五组、二十次固定镜像比较，实测源码 `ea3fb0a`。
-选择模式 3 + Tournament/RAS，M0/M1 为 2.933400/2.566781 CoreMark/MHz，
-较同镜像重建 P0 提高 11.3812%/10.7359%。四模式双宽定向各 17 PASS/0 SKIP，
-新增统计计数器各 1 PASS/0 SKIP、解析器 8 PASS；双宽 P0 LSU 差分各 5 PASS/0 SKIP。
-配置入口为 `source scripts/verilator/p1_core_config.sh`，随后调用原有 make/测试入口。
-`8c072c0` 最终回归已完成：RV32 237 PASS/4 SKIP、RV64 269 PASS/4 SKIP，RV32 包含八次
-固定镜像重放。两轮 CRC、ROI/TB、新旧统计和镜像哈希逐项相同，并与选定候选一致。
-最终综合通过，57,437 LUT、41,497 FF、零 latch，双 TCM 初值匹配。两次标准 place
-分别在 20,193/22,191 MB 内存池峰值时分配失败；重试前物理可用/提交余量为
-19.988/24.021 GiB，运行中 Windows 事件记录 PDS 提交量 42,237,083,648 字节及虚拟内存不足。
-用户已要求暂停布局，原工程和失败日志保留，尚无最终 Fmax/WNS 或未布通数量。
-本分支提交代码和仿真结果供评审，最终 P1 物理验收未完成，详见 [FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。
-模式说明见 [双发射](docs/understand/DUAL_ISSUE.md)。
-P1.1b 中间布线严重拥塞，已主动终止，未记作时序通过。
-以下 r15 数值为历史 P0 记录。
-
-新 P0 发布基线为 `publish/p0-r15`，实测 RTL 为 `dffb8a2`；原开发分支
-`core/pipe-lsu-forward-format@5fa11fb` 和本地发布准备分支 `baseline/p0-r15@6d92659`
-保留。冻结依据与后续计划见工作区三个交接文档。
-四个 Load 槽先格式化转发值，再选择两个输出；提示有效位与载荷分离，原资格、
-取消、返回优先级和请求/完成时点保持。主流水 ALU 为 8 级，Load/DSP 乘法为 10 级。
-RV32 为 228 PASS/5 SKIP，M0/M1 为 **2.859463/2.494327 CoreMark/MHz**；四次
-固定重放的周期、CRC 和全部计数与 r13/r14b 一致。比 CMP 分别高 9.84%/8.61%，
-比拆分起点高 19.45%/16.70%。RV64 功能为 264 PASS/5 SKIP，跟随共享 RTL，
-不设置独立性能门槛、不做 P&R；取消前完成的 M0 两次重放只作附加记录，M1 已取消。
-
-本轮 `dffb8a2` 的 r15 标准 PDS 已完成：**85.2464 MHz、85 MHz WNS +0.034 ns、
-TNS 0、零未布通**，12 类 STA 均无失败，57,382 条网络全部布通。物理为
-40,154 LUT、32,318 FF、36 DRM、4 APM、77 IO；比 r14b 少 800 LUT，FF 不变。
-相对 r14b，Fmax 提高 3.03%；比 CMP 的 87.8837 MHz 低 3.00%。
-用户已确认按 8–10 级结构、CoreMark/MHz 不回退和标准 PDS ≥85 MHz 冻结 r15 为新 P0。
-CMP 是 7 级 ALU 诊断点，不作为本次冻结门槛。原 `p0-acceptance.json` 保留当时
-与 CMP 比频率的失败记录，原始数值和判据没有改写。发布基线为 `publish/p0-r15`，
-发布仅含当前 P0 文件的一次提交，不带开发历史；原开发和历史阶段分支全部在
-本地保留。后续 RTL 优化从独立分支开展。
-源码、固定镜像和同源结果索引为 `logs/pipeline/forward-format-dffb8a2-20261021/`；
-详细分类、周期、跳过项与物理证据见双发射和 FPGA 文档。Core/SoC 用户侧共用时钟，
-IP 仍为 125 MHz，本轮为 85 MHz 内部 STA 约束检查；35/73 项 I/O 延迟缺失，未上板。
-旧控制组为 `perf/coremark-baseline@53b7ee9`，端口默认值问题已在 `c04c588` 修复。
-
-历史 RV32 PDS（i1、full、local TCM 0、块口全开）：
-
-- 同域 Fmax 65.4279 MHz，125 MHz WNS −7.284 ns。
-- 物理 LUT/FF 24888/20140，DRM36K 34，APM 4，0 未布通。
-- 前 100 条 SoC setup 路径全部从 `reset_sync_q[1]` 出发，复位网是首要物理问题。
-
-后续同配置标准布局与复位树修正后，85 MHz 约束检查得到 Fmax 92.3306 MHz、
-WNS +0.934 ns、0 未布通。这个 i1 结果不能作为新 scoreboard 后端的频率。
-
-CoreMark：
-
-| 检查点 | RV32 | RV64 |
-|---|---:|---:|
-| `19562a9` Core-only | 2.118203 | 1.944208 |
-| I1 Core-only | 1.710011 | 1.549205 |
-| I2 i2/q8 Core-only | 1.811039 | 1.627599 |
-| C2 scoreboard i2/q16 单 LSU Core-only，64 次迭代 | 2.111139 | 1.892827 |
-| C6 `b98f714` 双 LSU，M0 Core-only，64 次迭代 | 2.387318 | 2.099647 |
-| C6 `b98f714`，M1 完整 SoC-TCM，64 次迭代 | 2.371599 | 2.087406 |
-| `555453f` 请求缓冲，M1，同一固定镜像 | 2.142396 | 1.911813 |
-| `fdb3ffb` 寄存退休，M0，同一固定镜像 | 2.393948 | 2.092062 |
-| `fdb3ffb`，M1，同一固定镜像 | 2.137354 | 1.896438 |
-
-新候选使用 p0/r0、DSP/SRT，固定镜像与原始日志见 `docs/understand/DUAL_ISSUE.md`
-和工作区 `ITERATIONS.md`。M1 保留 DDR3、MMIO、DMA 等完整硬件，程序和数据在
-TCM，DDR 空闲。DDR 执行和外设背景负载成绩尚未测量。Core-only、SoC-TCM、
-DDR/RT 分开记录；不同迭代数、预测参数或镜像的历史成绩不作严格同条件增幅比较。
-`fdb3ffb` 另将 ROB 完成到退休的路径分拍，双宽整核保持 129 拍连续双退休；
-RV32 综合最差路径从 29 级、19.389 ns 降至 19 级、13.177 ns；
-该历史检查点的标准 PDS 布线已中断，未冻结为 P0。
-
-## 文档
-
-- [项目介绍](docs/PROJECT_INTRO.md)：目录、参数、环境、仿真、FPGA、功能。
-- [学习文档](docs/understand/README.md)：SoC、双发射、DDR/AXI、FPGA、优化五块。
-- [FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)：PDS 流程、时序、资源、板级边界。
-- 工作区根目录：`ITERATIONS.md`、`OPTIMIZATION_PLAN.md`、`HANDOVER.md`。
-
-所有 Markdown 按 `../skills/regulation.md` 写。`docs/COMMIT.md` 不再存在。
-
-## 快速验证
-
-```bash
-export RISCV_TOOL_ROOT=<toolchain-bin>
-export MUL_IMPL=0 DIV_IMPL=1 PREDICTOR_MODE=1 RAS_ENABLE=1 RETIRE_ENTRIES=4
-make test XLEN=32
-make test XLEN=64
-make riscv-tests XLEN=32
-make riscv-tests XLEN=64
-make benchmark-smoke XLEN=32
-make coremark XLEN=32
-SOC_CACHE_BLOCK_ENABLE=1 SOC_DMA_WIDE_ENABLE=1 SOC_DMA_BLOCK_ENABLE=1 \
-  SOC_LOCAL_TCM_ENABLE=1 make soc-riscv-tests XLEN=32
-bash scripts/verilator/run_dma_block.sh 32
-```
-
-普通 `make` 的 DIV 默认 0、ISSUE 默认 1。正式对照使用 DSP/SRT、Tournament/RAS；
-双发射加 `ISSUE_WIDTH=2 RETIRE_ENTRIES=8`。RT-Thread 需要先恢复 v5.2.2 依赖或用
-`RTTHREAD_ROOT` 指向已核验副本。
-
-新后端验证使用 `CORE_BACKEND=scoreboard ISSUE_WIDTH=2 RETIRE_ENTRIES=16 DIV_IMPL=1`；
-`bash scripts/verilator/run_scoreboard.sh 64` 与 `run_scoreboard_soc.sh 64` 验证模块，
-换为 32 验证另一位宽。旧性能表的预测配置与新 P0 的 p0/r0 物理模板分别记录。
-
-## 边界
-
-- 没有真实 DDR/UART/ILA、bitstream、烧板、十秒 CoreMark 或功耗。
-- 125 MHz setup 未收敛，工具 Fmax 不是板上频率。
-- 没有硬件 Cache 一致性；DMA 需要软件 clean/flush/invalidate。
-- 每个 D$ bank 的 miss 阻塞；跨 bank 可独立排队，共享外部填充/写回带宽。
-- `soc/npu128-five-domain` 已接入固定版本的 128-MAC NPU，双宽 CPU/DMA 卷积和异频 AXI
-  仿真通过；合体 FPGA 验收、完整 YOLOX 定点图和 RT-Thread 推理尚未完成。
-  来源与接口见 [固定依赖](third_party/yolo_npu128/README.md) 和 [SoC 系统](docs/understand/SOC_SYSTEM.md)。
+说明见[项目介绍](docs/PROJECT_INTRO.md)、[系统结构](docs/understand/SOC_SYSTEM.md)、
+[FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。全部源码与可选应用集中保存在 baseline-all；
+本分支只保留上述应用。历史分支已保存为本地 archive 标签，详细变更用 git log/git show 查询。

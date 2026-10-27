@@ -71,8 +71,8 @@ vsrc/soc/mm3/attention/mm3_attention.sv
 vsrc/soc/mm3/gemv/mm3_gemv_accel.sv
 vsrc/soc/mm3/top/mm3_ops_engine.sv
 vsrc/soc/mm3/top/mm3_accel.sv
-vsrc/soc/mm3/top/mm3_soc_compat.sv
 -f scripts/axi_files.f
+vsrc/soc/mm3/top/mm3_axi_subsystem.sv
 vsrc/soc/bus/axi_to_axil.sv
 vsrc/soc/bus/axil_clock_bridge.sv
 vsrc/soc/bus/axil_to_bus.sv
@@ -87,4 +87,3 @@ vsrc/soc/flash/spi_flash_reader.sv
 vsrc/soc/flash/flash_axi_target.sv
 vsrc/soc/soc_system.sv
 vsrc/soc/soc_top.sv
--f scripts/npu_files.f

@@ -11,8 +11,8 @@ image_dir="build/benchmark/soc-peripherals-rv${xlen}-${config}"
 sim_dir="build/verilator/benchmark-rv${xlen}-${config}"
 log="logs/soc-peripherals-rv${xlen}-${config}.log"
 bash scripts/verilator/build_benchmark_sim.sh "${xlen}"
-bash scripts/verilator/build_benchmark_image.sh "${xlen}" "${image_dir}" \
-    tb/soc/irq_crt0.S tb/soc/peripheral_smoke.c benchmark/bsp/runtime.c benchmark/bsp/softarith.c \
+bash scripts/verilator/build_baremetal_image.sh "${xlen}" "${image_dir}" \
+    tb/soc/irq_crt0.S tb/soc/peripheral_smoke.c software/common/baremetal/runtime.c software/common/baremetal/softarith.c \
     >"logs/soc-peripherals-build-rv${xlen}-${config}.log" 2>&1
 tohost_addr="$("${tool_prefix}nm" -n "${image_dir}/program.elf" | awk '$3 == "tohost" { print $1; exit }')"
 console_addr="$("${tool_prefix}nm" -n "${image_dir}/program.elf" | awk '$3 == "sim_console" { print $1; exit }')"

@@ -30,7 +30,7 @@ static int maintain(unsigned command)
 }
 
 #if BENCH_NPU
-#include "npu_platform.h"
+#include "../../software/yolo/npu_workload.h"
 #endif
 
 int main(void)

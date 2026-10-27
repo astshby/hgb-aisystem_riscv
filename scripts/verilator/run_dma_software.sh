@@ -13,9 +13,9 @@ for ddr_bytes in 0 65536; do
     sim_dir="build/verilator/benchmark-rv${xlen}-${config}"
     log="logs/soc-dma-rv${xlen}-${config}.log"
     bash scripts/verilator/build_benchmark_sim.sh "${xlen}"
-    bash scripts/verilator/build_benchmark_image.sh "${xlen}" "${image_dir}" \
+    bash scripts/verilator/build_baremetal_image.sh "${xlen}" "${image_dir}" \
         -march="rv${xlen}im_zicsr_zifencei" -DSOC_DDR_BYTES="${ddr_bytes}" tb/soc/irq_crt0.S tb/soc/dma_smoke.c \
-        benchmark/bsp/runtime.c benchmark/bsp/softarith.c \
+        software/common/baremetal/runtime.c software/common/baremetal/softarith.c \
         >"logs/soc-dma-build-rv${xlen}-${config}.log" 2>&1
     tohost_addr="$("${tool_prefix}nm" -n "${image_dir}/program.elf" | awk '$3 == "tohost" { print $1; exit }')"
     console_addr="$("${tool_prefix}nm" -n "${image_dir}/program.elf" | awk '$3 == "sim_console" { print $1; exit }')"

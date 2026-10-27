@@ -153,7 +153,7 @@ class HandoffTests(unittest.TestCase):
                     for name in MEMORY_SCRIPTS:
                         self.assertIn(name, manifest["files"])
                     self.assertEqual(configuration["core_backend"], "scoreboard")
-                    self.assertEqual(configuration["core_retire_entries"], 32)
+                    self.assertEqual(configuration["core_retire_entries"], 16)
                     self.assertEqual(configuration["core_split_issue_queue"], 1)
                     self.assertEqual(configuration["core_memory_queue_entries"], 4)
                     self.assertEqual(configuration["core_limited_integer_ooo"], 0)
@@ -198,7 +198,7 @@ class HandoffTests(unittest.TestCase):
         manifest = json.loads((output / "manifest.json").read_text())
         path = output / "compile.tcl"
         original = path.read_text()
-        for before, after in (("CORE_SCOREBOARD=1", ""), ("CORE_RETIRE_ENTRIES=32", "CORE_RETIRE_ENTRIES=4"),
+        for before, after in (("CORE_SCOREBOARD=1", ""), ("CORE_RETIRE_ENTRIES=16", "CORE_RETIRE_ENTRIES=4"),
                               ("CORE_SPLIT_ISSUE_QUEUE=1", "CORE_SPLIT_ISSUE_QUEUE=0"),
                               ("CORE_LOAD_QUEUE_ENTRIES=4", "CORE_LOAD_QUEUE_ENTRIES=1")):
             altered = copy.deepcopy(manifest)

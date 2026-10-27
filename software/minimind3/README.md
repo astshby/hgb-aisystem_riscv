@@ -1,45 +1,13 @@
 # MiniMind-3：FP32 与全整数 C 推理
 
-2026-10-27 合并说明：`baseline-all` 将 `main@e240c48` 的 MiniMind 与已测
-`0e7c994` 的 ROB16 Core 合并，后续使用 `baseline-minimind` 分支。YOLO 在
-`baseline-yolo` 独立开发；两个加速器没有同时挂载。MiniMind 顶层仍为单时钟
-`mm3_soc_compat`，Core 配置是 ROB16、int8/mem4、OOO0、RAS0、forward3。
-本轮重建的 FP32、整数模型及 tokenizer 哈希与下文锁定记录完全一致。
-本次已重跑双宽单元、算子与单层链：各 1600 项整数乘除、13 组 GEMV、复位/背压/
-错误与运行库检查通过；8 种算子、T=4 Attention、独立单层与 CPU 驱动单层均通过。
-单层各执行 38 条命令，最终 4736 字节的输出、缩放参数和 KV 内容与 C/Python 参考
-完全一致；本轮 TRACE=0，未重跑全部中间 trace。独立链双宽均为 3,592,430 周期，
-CPU 驱动 RV32/RV64 为 3,616,540/3,615,225 周期。上述为一层一个 Token 的算子链，
-尚无本轮完整八层、多 Token、LM Head 或语言质量验收。
-
-完整运行库另完成双宽 SoC 测试：每宽 4 次 CPU/加速器执行、2 次结果比较及 4 次
-预期分配失败均通过，合计每宽 8 个仿真场景、0 SKIP。覆盖 17×33 小矩阵、Cache
-维护和并发 32 KiB DMA；每对 CPU/加速器使用同一 ELF，结果与缩放参数完全一致。
-日志索引为 `logs/baseline-all-20261027/mm3-dma-regressions-final.json`，ELF、模型
-哈希、完整源归档在各 `build/mm3/rv*-p1r0q16i2-scoreboard-s1j8m4-f3-l16-s64-g2/runs/`。
-
-完整运行库 runner 去掉误用的 `MM3_FREESTANDING` 宏，使用已有裸机 stdio/string
-和 `mm3.h` 的完整声明。`integer_io.c` 按是否提供模型/tokenizer 字节数选择 DDR
-物理地址，解除该行为与精简头文件宏的绑定，避免 RV64 远地址的 PC 相对链接溢出；
-保留 `-Werror`、无未解析符号及无浮点指令/软浮点审计。
-旧报告中的 ROB32/OOO1 周期不代表本次合并版本。新原始日志、运行命令与哈希索引为
-`logs/baseline-all-20261027/mm3-regressions.json`，独立结果与完整源快照在
-`build/mm3-ops/ac60559d357f5ce9/runs/`。旧日志已被维护者删除，以下旧记录按原日期阅读。
-
-复现命令如下；锁定模型参数先按本文导出，`RISCV_TOOL_ROOT` 指向交叉编译器 bin：
-
-```bash
-bash scripts/verilator/run_mm3_ops.sh static 32
-for width in 32 64; do
-    bash scripts/verilator/run_mm3.sh unit "$width"
-    OP=all bash scripts/verilator/run_mm3_ops.sh op "$width"
-    bash scripts/verilator/run_mm3_ops.sh attn "$width"
-    bash scripts/verilator/run_mm3_ops.sh layer "$width"
-    bash scripts/verilator/run_mm3_ops.sh soc "$width"
-    MM3_MAX_CYCLES=50000000 bash scripts/verilator/run_mm3.sh soc "$width"
-done
-```
-完整八层、多 Token、FPGA 接入与综合/布线仍待后续验证。
+2026-10-27：本轮已迁移到主 SoC 五域接口，原作者 C 算法、模型锁和导出工具保留。
+Core/SYS/DDR-user/外设/NPU 目标为 100/80/125/25/100 MHz，设备控制窗口为 `0x20000000`。
+CPU 配置算子，算子通过独立 AXI 主口读写 DDR，系统 DMA 可并发搬运；Cache 所有权由软件维护。
+`make minimind XLEN=32|64` 分别执行运行库及 38 命令单层验证。
+双宽单层与参考完全一致，RV32/RV64 为 4,680,438/4,678,859 TB 周期。
+每宽另有 4 次正常及 4 次预期分配失败通过，包含并发 32 KiB DMA。
+本轮 TRACE=0，尚未完成全八层、多 Token、LM Head、语言质量或上板验证。
+锁定模型先按下文恢复。软件默认 O3，`SOFTWARE_OPT` 可选 O2/Ofast；整数 ABI 和算法未改。
 
 宿主生成工程保留 C FP32 原模型和 `w8a16_int` 全整数推理；`operators/` 另提供硬件算子参考与驱动。普通编译、分词、生成均无需 Python、PyTorch 或 CUDA。默认单轮对话、关闭思考、贪心选择 Token。
 

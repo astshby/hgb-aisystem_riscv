@@ -1,0 +1,9 @@
+{
+  "variant": "minimind",
+  "default_accelerator": "minimind",
+  "accelerators": [
+    "minimind"
+  ],
+  "coremark": false,
+  "rt_thread": false
+}

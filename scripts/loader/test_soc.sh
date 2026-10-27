@@ -8,7 +8,7 @@ local_tcm="${SOC_LOCAL_TCM_ENABLE:-0}"
 [[ "$local_tcm" =~ ^[01]$ ]] || { echo 'SOC_LOCAL_TCM_ENABLE must be 0 or 1' >&2; exit 2; }
 out="build/loader/sim-rv$xlen"
 mkdir -p logs "$out"
-# 同位宽的普通下载与 RT 下载共用镜像/模型目录，整段加锁，避免并行回归覆盖 wire。
+# 同位宽的下载测试共用镜像/模型目录，整段加锁，避免并行回归覆盖 wire。
 exec {loader_test_lock}>"$out/.test.lock"
 flock "$loader_test_lock"
 LOADER_BAUD=500000 LOADER_QUIET_MS=1 bash scripts/loader/build.sh "$xlen"
@@ -34,17 +34,13 @@ verilator "${core_microarch_flags[@]}" -Wall -Wno-fatal --assert --timing --bina
     -CFLAGS "${LOADER_HOST_OPT:--O0}" \
     -DCORE_XLEN="$xlen" -DCORE_MUL_IMPL=0 -DCORE_DIV_IMPL=1 -Mdir "$sim" \
     -f scripts/soc_files.f tb/common/store_result_monitor.sv tb/soc/axi_memory_model.sv tb/soc/axi_block_memory_model.sv \
-    tb/soc/tb_soc_benchmark.sv tb/loader/tb_uart_loader.sv \
+    tb/soc/axi_system_memory_model.sv tb/soc/spi_flash_model.sv \
+    tb/soc/tb_soc_system.sv tb/loader/tb_uart_loader.sv \
     -GLOCAL_TCM_ENABLE="$local_tcm" -GSOC_PROFILE="$soc_profile_id" --top-module tb_uart_loader \
     > "logs/uart-loader-build-rv$xlen-${core_build_tag}-p$soc_profile-ltcm$local_tcm.log" 2>&1 || { tail -n 40 "logs/uart-loader-build-rv$xlen-${core_build_tag}-p$soc_profile-ltcm$local_tcm.log"; exit 1; }
 extra_args=()
 log="logs/uart-loader-rv$xlen-${core_build_tag}-p$soc_profile-ltcm$local_tcm.log"
-max_cycles=2000000
-if [[ -n "${LOADER_PACKET:-}" ]]; then
-    extra_args=(+RT_IMAGE +HOT_BYTES="${LOADER_HOT_BYTES:?}")
-    log="logs/uart-rt-${RT_COREMARK_MODE:-performance}-rv$xlen-${core_build_tag}-p$soc_profile-ltcm$local_tcm.log"
-    max_cycles=100000000
-fi
+max_cycles=4000000
 "$sim/Vtb_uart_loader" +IMEM="$out/imem.hex" +DMEM="$out/dmem.hex" \
     +TOHOST="${LOADER_TOHOST:-01100000}" +CONSOLE="${LOADER_CONSOLE:-01100008}" \
     +TEST=uart-loader +MAX_CYCLES="$max_cycles" \

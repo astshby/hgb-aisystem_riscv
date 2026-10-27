@@ -9,6 +9,9 @@
 #ifndef LOADER_QUIET_MS
 #define LOADER_QUIET_MS 100u
 #endif
+/* 四域 SoC 的 UART/mtime 使用外设时钟，旧单时钟入口保留 ABI 回退。 */
+static uint32_t peripheral_hz(void)
+{ return (REG(INFO+0x3c)&0x100u) ? REG(INFO+0x60) : REG(INFO+4); }
 static uint64_t time_now(void)
 {
     uint32_t high, low, check;
@@ -23,7 +26,7 @@ int loader_get(uint8_t *value)
         uint32_t status=REG(UART+8);
         if (status&12u) return HGB_UART;
         if (status&2u) { *value=REG(UART+4); return HGB_OK; }
-        if (time_now()-start>(uint64_t)REG(INFO+4)*2u) return HGB_TIMEOUT;
+        if (time_now()-start>(uint64_t)peripheral_hz()*2u) return HGB_TIMEOUT;
     }
 }
 void loader_put(uint8_t value)
@@ -59,14 +62,14 @@ static int ddr_check(void)
 void loader_main(void)
 {
     REG(UART+16)=0;
-    REG(UART+12)=REG(INFO+4)/LOADER_BAUD;
+    REG(UART+12)=peripheral_hz()/LOADER_BAUD;
     REG(UART+8)=12;
     if (ddr_check()) { text("LOADER DDR FAIL; reset required\n"); for (;;) { } }
     for (;;) {
         uint32_t entry;
         /* 失败后丢弃残留字节，等待 100 ms 静默再进入下一次事务。 */
         uint64_t quiet=time_now();
-        while (time_now()-quiet<(REG(INFO+4)/1000u)*LOADER_QUIET_MS) {
+        while (time_now()-quiet<(peripheral_hz()/1000u)*LOADER_QUIET_MS) {
             if (REG(UART+8)&2u) { (void)REG(UART+4); quiet=time_now(); }
         }
         REG(UART+8)=12;
