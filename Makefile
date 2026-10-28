@@ -38,4 +38,4 @@ endif
 ifneq ($(wildcard scripts/make/minimind.mk),)
 	@printf '%s\n' 'make minimind (five domains, runtime + 38-command layer)'
 endif
-check: test scoreboard-test riscv-tests soc-test soc-riscv-tests soc-system-test soc-axi-test benchmark-smoke
+check: test scoreboard-test riscv-tests soc-test soc-riscv-tests soc-system-test soc-axi-test tcm-bram-test benchmark-smoke

@@ -239,13 +239,15 @@ module tb_soc_system #(
     for(genvar b=0;b<2;b++) begin : g_tcm_latency
         longint unsigned conflict_cycles=0, blocked_response_cycles=0, bank_fires=0;
         longint unsigned roi_conflict_cycles=0, roi_blocked_response_cycles=0, roi_bank_fires=0;
+        // 双端口可同时服务同bank两读；只将实际阻塞的bank竞争计为冲突。
         logic conflict;
         always_comb begin
             conflict=0;
             for(int p=0;p<4;p++) for(int q=p+1;q<4;q++)
                 if(dut.g_tcm[b].req_v[p]&&(!dut.g_tcm[b].rsp_v[p]||dut.g_tcm[b].rsp_r[p])&&
                    dut.g_tcm[b].req_v[q]&&(!dut.g_tcm[b].rsp_v[q]||dut.g_tcm[b].rsp_r[q])&&
-                   |(dut.g_tcm[b].u_ram.needed[p]&dut.g_tcm[b].u_ram.needed[q])) conflict=1;
+                   |(dut.g_tcm[b].u_ram.needed[p]&dut.g_tcm[b].u_ram.needed[q])&&
+                   (!dut.g_tcm[b].req_r[p]||!dut.g_tcm[b].req_r[q])) conflict=1;
         end
         always @(posedge clk_core) if(!reset_async&&!dut.rst_core&&p2_metrics_enable) begin
             if(conflict) begin conflict_cycles++; if(metrics_roi) roi_conflict_cycles++; end

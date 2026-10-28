@@ -185,7 +185,7 @@ module soc_system #(
             assign requests[p] = t_request[b][p];
             assign t_rsp_data[b][p] = responses[p];
         end
-        tcm_dual_bank #(.BYTES(65536),.INIT_FILE(b==0 ? ITCM_INIT_FILE : DTCM_INIT_FILE)) u_ram (
+        tcm_bram #(.BYTES(65536),.INSTRUCTION(b==0),.INIT_FILE(b==0 ? ITCM_INIT_FILE : DTCM_INIT_FILE)) u_ram (
             .clk(clk_core),.rst(rst_core),.req_valid(req_v),.req_ready(req_r),.request(requests),
             .rsp_valid(rsp_v),.rsp_ready(rsp_r),.rsp_data(responses));
     end

@@ -44,6 +44,7 @@ vsrc/soc/cache/dcache.sv
 vsrc/soc/cache/cache_maintenance_controller.sv
 vsrc/soc/bus/bus_pair_arbiter.sv
 vsrc/soc/memory/tcm_dual_bank.sv
+vsrc/soc/memory/tcm_bram.sv
 vsrc/soc/cache/dcache_banked.sv
 vsrc/soc/cache/icache_native.sv
 vsrc/soc/memory/scoreboard_soc_memory.sv
