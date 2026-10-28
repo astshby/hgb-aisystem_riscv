@@ -160,6 +160,40 @@ module tb_axi_narrow_burst #(parameter int TCM_REGION = 0);
         end
     endtask
 
+    // 连续四个不同字节lane的AW/W填满B响应队列。旧事务的B被阻塞时，
+    // 后续W不能使用旧AW的size/addr预检查；检查外部响应顺序和最终逐字节结果。
+    task automatic queued_write_epochs;
+        axi_b_t held;
+        int first_id;
+        first_id = cases;
+        for (int transaction = 0; transaction < 4; transaction++) begin
+            send_aw(448 + transaction*32 + transaction, 0, 1);
+            send_w(448 + transaction*32 + transaction, 0, 0, 1, 0);
+            cases++;
+        end
+        while (!axi_rsp.b_valid) @(negedge clk);
+        held = axi_rsp.b;
+        repeat (200) begin
+            @(negedge clk);
+            assert (axi_rsp.b_valid && axi_rsp.b == held)
+                else $fatal(1, "queued B changed during backpressure");
+        end
+        for (int transaction = 0; transaction < 4; transaction++) begin
+            while (!axi_rsp.b_valid) @(negedge clk);
+            assert (axi_rsp.b.id == axi_id_t'(first_id + transaction) && axi_rsp.b.resp == AXI_OKAY)
+                else $fatal(1, "queued write epoch=%0d id=%0d response=%0d",
+                            transaction, axi_rsp.b.id, axi_rsp.b.resp);
+            axi_req.b_ready = 1;
+            @(posedge clk); @(negedge clk); axi_req.b_ready = 0;
+        end
+        for (int address_byte = 0; address_byte < MEMORY_BYTES; address_byte++) begin
+            assert (actual[address_byte] == expected[address_byte])
+                else $fatal(1, "queued write byte=%h actual=%h expected=%h",
+                            address_byte, actual[address_byte], expected[address_byte]);
+            checked_bytes++;
+        end
+    endtask
+
     initial begin
         for (int address_byte = 0; address_byte < MEMORY_BYTES; address_byte++) begin
             actual[address_byte] = 8'(address_byte ^ 8'hb7);
@@ -173,6 +207,7 @@ module tb_axi_narrow_burst #(parameter int TCM_REGION = 0);
                     for (int ordering = 0; ordering < 2; ordering++)
                         write_case(256 + 32 - (1 << size), size, 4, mode, 1'(ordering));
         read_back();
+        queued_write_epochs();
         $display("PASS AXI independent INCR bytes RV%0d tcm_region=%0d cases=%0d checked_bytes=%0d local_reads=%0d local_writes=%0d",
                  XLEN, TCM_REGION, cases, checked_bytes, local_reads, local_writes);
         $finish;
