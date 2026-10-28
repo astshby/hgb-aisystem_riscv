@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.pango.check_tcm_init import reconstruct, reconstruct_native
 
 
-def fixture(xlen=32, native=True, primitive_width=None):
+def fixture(xlen=32, native=True, primitive_width=None, dual=False, primary=0, swap=False):
     lane_bits = xlen // 8 if native else 2
     primitive_width = primitive_width or lane_bits
     words = [(0x9e3779b97f4a7c15 * (index + 1)) & ((1 << xlen) - 1)
@@ -28,6 +28,10 @@ def fixture(xlen=32, native=True, primitive_width=None):
                 shift = (index % (8 // lane_bits)) * lane_bits
                 cells[cell] |= ((word >> low) & ((1 << lane_bits) - 1)) << shift
             params = [f'.DATA_WIDTH_A({primitive_width})', '.RAM_MODE("SINGLE_PORT")', '.INIT_FILE("NONE")']
+            if dual:
+                params[1] = '.RAM_MODE("TRUE_DUAL_PORT")'
+                params += [f'.DATA_WIDTH_B({primitive_width})', '.WRITE_MODE_A("READ_BEFORE_WRITE")',
+                           '.WRITE_MODE_B("READ_BEFORE_WRITE")', '.DOA_REG(0)', '.DOB_REG(0)']
             for chunk in range(128):
                 value = sum(cells[chunk * 32 + slot] << (9 * slot) for slot in range(32))
                 params.append(f".INIT_{chunk:02X}(288'b{value:0288b})")
@@ -41,9 +45,17 @@ def fixture(xlen=32, native=True, primitive_width=None):
                 address = ["1'b1"] + [f"\\request.addr [{bit}]" for bit in range(15, 1, -1)] + ["1'b1"]
                 data = [f"\\response.rdata [{bit}]" for bit in range(low + 1, low - 1, -1)]
             data = [f"\\unused_{bit}_floating " for bit in range(35, lane_bits - 1, -1)] + data
+            wiring = f".ADDRA ({{" + ",".join(address) + "}),\n.DOA ({" + ",".join(data) + "})"
+            if dual:
+                wiring = []
+                for port, role in zip("AB", "ba" if swap else "ab"):
+                    source = f"request[{primary}]" if role == "a" else f"auxiliary[{bank}]"
+                    pins = ",".join(address).replace(f"g_bank[{bank}].access", source)
+                    outputs = ",".join(data).replace("bank_data", f"{role}_data")
+                    wiring += [f".ADDR{port} ({{{pins}}})", f".DO{port} ({{{outputs}}})"]
+                wiring = ",\n".join(wiring)
             blocks.append("GTP_DRM36K_E1 /* fixture */ #(" + ",\n".join(params) +
-                f") ram_{bank}_{low} (\n.ADDRA ({{" + ",".join(address) +
-                "}),\n.DOA ({" + ",".join(data) + "}));")
+                          f") ram_{bank}_{low} (\n" + wiring + ");")
     return "module fixture;\n" + "\n".join(blocks) + "\nendmodule\n fixture u_itcm ();\n", words
 
 
@@ -62,6 +74,27 @@ class TcmInitTests(unittest.TestCase):
             with self.subTest(primitive_width=width):
                 vm = self.native64.replace(".DATA_WIDTH_A(8)", f".DATA_WIDTH_A({width})")
                 self.assertEqual(reconstruct_native(vm, "u_itcm", 64), self.words64)
+
+    def test_dual_ports_both_widths_roles_and_native_port_orders(self):
+        for xlen in (32, 64):
+            for primary in (0, 1):
+                for swap in (False, True):
+                    with self.subTest(xlen=xlen, primary=primary, swap=swap):
+                        vm, words = fixture(xlen, dual=True, primary=primary, swap=swap)
+                        instance = f"g_tcm[{primary}].u_ram"
+                        vm = vm.replace("fixture u_itcm", f"fixture \\{instance}")
+                        self.assertEqual(reconstruct_native(vm, instance, xlen), words)
+
+    def test_dual_port_other_port_address_and_lane_faults_rejected(self):
+        vm, _ = fixture(dual=True)
+        faults = [vm.replace("\\auxiliary[0].addr [3]", "\\auxiliary[0].addr [2]", 1),
+                  vm.replace("\\request[0].addr [3]", "\\request[1].addr [3]", 1),
+                  vm.replace("\\b_data[0] [3]", "\\b_data[1] [3]", 1),
+                  vm.replace("READ_BEFORE_WRITE", "WRITE_THROUGH", 1)]
+        for altered in faults:
+            with self.subTest():
+                with self.assertRaises(ValueError):
+                    reconstruct_native(altered, "u_itcm", 32)
 
     def test_legacy_rv32_all_bytes(self):
         self.assertEqual(reconstruct(self.legacy32, "u_itcm"), self.old_words)
@@ -119,6 +152,26 @@ class TcmInitTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("DTCM init mismatch", result.stderr)
             self.assertFalse(summary.exists())
+
+    def test_cli_paired_manifest_and_escaped_dual_port_instances(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            (project / "firmware").mkdir()
+            (project / "benchmark.json").write_text(json.dumps({
+                "config": {"xlen": 32, "pds_top": "pango_benchmark_tcm_top"}}))
+            netlist = project / "prj_tasks/syn_1/synthesize/pango_benchmark_tcm_top_syn.vm"
+            netlist.parent.mkdir(parents=True)
+            modules = []
+            for primary, kind in enumerate(("i", "d")):
+                vm, words = fixture(dual=True, primary=primary, swap=True)
+                modules.append(vm.replace("fixture", f"fixture_{kind}").replace(
+                    "u_itcm", f"\\g_tcm[{primary}].u_ram"))
+                (project / f"firmware/{kind}mem.hex").write_text("".join(f"{word:08x}\n" for word in words))
+            netlist.write_text("\n".join(modules))
+            result = subprocess.run([sys.executable, "scripts/pango/check_tcm_init.py", str(project)],
+                                    text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.count("PASS synthesized"), 2)
 
 
 if __name__ == "__main__":
