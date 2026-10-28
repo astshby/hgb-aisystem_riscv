@@ -34,7 +34,9 @@ DEFAULT_SCOREBOARD_CONFIGURATION = dict(P1_SCOREBOARD_CONFIGURATION,
                                         core_ras_enable=0, core_limited_integer_ooo=0,
                                         core_retire_entries=16)
 BOARD_CLOCK_DOMAINS = dict.fromkeys(("core", "sys", "ddr", "periph"), 125000000)
-# C1/C4 的时钟来自 800 MHz VCO 的 GPLL；DDR 用户钟仍由 DDR IP 的 125 MHz 输出提供。
+# C1/C4 的时钟来自 800 MHz VCO 的 GPLL；C5 改用 850 MHz VCO 以整数分频得到
+# 85/106.25/25 MHz（完整 DDR 层综合估计 89.3336/106.6894 MHz 向下取 5 的倍数）。
+# DDR 用户钟仍由 DDR IP 的 125 MHz 输出提供，不随该表变化。
 BOARD_CLOCK_PROFILES = {
     0: {"name": "common", "core": 125000000, "sys": 125000000,
         "ddr": 125000000, "periph": 125000000},
@@ -42,11 +44,15 @@ BOARD_CLOCK_PROFILES = {
         "ddr": 125000000, "periph": 25000000},
     4: {"name": "C4", "core": 100000000, "sys": 100000000,
         "ddr": 125000000, "periph": 25000000},
+    5: {"name": "C5", "core": 85000000, "sys": 106250000,
+        "ddr": 125000000, "periph": 25000000},
 }
 # 相对 125 MHz ref_clk 的 GTP_GPLL 输出比；与 pango_soc_pll 的 STATIC_RATIO* 对齐。
+# C5 的 GPLL 分频是 850/10、850/8、850/34，折算到 ref_clk 即 17/25、17/20、1/5。
 BOARD_CLOCK_RATIOS = {
     1: {"core": (4, 5), "sys": (16, 25), "periph": (1, 5)},
     4: {"core": (4, 5), "sys": (4, 5), "periph": (1, 5)},
+    5: {"core": (17, 25), "sys": (17, 20), "periph": (1, 5)},
 }
 
 
@@ -81,9 +87,9 @@ def verify_default_board_clocks(wrapper):
 
 
 def verify_independent_board_clocks(wrapper, profile):
-    """C1/C4：默认仍为 profile 0，实际 profile 由 compile 参数覆盖。"""
+    """C1/C4/C5：默认仍为 profile 0，实际 profile 由 compile 参数覆盖。"""
     if profile not in BOARD_CLOCK_RATIOS:
-        raise ValueError("independent board clock profile must be C1 or C4")
+        raise ValueError("independent board clock profile must be C1, C4 or C5")
     text = re.sub(r"//[^\n]*|/\*.*?\*/", "", wrapper, flags=re.S)
     if not re.search(r"parameter\s+int\s+unsigned\s+BOARD_CLOCK_PROFILE\s*=\s*0\s*,", text):
         raise ValueError("staged wrapper must default to BOARD_CLOCK_PROFILE 0")
@@ -101,21 +107,23 @@ def verify_independent_board_clocks(wrapper, profile):
         raise ValueError("missing independent boot reset supervisor")
     if not re.search(r"CLOCK_INFO_ENABLE\(BOARD_CLOCK_PROFILE\s*!=\s*0\)", body):
         raise ValueError("clock discovery is not enabled for independent profiles")
-    if not re.search(r"HOT_HZ\s*=\s*BOARD_CLOCK_PROFILE\s*==\s*0\s*\?\s*125000000\s*:\s*100000000", text):
+    if not re.search(r"HOT_HZ\s*=\s*BOARD_CLOCK_PROFILE\s*==\s*0\s*\?\s*125000000\s*:\s*"
+                     r"\(\s*BOARD_CLOCK_PROFILE\s*==\s*5\s*\?\s*85000000\s*:\s*100000000\s*\)", text):
         raise ValueError("unexpected HOT_HZ profile formula")
     if not re.search(r"SYS_HZ\s*=\s*BOARD_CLOCK_PROFILE\s*==\s*0\s*\?\s*125000000\s*:\s*"
-                     r"\(\s*BOARD_CLOCK_PROFILE\s*==\s*4\s*\?\s*100000000\s*:\s*80000000\s*\)", text):
+                     r"\(\s*BOARD_CLOCK_PROFILE\s*==\s*5\s*\?\s*106250000\s*:\s*"
+                     r"\(\s*BOARD_CLOCK_PROFILE\s*==\s*4\s*\?\s*100000000\s*:\s*80000000\s*\)\s*\)", text):
         raise ValueError("unexpected SYS_HZ profile formula")
     if not re.search(r"PERIPH_HZ\s*=\s*BOARD_CLOCK_PROFILE\s*==\s*0\s*\?\s*125000000\s*:\s*25000000", text):
         raise ValueError("unexpected PERIPH_HZ profile formula")
 
 
 def board_clock_constraints(profile, npu_enable=False):
-    """只生成 C1/C4 的 generated clock 与时钟不确定性，不加载 CDC 例外。"""
+    """只生成 C1/C4/C5 的 generated clock 与时钟不确定性，不加载 CDC 例外。"""
     if profile not in BOARD_CLOCK_RATIOS:
-        raise ValueError("board clock constraints require C1 or C4")
+        raise ValueError("board clock constraints require C1, C4 or C5")
     lines = [
-        "# C1/C4 board clocks from the 125 MHz ref_clk through GTP_GPLL.",
+        "# C1/C4/C5 board clocks from the 125 MHz ref_clk through GTP_GPLL.",
         "# board_ddr.fdc defines ref_clk; PLL/DDR site coexistence is left to PDS placement.",
         "# All cross-domain paths remain timed; no clock group, false path or max_delay is loaded.",
     ]
@@ -432,8 +440,8 @@ def main():
     parser.add_argument("--memory-queue-entries", type=int, choices=(2, 4, 8), default=None)
     parser.add_argument("--predictor-mode", type=int, choices=(0, 1), default=None)
     parser.add_argument("--ras-enable", type=int, choices=(0, 1), default=None)
-    parser.add_argument("--board-clock-profile", type=int, choices=(0, 1, 4), default=None,
-                        help="default C1 for scoreboard, common for legacy; 0=125 MHz common, 1=C1, 4=C4")
+    parser.add_argument("--board-clock-profile", type=int, choices=(0, 1, 4, 5), default=None,
+                        help="default C1 for scoreboard, common for legacy; 0=125 MHz common, 1=C1, 4=C4, 5=C5 85/106.25/25 MHz")
     parser.add_argument("--npu-enable", action="store_true", help="attach pinned 128-MAC NPU on dedicated 100 MHz clock")
     parser.add_argument("--mm3-enable", action="store_true", help="attach MiniMind on dedicated 100 MHz clock")
     args = parser.parse_args()
@@ -454,8 +462,10 @@ def main():
         args.board_clock_profile = 1 if scoreboard else 0
     if (args.npu_enable or args.mm3_enable) and (not scoreboard or not args.board_clock_profile):
         parser.error("NPU requires scoreboard C1/C4")
+    if args.board_clock_profile == 5 and (args.npu_enable or args.mm3_enable):
+        parser.error("C5 has no integer 100 MHz NPU divider")
     if args.board_clock_profile and not scoreboard:
-        parser.error("C1/C4 board clock profiles require --core-backend scoreboard")
+        parser.error("C1/C4/C5 board clock profiles require --core-backend scoreboard")
     if args.local_tcm is None:
         args.local_tcm = int(scoreboard)
     if scoreboard and args.local_tcm != 1:

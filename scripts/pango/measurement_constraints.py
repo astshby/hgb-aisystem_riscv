@@ -13,6 +13,7 @@ import re
 CLOCKS = {
     "C1": {"core": 100_000_000, "sys": 80_000_000, "ddr": 125_000_000, "periph": 25_000_000},
     "C4": {"core": 100_000_000, "sys": 100_000_000, "ddr": 125_000_000, "periph": 25_000_000},
+    "C5": {"core": 85_000_000, "sys": 106_250_000, "ddr": 125_000_000, "periph": 25_000_000},
 }
 DOMAINS = ("core", "sys", "ddr", "periph")
 SCAN_INPUTS = ("scan_shift", "scan_update", "scan_capture", "scan_din")

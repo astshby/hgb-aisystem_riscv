@@ -49,9 +49,10 @@ class HandoffTests(unittest.TestCase):
             "    parameter bit DUMMY = 1'b0\n"
             ");\n"
             "logic core_clk, hot_clk, sys_clk, periph_clk;\n"
-            "localparam int unsigned HOT_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 : 100000000;\n"
+            "localparam int unsigned HOT_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :\n"
+            "    (BOARD_CLOCK_PROFILE == 5 ? 85000000 : 100000000);\n"
             "localparam int unsigned SYS_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :\n"
-            "    (BOARD_CLOCK_PROFILE == 4 ? 100000000 : 80000000);\n"
+            "    (BOARD_CLOCK_PROFILE == 5 ? 106250000 : (BOARD_CLOCK_PROFILE == 4 ? 100000000 : 80000000));\n"
             "localparam int unsigned PERIPH_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 : 25000000;\n"
             "generate\n"
             "if (BOARD_CLOCK_PROFILE == 0) begin : g_common_clock\n"
@@ -417,8 +418,8 @@ class HandoffTests(unittest.TestCase):
             self.assertIn(f"BOARD_CLOCK_PROFILE {profile}", command)
             self.assertNotIn("LOCAL_TCM_ENABLE", command)
 
-    def test_c1_c4_board_clock_staging(self):
-        for profile in (1, 4):
+    def test_c1_c4_c5_board_clock_staging(self):
+        for profile in (1, 4, 5):
             with self.subTest(profile=profile):
                 output, _ = self.stage(backend="scoreboard", output=self.root / f"board-c{profile}",
                                        extra=("--board-clock-profile", str(profile)))
