@@ -7,6 +7,7 @@ module tb_pango_soc_reset;
     logic ddr_run = 0, board_reset_n = 0, soc_pll_locked = 0;
     logic ddr_pll_locked = 0, ddr_phy_locked = 0, ddr_ready = 0;
     logic reset_async, ddr_reset_n, rst_core, rst_sys, rst_ddr, rst_periph;
+    logic [7:0] rst_sys_local;
     logic in_valid = 0, in_ready, out_valid, out_ready = 0;
     logic [7:0] in_data = 0, out_data;
     int core_edges = 0;
@@ -20,7 +21,9 @@ module tb_pango_soc_reset;
         else clk_ddr = 0;
     end
     pango_soc_reset dut (.*);
-    soc_reset_controller domains (.*);
+    soc_reset_controller #(.SYS_COPIES(8)) domains (.*);
+    always @(negedge clk_sys)
+        assert (rst_sys_local === {8{rst_sys}}) else $fatal(1, "SYS reset copies changed release cycle");
     async_fifo #(.WIDTH(8), .DEPTH(4)) pending (
         .s_clk(clk_sys), .s_rst(rst_sys), .m_clk(clk_ddr), .m_rst(rst_ddr),
         .in_valid, .in_ready, .in_data, .out_valid, .out_ready, .out_data);
@@ -29,7 +32,7 @@ module tb_pango_soc_reset;
     task automatic released;
         wait (!reset_async);
         repeat (6) @(negedge clk_periph);
-        assert (!rst_core && !rst_sys && !rst_periph && ddr_reset_n)
+        assert (!rst_core && !rst_sys && rst_sys_local == 0 && !rst_periph && ddr_reset_n)
             else $fatal(1, "local domains did not release");
     endtask
     task automatic online;
@@ -53,7 +56,7 @@ module tb_pango_soc_reset;
     task automatic check_reset;
         wait (reset_async);
         #1ps;
-        assert (reset_async && rst_core && rst_sys && rst_ddr && rst_periph && !ddr_reset_n)
+        assert (reset_async && rst_core && rst_sys && (&rst_sys_local) && rst_ddr && rst_periph && !ddr_reset_n)
             else $fatal(1, "fault did not reset every domain and DDR controller");
         // DDR IP 接到复位后撤销 lock/ready；该握手在 TB 模拟，不模拟 DDR PHY。
         @(negedge ref_clk);

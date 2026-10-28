@@ -108,7 +108,7 @@ module pango_measure_top #(
     assign arch.trace[0] = commit_trace[0];
     assign arch.trace[1] = commit_trace[1];
     soc_reset_controller u_reset (.reset_async, .clk_core, .clk_sys, .clk_ddr, .clk_periph,
-        .rst_core, .rst_sys, .rst_ddr, .rst_periph);
+        .rst_core, .rst_sys, .rst_ddr, .rst_periph, .rst_sys_local());
     if (1) begin : g_scan_core
         pango_measure_scan #(.INPUT_BITS(CORE_INPUT_BITS), .OUTPUT_BITS(CORE_OUTPUT_BITS)) u_scan (
             .clk(clk_core), .rst(rst_core), .shift(scan_shift[0]), .update(scan_update[0]),

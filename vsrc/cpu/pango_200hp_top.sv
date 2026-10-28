@@ -102,7 +102,7 @@ module pango_200hp_top #(
             // 与 soc_system 内部 DDR 端口同时异步置位、同域三拍释放，防止只清 FIFO 一侧。
             soc_reset_controller u_bridge_reset (
                 .clk_core(hot_clk), .clk_sys(sys_clk), .clk_ddr(core_clk), .clk_periph(periph_clk),
-                .reset_async(soc_rst), .rst_core(), .rst_sys(), .rst_ddr(ddr_bridge_rst), .rst_periph());
+                .reset_async(soc_rst), .rst_core(), .rst_sys(), .rst_ddr(ddr_bridge_rst), .rst_periph(), .rst_sys_local());
             assign reset_sync_q = '0;
         end
     endgenerate

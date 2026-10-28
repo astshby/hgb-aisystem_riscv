@@ -56,8 +56,10 @@ module soc_system #(
         (SOC_PROFILE == soc_config_pkg::SOC_PROFILE_LITE ? soc_config_pkg::SOC_LITE_PRESENT : soc_config_pkg::SOC_FULL_PRESENT) |
         (DDR_BYTES != 0 ? 16'h4000 : 16'h0000);
     logic rst_core, rst_sys, rst_ddr, rst_periph;
-    soc_reset_controller u_reset (.reset_async,.clk_core,.clk_sys,.clk_ddr,.clk_periph,
-        .rst_core,.rst_sys,.rst_ddr,.rst_periph);
+    logic [7:0] rst_sys_local;
+    // 按fabric、两个CPU CDC、TCM、DDR、DMA、控制桥、ROM/Flash分开驱动SYS复位负载。
+    soc_reset_controller #(.SYS_COPIES(8)) u_reset (.reset_async,.clk_core,.clk_sys,.clk_ddr,.clk_periph,
+        .rst_core,.rst_sys,.rst_ddr,.rst_periph,.rst_sys_local);
     logic [2:0] device_pending, core_pending;
     (* ASYNC_REG = "TRUE" *) logic [1:0] ddr_system_online_q;
     always_ff @(posedge clk_sys) begin
@@ -143,7 +145,7 @@ module soc_system #(
             .wr_valid(cache_wr_valid[m]),.wr_ready(cache_wr_ready[m]),.wr_data(cache_wr_data[m]),
             .wr_rsp_valid(cache_wr_rsp_valid[m]),.wr_rsp_ready(cache_wr_rsp_ready[m]),.wr_rsp(cache_wr_rsp[m]),
             .axi_req(local_axi[m]),.axi_rsp(local_responses[m]));
-        axi_clock_bridge u_cdc (.s_clk(clk_core),.s_rst(rst_core),.m_clk(clk_sys),.m_rst(rst_sys),
+        axi_clock_bridge u_cdc (.s_clk(clk_core),.s_rst(rst_core),.m_clk(clk_sys),.m_rst(rst_sys_local[m+1]),
             .s_req(local_axi[m]),.s_rsp(local_responses[m]),.m_req(masters[m]),.m_rsp(master_responses[m]));
     end
     assign masters[3] = external_req;
@@ -151,19 +153,19 @@ module soc_system #(
     assign npu_req = targets[6];
     assign target_responses[6] = npu_rsp;
     axi_system_fabric #(.DDR_BYTES(DDR_BYTES),.FLASH_BYTES(FLASH_BYTES),.NPU_BYTES(NPU_BYTES)) u_fabric (
-        .clk(clk_sys),.rst(rst_sys),.m_req(masters),.m_rsp(master_responses),.s_req(targets),.s_rsp(target_responses));
-    axi_error_target u_error (.clk(clk_sys),.rst(rst_sys),.req(targets[0]),.rsp(target_responses[0]));
+        .clk(clk_sys),.rst(rst_sys_local[0]),.m_req(masters),.m_rsp(master_responses),.s_req(targets),.s_rsp(target_responses));
+    axi_error_target u_error (.clk(clk_sys),.rst(rst_sys_local[0]),.req(targets[0]),.rsp(target_responses[0]));
     logic rom_req_valid, rom_req_ready, rom_rsp_valid, rom_rsp_ready;
     bus_req_t rom_request;
     bus_rsp_t rom_response;
-    axi_bus_target #(.READ_ONLY(1)) u_rom_target (.clk(clk_sys),.rst(rst_sys),.axi_req(targets[1]),.axi_rsp(target_responses[1]),
+    axi_bus_target #(.READ_ONLY(1)) u_rom_target (.clk(clk_sys),.rst(rst_sys_local[7]),.axi_req(targets[1]),.axi_rsp(target_responses[1]),
         .req_valid(rom_req_valid),.req_ready(rom_req_ready),.request(rom_request),
         .rsp_valid(rom_rsp_valid),.rsp_ready(rom_rsp_ready),.response(rom_response));
-    boot_rom u_rom (.clk(clk_sys),.rst(rst_sys),.req_valid(rom_req_valid),.req_ready(rom_req_ready),.request(rom_request),
+    boot_rom u_rom (.clk(clk_sys),.rst(rst_sys_local[7]),.req_valid(rom_req_valid),.req_ready(rom_req_ready),.request(rom_request),
         .rsp_valid(rom_rsp_valid),.rsp_ready(rom_rsp_ready),.response(rom_response));
     axi_req_t system_tcm_req;
     axi_rsp_t system_tcm_rsp;
-    axi_clock_bridge u_tcm_cdc (.s_clk(clk_sys),.s_rst(rst_sys),.m_clk(clk_core),.m_rst(rst_core),
+    axi_clock_bridge u_tcm_cdc (.s_clk(clk_sys),.s_rst(rst_sys_local[3]),.m_clk(clk_core),.m_rst(rst_core),
         .s_req(targets[2]),.s_rsp(target_responses[2]),.m_req(system_tcm_req),.m_rsp(system_tcm_rsp));
     logic [1:0] system_req_valid, system_req_ready, system_rsp_valid, system_rsp_ready;
     bus_req_t system_request [2];
@@ -193,20 +195,20 @@ module soc_system #(
     if (DDR_BYTES != 0) begin : g_ddr
         axi_req_t admitted_ddr_req;
         axi_rsp_t admitted_ddr_rsp;
-        axi_availability_gate u_ddr_admission (.clk(clk_sys),.rst(rst_sys),.available(ddr_system_online_q[1]),
+        axi_availability_gate u_ddr_admission (.clk(clk_sys),.rst(rst_sys_local[4]),.available(ddr_system_online_q[1]),
             .s_req(targets[3]),.s_rsp(target_responses[3]),.m_req(admitted_ddr_req),.m_rsp(admitted_ddr_rsp));
-        axi_clock_bridge u_ddr_cdc (.s_clk(clk_sys),.s_rst(rst_sys),.m_clk(clk_ddr),.m_rst(rst_ddr),
+        axi_clock_bridge u_ddr_cdc (.s_clk(clk_sys),.s_rst(rst_sys_local[4]),.m_clk(clk_ddr),.m_rst(rst_ddr),
             .s_req(admitted_ddr_req),.s_rsp(admitted_ddr_rsp),.m_req(ddr_req),.m_rsp(ddr_rsp));
     end else begin : g_no_ddr
         assign ddr_req = '0;
-        axi_error_target u_error (.clk(clk_sys),.rst(rst_sys),.req(targets[3]),.rsp(target_responses[3]));
+        axi_error_target u_error (.clk(clk_sys),.rst(rst_sys_local[4]),.req(targets[3]),.rsp(target_responses[3]));
     end
 
     axil_req_t system_mmio_req, periph_mmio_req;
     axil_rsp_t system_mmio_rsp, periph_mmio_rsp;
-    axi_to_axil u_control_bridge (.clk(clk_sys),.rst(rst_sys),.s_req(targets[4]),.s_rsp(target_responses[4]),
+    axi_to_axil u_control_bridge (.clk(clk_sys),.rst(rst_sys_local[6]),.s_req(targets[4]),.s_rsp(target_responses[4]),
         .m_req(system_mmio_req),.m_rsp(system_mmio_rsp));
-    axil_clock_bridge u_periph_cdc (.s_clk(clk_sys),.s_rst(rst_sys),.m_clk(clk_periph),.m_rst(rst_periph),
+    axil_clock_bridge u_periph_cdc (.s_clk(clk_sys),.s_rst(rst_sys_local[6]),.m_clk(clk_periph),.m_rst(rst_periph),
         .s_req(system_mmio_req),.s_rsp(system_mmio_rsp),.m_req(periph_mmio_req),.m_rsp(periph_mmio_rsp));
     logic dma_req_valid, dma_req_ready, dma_rsp_valid, dma_rsp_ready, dma_irq;
     bus_req_t dma_request;
@@ -234,10 +236,10 @@ module soc_system #(
         .dma_req_valid,.dma_req_ready,.dma_request,.dma_rsp_valid,.dma_rsp_ready,.dma_response,.dma_irq,
         .flash_req_valid,.flash_req_ready,.flash_request,.flash_rsp_valid,.flash_rsp_ready,.flash_response);
     dma_command_cdc #(.DDR_BYTES(DDR_BYTES),.FLASH_BYTES(FLASH_BYTES),.NPU_ENABLE(NPU_BYTES != 0)) u_dma (
-        .clk_sys,.rst_sys,.clk_periph,.rst_periph,.req_valid(dma_req_valid),.req_ready(dma_req_ready),.request(dma_request),
+        .clk_sys,.rst_sys(rst_sys_local[5]),.clk_periph,.rst_periph,.req_valid(dma_req_valid),.req_ready(dma_req_ready),.request(dma_request),
         .rsp_valid(dma_rsp_valid),.rsp_ready(dma_rsp_ready),.response(dma_response),.irq(dma_irq),
         .axi_req(masters[2]),.axi_rsp(master_responses[2]));
-    flash_axi_target u_flash (.clk_sys,.rst_sys,.clk_periph,.rst_periph,.axi_req(targets[5]),.axi_rsp(target_responses[5]),
+    flash_axi_target u_flash (.clk_sys,.rst_sys(rst_sys_local[7]),.clk_periph,.rst_periph,.axi_req(targets[5]),.axi_rsp(target_responses[5]),
         .reg_req_valid(flash_req_valid),.reg_req_ready(flash_req_ready),.reg_request(flash_request),
         .reg_rsp_valid(flash_rsp_valid),.reg_rsp_ready(flash_rsp_ready),.reg_response(flash_response),
         .spi_cs_n(flash_cs_n),.spi_sck(flash_sck),.spi_mosi(flash_mosi),.spi_miso(flash_miso));
