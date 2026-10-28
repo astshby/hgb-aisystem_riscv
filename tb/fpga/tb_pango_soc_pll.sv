@@ -1,13 +1,14 @@
 // Module: tb_pango_soc_pll
-// Description: Measure C1/C4 periods using the unmodified vendor GPLL simulation model.
+// Description: Measure C1/C4 and optional NPU periods using the unmodified vendor GPLL simulation model.
 module tb_pango_soc_pll;
     timeunit 1ns;
     timeprecision 1ps;
     parameter int CLOCK_PROFILE = 1;
+    parameter bit NPU_ENABLE = 0;
     logic ref_clk = 0, reset_n = 0;
-    wire clk_core, clk_sys, clk_periph, locked;
+    wire clk_core, clk_sys, clk_periph, clk_npu, locked;
     always #4ns ref_clk = ~ref_clk;
-    pango_soc_pll #(.CLOCK_PROFILE(CLOCK_PROFILE)) dut (.*);
+    pango_soc_pll #(.CLOCK_PROFILE(CLOCK_PROFILE), .NPU_ENABLE(NPU_ENABLE)) dut (.*);
     task automatic measure(input int domain, input realtime expected);
         realtime first_edge, period;
         for (int i = 0; i < 10; i++) begin
@@ -15,6 +16,7 @@ module tb_pango_soc_pll;
                 0: @(posedge clk_core);
                 1: @(posedge clk_sys);
                 2: @(posedge clk_periph);
+                3: @(posedge clk_npu);
                 default: $fatal(1, "bad domain");
             endcase
             if (i > 0) begin
@@ -33,8 +35,10 @@ module tb_pango_soc_pll;
         measure(0, 10ns);
         measure(1, CLOCK_PROFILE == 4 ? 10ns : 12.5ns);
         measure(2, 40ns);
-        $display("PASS vendor GPLL C%0d: core=100 sys=%0d periph=25 MHz", CLOCK_PROFILE,
-            CLOCK_PROFILE == 4 ? 100 : 80);
+        if (NPU_ENABLE) measure(3, 10ns);
+        else assert (clk_npu == 0) else $fatal(1, "disabled NPU clock toggled");
+        $display("PASS vendor GPLL C%0d: core=100 sys=%0d periph=25 npu=%0d MHz", CLOCK_PROFILE,
+            CLOCK_PROFILE == 4 ? 100 : 80, NPU_ENABLE ? 100 : 0);
         $finish;
     end
     initial begin

@@ -35,9 +35,10 @@ def main():
                "vsrc/soc/common/async_fifo.sv", "tb/fpga/tb_pango_soc_reset.sv"]
     jobs = [("reset", "tb_pango_soc_reset", sources, [])]
     for profile in (1, 4):
-        jobs.append((f"pll-c{profile}", "tb_pango_soc_pll",
-                     [str(path) for path in libraries] + ["vsrc/cpu/pango_soc_pll.sv", "tb/fpga/tb_pango_soc_pll.sv"],
-                     [f"-GCLOCK_PROFILE={profile}"]))
+        for npu in (0, 1):
+            jobs.append((f"pll-c{profile}-npu{npu}", "tb_pango_soc_pll",
+                         [str(path) for path in libraries] + ["vsrc/cpu/pango_soc_pll.sv", "tb/fpga/tb_pango_soc_pll.sv"],
+                         [f"-GCLOCK_PROFILE={profile}", f"-GNPU_ENABLE={npu}"]))
     hashes = {str(path): hashlib.sha256(path.read_bytes()).hexdigest()
               for path in set((REPO / name).resolve() for _, _, paths, _ in jobs for name in paths)}
     receipt = {"evidence": "RTL and unmodified vendor simulation models; no placement, STA, DDR PHY or board test",
