@@ -69,8 +69,12 @@ proc all_registers {args} {
 
 class CdcAuditTests(unittest.TestCase):
     def test_success_and_missing_bit_or_wrong_domain(self):
-        for platform in ('soc_tcm', 'soc_ddr'):
-            spec = specification(configuration(platform))
+        for platform in ('soc_tcm', 'soc_ddr', 'soc_ddr_yolo'):
+            config = configuration('soc_ddr' if platform == 'soc_ddr_yolo' else platform)
+            if platform == 'soc_ddr_yolo':
+                config = dict(config, domains=[*config['domains'], 'npu'], npu_enable=1,
+                              periods_ps=dict(config['periods_ps'], npu=10000))
+            spec = specification(config)
             audit, _ = generate(spec)
             for missing, wrong in ((False, False), (True, False), (False, True)):
                 with self.subTest(platform=platform, missing=missing, wrong=wrong):

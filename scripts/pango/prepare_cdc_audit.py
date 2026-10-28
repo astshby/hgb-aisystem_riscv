@@ -191,9 +191,11 @@ def main():
         return
     if a.project is None:
         p.error('--project required to generate an audit')
-    manifest = json.loads((a.project / 'benchmark.json').read_text())
+    manifest_path = a.project / ('application.json' if (a.project / 'application.json').exists() else 'benchmark.json')
+    manifest = json.loads(manifest_path.read_text())
     spec = specification(manifest['config'])
-    spec['benchmark_manifest_sha256'] = hashlib.sha256((a.project / 'benchmark.json').read_bytes()).hexdigest()
+    spec['input_manifest'] = manifest_path.name
+    spec['input_manifest_sha256'] = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
     a.output.mkdir(parents=True, exist_ok=False)
     audit, _ = generate(spec)
     (a.output / 'audit.tcl').write_text(audit)

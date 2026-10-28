@@ -11,7 +11,11 @@ from summarize_measurement import read_table, resources, path_family
 
 
 def summarize(root):
-    manifest=verify(root)
+    if (root/'application.json').exists():
+        from prepare_yolo_application import verify as verify_application
+        manifest=verify_application(root)
+    else:
+        manifest=verify(root)
     config=manifest['config']
     syn=root/'prj_tasks/syn_1/synthesize'
     log=root/'native-synthesis.stdout.log'

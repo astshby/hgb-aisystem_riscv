@@ -34,8 +34,13 @@ def scripts(synthesis, implementation):
 
 
 def stage(source, output):
-    from prepare_benchmark import verify
+    application = (source/'application.json').exists()
+    if application:
+        from prepare_yolo_application import verify
+    else:
+        from prepare_benchmark import verify
     manifest = verify(source)
+    manifest_name = 'application.json' if application else 'benchmark.json'
     if output.exists():
         raise ValueError('performance experiment needs a new directory')
     # Gray sources, both synchronizer stages and the FIFO module must retain their
@@ -44,17 +49,17 @@ def stage(source, output):
     if 'PAP_ASYNC_REG' not in fifo or 'syn_allow_retiming = 0' not in fifo or 'syn_preserve = 1' not in fifo:
         raise ValueError('paired RTL lacks the reviewed CDC protection')
     output.mkdir(parents=True)
-    for name in [*manifest['files'], 'benchmark.json']:
+    for name in [*manifest['files'], manifest_name]:
         target = output / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source / name, target)
-    synthesis, implementation = scripts((source / 'benchmark_synthesize.tcl').read_text(),
+    synthesis, implementation = scripts((source / ('application_synthesize.tcl' if application else 'benchmark_synthesize.tcl')).read_text(),
                                          (source / 'implement.tcl').read_text())
     (output / 'performance_synthesize.tcl').write_text(synthesis)
     (output / 'performance_implement.tcl').write_text(implementation)
     strategy = dict(name='timing-v1', synthesis=SYNTHESIS, place=PLACEMENT, route=ROUTE,
                     clocks='unchanged from paired standard project',
-                    benchmark_manifest_sha256=sha(output / 'benchmark.json'),
+                    input_manifest=manifest_name, input_manifest_sha256=sha(output / manifest_name),
                     source_project=source.name,
                     files={name: sha(output/name) for name in
                            ('performance_synthesize.tcl', 'performance_implement.tcl')},
@@ -70,7 +75,11 @@ def verify_strategy(root, synthesis_log=None):
     expected = dict(synthesis=SYNTHESIS, place=PLACEMENT, route=ROUTE)
     if strategy['name'] != 'timing-v1' or any(strategy[k] != v for k, v in expected.items()):
         raise ValueError('unknown performance strategy')
-    if sha(root / 'benchmark.json') != strategy['benchmark_manifest_sha256']:
+    manifest_name = strategy.get('input_manifest', 'benchmark.json')
+    if manifest_name not in ('benchmark.json', 'application.json'):
+        raise ValueError('unknown paired manifest')
+    digest = strategy.get('input_manifest_sha256', strategy.get('benchmark_manifest_sha256'))
+    if sha(root / manifest_name) != digest:
         raise ValueError('performance benchmark configuration changed')
     for name, digest in strategy['files'].items():
         if sha(root/name) != digest:
