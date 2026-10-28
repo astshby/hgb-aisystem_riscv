@@ -2,6 +2,7 @@
 // Description: AXI burst target to scalar device/RAM accesses with independent address/data capture.
 module axi_bus_target #(
     parameter bit READ_ONLY = 0,
+    parameter bit REGISTER_WRITE_CHECK = 0,
     parameter int LOCAL_BYTES = core_config_pkg::DBUS_BYTES
 ) (
     input logic clk, rst,
@@ -29,7 +30,8 @@ module axi_bus_target #(
     logic r_valid_q, b_valid_q;
     axi_r_t r_q;
     axi_b_t b_q;
-    logic choose_write, choose_read, bad_write, skip_write, local_fire;
+    logic choose_write, choose_read, bad_write, bad_write_raw, skip_write, local_fire;
+    logic write_check_valid_q, bad_write_q;
     logic [31:0] read_beat_addr_q, write_beat_addr_q;
     logic [31:0] read_addr, write_addr, allowed_strb;
     logic [5:0] read_bytes, write_bytes, read_step, write_step;
@@ -49,11 +51,30 @@ module axi_bus_target #(
     assign write_end = write_offset_q + write_step >= write_bytes;
     // INCR窄传输的有效字节随当前beat地址移动，跨256位总线字边界后从低lane重新开始。
     assign allowed_strb = (32'hffffffff >> (32-int'(write_bytes))) << write_beat_addr_q[4:0];
-    assign bad_write = READ_ONLY ||
+    assign bad_write_raw = READ_ONLY ||
                        (q.w.last != (write_beat_q == write_q.len)) || |(q.w.strb & ~allowed_strb);
+    // 系统TCM在AXI beat边界预先寄存宽strobe/WLAST检查。
+    // 一个宽beat内的所有本地字共享该结果，避免每次BRAM写都增加一级等待。
+    if (REGISTER_WRITE_CHECK) begin : g_write_check
+        assign bad_write = bad_write_q;
+        always_ff @(posedge clk) begin
+            if (rst) write_check_valid_q <= 0;
+            else begin
+                if (write_active_q && !b_valid_q && q.w_valid && !write_check_valid_q) begin
+                    bad_write_q <= bad_write_raw;
+                    write_check_valid_q <= 1;
+                end
+                if (write_w_fire) write_check_valid_q <= 0;
+            end
+        end
+    end else begin : g_direct_write_check
+        assign bad_write = bad_write_raw;
+        assign write_check_valid_q = 1;
+        assign bad_write_q = 0;
+    end
     assign local_error = response.error == BUS_OK ? AXI_OKAY :
                          response.error == BUS_DECERR ? AXI_DECERR : AXI_SLVERR;
-    assign choose_write = !pending_q && write_active_q && q.w_valid && !b_valid_q &&
+    assign choose_write = !pending_q && write_active_q && q.w_valid && write_check_valid_q && !b_valid_q &&
                           (next_write_q || !read_active_q || r_valid_q);
     assign choose_read = !pending_q && read_active_q && !r_valid_q && !choose_write;
     assign skip_write = choose_write && (bad_write ||
