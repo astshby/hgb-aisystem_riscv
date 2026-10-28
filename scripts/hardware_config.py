@@ -26,11 +26,15 @@ def hardware_configuration(accelerator='none',xlen=32,icache_bytes=None,dcache_b
         raise ValueError('unsupported hardware selection')
     periods=dict(PROFILE['clock_periods_ps']['target'])
     if accelerator!='none':periods['npu']=10000
+    # 只有 YOLO 走 C5 板级时钟；其余软件与测量工程保持 target(C1)。仿真时钟仍是
+    # target 的 100/80/125/25 MHz，YOLO 应用验证的周期数与板级 90/100 MHz 无关。
+    board_profile = PROFILE['native_board_profiles'].get(
+        'yolo' if accelerator == 'yolo' else 'target')
     result = dict(accelerator=accelerator,xlen=xlen,
                 macros=dict(PROFILE['core_macros'],CORE_XLEN=xlen),
                 memory=cache_memory(icache_bytes,dcache_bytes,bank_xor_mask),periods_ps=periods,
                 frequencies_hz={key:10**12//value for key,value in periods.items()},
-                board_clock_profile=PROFILE['native_board_profiles']['target'])
+                board_clock_profile=board_profile)
     if bank_xor_mask:
         result['macros']['SOC_DCACHE_BANK_XOR_MASK'] = bank_xor_mask
     return result

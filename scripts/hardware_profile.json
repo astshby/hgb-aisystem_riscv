@@ -74,6 +74,7 @@
   },
   "native_board_profiles": {
     "target": 1,
-    "sys100": 4
+    "sys100": 4,
+    "yolo": 5
   }
 }

@@ -234,6 +234,13 @@ VCO 800 MHz 的栅格只能给出 100/88.9/80/114.3 MHz，90 和 110 都不在�
 | `scripts/pango/prepare_project.py` | `BOARD_CLOCK_PROFILES[5]`、`BOARD_CLOCK_RATIOS[5]=(18,25)/(4,5)/(1,5)`、`--board-clock-profile` 接受 5、NPU 校验改为 `NPU_DIV` 参数 |
 | `scripts/pango/measurement_constraints.py` | `CLOCKS["C5"]` |
 | `tb/tools/test_pango_handoff.py` | 暂存用例扩展到 1/4/5，同步新的 Hz 公式 |
+| `scripts/hardware_profile.json` | `native_board_profiles` 增加 `yolo: 5`，`target` 仍为 1 |
+| `scripts/hardware_config.py` | 按加速器选板级档：`yolo` 取 `yolo` 项（C5），其余仍取 `target`（C1） |
+
+选择范围：只有 YOLO 应用工程暂存到 C5。`clock_periods_ps` 未改，YOLO 仿真仍按 target 的
+100/80/125/25 MHz 运行，应用验证的周期数与板级 90/100 MHz 无关；CoreMark、RT-Thread 与其余
+测量工程的板级默认仍为 C1。`tb_yolo_system` 只带缓存容量参数，时钟由 `tb_soc_system` 默认值决定，
+因此这次切换不重建仿真时钟。
 
 验证：
 
