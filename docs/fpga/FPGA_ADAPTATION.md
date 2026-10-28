@@ -258,6 +258,47 @@ VCO 800 MHz 的栅格只能给出 100/88.9/80/114.3 MHz，90 和 110 都不在�
 YOLO 标准策略（Core 93.1532、SYS 101.8537、NPU 107.9680 MHz）也满足 C5 的 SYS 与 NPU 目标。
 波形与板上测量均未做。
 
+实现阶段的调用方式：`pds_shell -work_dir <工程> -file <tcl>`，工程由 `HGB_PDS_PROJECT` 打开。
+2026-10-29 实测，多传 `-project_name` 会新建空工程并覆盖已有 `.pds`（147 KB 变 19 KB），
+随后 `dev_map` 报 `Flow-0001: There are no design files`。实现脚本因此只传 `-work_dir` 与 `-file`。
+
+PDS 2025.2 的 `place -mode` 与 `route -route_mode` 只接受 `fast`/`normal`；`performance` 会报
+`Flow-0119`。`$PDS_WORK_ROOT/work/tcm-bram-20261028/yolo/physical-ready/strategy.json` 里的
+`place -mode performance ... -refineplacement_cluster`、`route ... -number_of_router_thread`
+都不是该版本的合法选项，那份“性能策略”没有执行过。实际可用的时序优先选项是
+`place -optimize_gp_recovery / -logic_optimize_lut6d FALSE` 与
+`route -slack_weight / -optimize_routing_recovery`；`place -dc_duplication` 只接受
+`Global Disable`（默认已启用复制，该选项仅用于全局关闭），`-logic_optimize_lut_cascade`
+本器件不支持（`Flow-0182`）。
+
+### C5 首次布线实测（2026-10-29）
+
+工程 `$PDS_WORK_ROOT/work/clocks-c5-yolo-perf2-20261029/yolo`，C5 目标
+90/100/125/25/100 MHz，性能策略综合后执行 `place -mode normal -optimize_gp_recovery TRUE
+-logic_optimize_lut6d FALSE`、`route -route_mode normal -slack_weight 80
+-optimize_routing_recovery TRUE`、`route_optimize`，25 min 41 s 完成，布线收敛，未布通网络 0。
+
+| 域 | 布线 Fmax | 目标 | Slack | 同域失败端点 |
+|---|---:|---:|---:|---:|
+| clk_core | 80.5794 | 90 | −1.299 | 6353 / 122429 |
+| clk_sys | 93.1966 | 100 | −0.730 | 未列 |
+| clk_npu | 91.4829 | 100 | −0.931 | 未列 |
+| ddrphy_sysclk | 109.6011 | 125 | −1.124 | 1280 / 30478 |
+| clk_periph | 55.6855 | 25 | +22.042 | 0 |
+
+资源占用：CLMA 20256/30075（68%）、CLMS 6360/9875（65%）、DRM 165/415（40%）、
+APM 43/370（12%）、GPLL 3/10。检查项只报 1 个 virtual_clock，没有缺失 I/O 约束。
+
+跨域（本工程未加载 CDC 例外，按同步检查判负）：外设→core −2.674、sys→DDR −2.485、
+DDR→sys −2.178、core→sys −2.079、sys→core −2.053、core→外设 −1.383。
+
+Core 最差路径仍是 IQ 写口：TCM bank CLKA → 整数 IQ `packet_q`（8 级、扇出 34、
+逻辑 2.874 / 布线 8.724），`u_memory/tag_q` → IQ `packet_q`（7 级、扇出 60、布线 85.9%）。
+
+结论：C5 的 90 MHz 布线后不成立，Core 实际约 80.6 MHz；85 MHz 同样不成立。
+要在布线上闭合，Core 目标需降到 80 MHz 或更低，SYS/NPU 需降到 90 MHz 或更低。
+DDR 域在 125 MHz 下 −1.124 ns 与 C5 无关，需单独处理。
+
 ## 结果解释
 
 Fmax 是对应域内路径的综合估计，不等于已上板频率。WNS、资源、最差路径、跨域报告分别呈现。
