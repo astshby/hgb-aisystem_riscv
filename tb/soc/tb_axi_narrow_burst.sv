@@ -1,6 +1,6 @@
 // Module: tb_axi_narrow_burst
 // Description: Byte-addressed AXI INCR reference checking independent of the target's strobe arithmetic.
-module tb_axi_narrow_burst;
+module tb_axi_narrow_burst #(parameter int TCM_REGION = 0);
     timeunit 1ns;
     timeprecision 1ps;
     import core_config_pkg::*;
@@ -8,6 +8,8 @@ module tb_axi_narrow_burst;
     import axi_types_pkg::*;
     import bus_types_pkg::*;
     localparam int MEMORY_BYTES = 1024;
+    localparam logic [31:0] BASE = TCM_REGION == 1 ? soc_addr_pkg::ITCM_BASE :
+                                       TCM_REGION == 2 ? soc_addr_pkg::DTCM_BASE : 32'b0;
     logic clk = 0, rst = 1;
     axi_req_t axi_req = '0;
     axi_rsp_t axi_rsp;
@@ -18,7 +20,31 @@ module tb_axi_narrow_burst;
     int cycles = 0, delay_q = 0, cases = 0, checked_bytes = 0;
     int local_writes = 0, local_reads = 0;
     always #5 clk = ~clk;
-    axi_bus_target dut (.*);
+    if (TCM_REGION == 0) begin : g_scalar
+        axi_bus_target dut (.*);
+    end else begin : g_tcm
+        logic [1:0] local_req_valid, local_req_ready, local_rsp_valid, local_rsp_ready;
+        bus_req_t local_request [2];
+        logic [63:0] local_rsp_data [2];
+        localparam int BANK = TCM_REGION - 1;
+        tcm_system_target dut (.clk, .rst, .axi_req, .axi_rsp,
+            .req_valid(local_req_valid), .req_ready(local_req_ready), .request(local_request),
+            .rsp_valid(local_rsp_valid), .rsp_ready(local_rsp_ready), .rsp_data(local_rsp_data));
+        assign req_valid = local_req_valid[BANK];
+        assign rsp_ready = local_rsp_ready[BANK];
+        always_comb begin
+            request = local_request[BANK];
+            request.addr = local_request[BANK].addr - core_types_pkg::xlen_t'(BASE);
+            local_req_ready = 0;
+            local_req_ready[BANK] = req_ready;
+            local_rsp_valid = 0;
+            local_rsp_valid[BANK] = rsp_valid;
+            for (int b = 0; b < 2; b++) local_rsp_data[b] = 0;
+            local_rsp_data[BANK] = 64'(response.rdata);
+        end
+        always @(posedge clk) if (!rst)
+            assert (!local_req_valid[1-BANK]) else $fatal(1, "wrong TCM region selected");
+    end
     assign req_ready = !rst && !pending_q && cycles % 5 != 0;
     assign rsp_valid = pending_q && delay_q == 0;
 
@@ -52,7 +78,7 @@ module tb_axi_narrow_burst;
     task automatic send_aw(input int address, size, beats);
         @(negedge clk);
         axi_req.aw_valid = 1;
-        axi_req.aw = '{id:axi_id_t'(cases), addr:32'(address), len:8'(beats-1),
+        axi_req.aw = '{id:axi_id_t'(cases), addr:BASE+32'(address), len:8'(beats-1),
                       size:3'(size), burst:2'b01, default:'0};
         do @(posedge clk); while (!axi_rsp.aw_ready);
         @(negedge clk); axi_req.aw_valid = 0;
@@ -114,7 +140,7 @@ module tb_axi_narrow_burst;
         axi_r_t held;
         @(negedge clk);
         axi_req.ar_valid = 1;
-        axi_req.ar = '{id:4'd9, addr:32'h100, len:8'd7, size:3'd5, burst:2'b01, default:'0};
+        axi_req.ar = '{id:4'd9, addr:BASE+32'h100, len:8'd7, size:3'd5, burst:2'b01, default:'0};
         do @(posedge clk); while (!axi_rsp.ar_ready);
         @(negedge clk); axi_req.ar_valid = 0;
         for (int beat = 0; beat < 8; beat++) begin
@@ -147,8 +173,8 @@ module tb_axi_narrow_burst;
                     for (int ordering = 0; ordering < 2; ordering++)
                         write_case(256 + 32 - (1 << size), size, 4, mode, 1'(ordering));
         read_back();
-        $display("PASS AXI independent INCR bytes RV%0d cases=%0d checked_bytes=%0d local_reads=%0d local_writes=%0d",
-                 XLEN, cases, checked_bytes, local_reads, local_writes);
+        $display("PASS AXI independent INCR bytes RV%0d tcm_region=%0d cases=%0d checked_bytes=%0d local_reads=%0d local_writes=%0d",
+                 XLEN, TCM_REGION, cases, checked_bytes, local_reads, local_writes);
         $finish;
     end
 endmodule

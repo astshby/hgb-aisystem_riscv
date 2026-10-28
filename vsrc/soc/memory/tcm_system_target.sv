@@ -1,5 +1,5 @@
 // Module: tcm_system_target
-// Description: System AXI access to the same core-domain TCM banks through an independent fourth local port.
+// Description: System AXI access to the same core-domain TCM banks through an independent fourth local port with registered write admission.
 module tcm_system_target (
     input logic clk, rst,
     input axi_types_pkg::axi_req_t axi_req,
@@ -13,7 +13,8 @@ module tcm_system_target (
 );
     import bus_types_pkg::*;
     logic v, ready, rv, rr, active_q, bank_q, error_q;
-    bus_req_t r;
+    bus_req_t r, write_q;
+    logic write_pending_q, write_fire;
     bus_rsp_t p;
     bus_target_e target;
     bus_error_e access_error;
@@ -23,13 +24,27 @@ module tcm_system_target (
     address_decode u_decode (.request(r),.target,.error(access_error));
     assign bank = target == TARGET_DTCM;
     assign legal = access_error == BUS_OK && (target == TARGET_ITCM || target == TARGET_DTCM);
-    assign ready = !active_q && (!legal || req_ready[bank]);
-    assign rv = active_q && (error_q || rsp_valid[bank_q]);
+    assign ready = !active_q && (!legal || r.write || req_ready[bank]);
+    assign rv = active_q && (error_q || (!write_pending_q && rsp_valid[bank_q]));
     assign p = '{rdata:core_types_pkg::xlen_t'(rsp_data[bank_q]),error:error_q ? BUS_SLVERR : BUS_OK};
+    // 系统写先保存在本地寄存器，下一拍再参与BRAM辅助口仲裁。
+    // 这里只接收请求；B响应仍等待真实RAM写完成。读保持原来的直通接纳延迟。
+    assign write_fire = write_pending_q && req_ready[bank_q];
+    always_ff @(posedge clk) begin
+        if (rst) write_pending_q <= 0;
+        else begin
+            if (write_fire) write_pending_q <= 0;
+            if (v && ready && legal && r.write) begin
+                write_pending_q <= 1;
+                write_q <= r;
+            end
+        end
+    end
     for (genvar b = 0; b < 2; b++) begin : g_bank
-        assign request[b] = r;
-        assign req_valid[b] = v && !active_q && legal && bank == 1'(b);
-        assign rsp_ready[b] = rr && active_q && !error_q && bank_q == 1'(b);
+        assign request[b] = write_pending_q ? write_q : r;
+        assign req_valid[b] = write_pending_q ? bank_q == 1'(b) :
+            (v && !active_q && legal && !r.write && bank == 1'(b));
+        assign rsp_ready[b] = rr && active_q && !error_q && !write_pending_q && bank_q == 1'(b);
     end
     always_ff @(posedge clk) begin
         if (rst) begin active_q <= 0; bank_q <= 0; error_q <= 0; end

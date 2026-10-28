@@ -8,7 +8,7 @@ log_root="${P2_LOG_ROOT:-logs/axi-narrow-burst}"
 out="build/axi-narrow-burst-rv$xlen"
 mkdir -p "$CCACHE_TEMPDIR" "$CCACHE_DIR" "$log_root" "$out"
 command=(verilator --binary --assert --timing -Wall -Wno-fatal -j 2 -DCORE_XLEN="$xlen"
-    -f scripts/rtl_files.f -f scripts/axi_files.f tb/soc/tb_axi_narrow_burst.sv
+    -f scripts/rtl_files.f -f scripts/axi_files.f vsrc/soc/memory/tcm_system_target.sv tb/soc/tb_axi_narrow_burst.sv
     --top-module tb_axi_narrow_burst -Mdir "$out")
 printf '%q ' "${command[@]}" > "$log_root/command-rv$xlen.txt"
 printf '\n' >> "$log_root/command-rv$xlen.txt"
