@@ -39,7 +39,7 @@ Windows PDS 2025.2 ADS，器件 PG2L200H-6IFBB676，HMIC_S 1.10 DDR3 IP。
 
 Core 为 ROB16/int8/mem4、RAS0、OOO0、Tournament1、forward3、MUL0/DIV1。
 C1 目标 Core/SYS/DDR-user/外设 = 100/80/125/25 MHz。
-C5 目标 Core/SYS/DDR-user/外设 = 85/106.25/125/25 MHz，无加速器；见下节。
+C5 目标 Core/SYS/DDR-user/外设/NPU = 90/100/125/25/100 MHz，供 YOLO 布局布线；见下节。
 `pango_soc_pll` 为功能域生成时钟，DDR 用户时钟来自 DDR IP；选定加速器使用额外 100 MHz 输出。
 
 `prepare_project.py --core-backend scoreboard --board-clock-profile 1` 暂存无加速器板级工程；
@@ -209,41 +209,47 @@ DDR D8跨域setup DDR→SYS -6.064、外设→SYS -2.998；hold SYS→DDR -4.771
 
 ## C5 目标时钟
 
-2026-10-29 分支 `clocks/c5-core85-sys106p25`，基于 `5966bbb`。目的：把布局布线的目标频率
-定在各域综合估计向下取 5 的倍数，不再对 Core 施加达不到的 100 MHz。
+2026-10-29 分支 `clocks/c5-yolo-90-100`，基于 `5966bbb`。首次提交 `864b344` 的目标是
+无加速器的 85/106.25 MHz；按 YOLO 布局布线需要修订为 90/100 MHz 并保留 100 MHz NPU，
+修订见下表和第二次提交。
 
-| 域 | 综合估计 MHz | 向下取 5 | C5 目标 MHz | 相对估计余量 |
+| 域 | 综合估计 MHz（YOLO 性能） | 向下取 5 | C5 目标 MHz | 相对估计余量 |
 |---|---:|---:|---:|---:|
-| Core | 90.0252 | 90 | 85 | 5.6%（且 90 只剩 0.03%，不适合作为布线目标） |
-| SYS | 107.6310 | 105 | 106.25 | 1.3% |
-| DDR-user | 150.5117 | 150 | 125（IP 固定） | 不适用 |
-| 外设 | 87.6808 | 85 | 25（保持原值） | 不适用 |
+| Core | 92.9282 | 90 | 90 | 3.2% |
+| SYS | 113.9212 | 110 | 100 | 12.2% |
+| DDR-user | 146.0494 | 145 | 125（IP 固定） | 不适用 |
+| 外设 | 92.1574 | 90 | 25（保持原值） | 不适用 |
+| NPU | 114.8633 | 110 | 100（保持原值） | 不适用 |
 
-时钟树：125 MHz ref → PFD 25 MHz → VCO 850 MHz（`STATIC_RATIOF=8.5`，0.125 步进可精确表示）
-→ 整数 ODIV 10/8/34 得到 85 / 106.25 / 25 MHz，占空比均 50%。VCO 800 MHz 的栅格只能给出
-100/88.9/80/114.3 MHz，85 和 105 都不在栅格上；{85, 105, 25} 不存在整数 ODIV 解
-（LCM(85,105)=1785，1785/25=71.4）。C5 用 850 MHz VCO 使三个域同时落在整数分频上。
+时钟树：125 MHz ref → PFD 25 MHz → VCO 900 MHz（`STATIC_RATIOF=9.0`）→ 整数 ODIV
+10/9/36 得到 Core 90、SYS 100、外设 25 MHz，CLKOUT3 的 /9 给出 NPU 100 MHz，占空比均 50%。
+VCO 800 MHz 的栅格只能给出 100/88.9/80/114.3 MHz，90 和 110 都不在栅格上；
+{90, 110, 25, 110} 无整数 ODIV 解。900 MHz VCO 让四个域同时落在整数分频上，SYS 取 100 MHz
+（900/9），比向下取整的 110 MHz 低一档，代价是 SYS 带宽少 9%。
 
 | 文件 | 改动 |
 |---|---|
-| `vsrc/cpu/pango_soc_pll.sv` | 新增 `CLOCK_PROFILE=5`：`VCO_RATIOF=8.5`、Core ODIV 10、SYS ODIV 8、外设 ODIV 34；C1/C4 参数保持不变；C5 与 NPU 互斥（850/8=106.25，没有 100 MHz NPU 分频） |
-| `vsrc/cpu/pango_200hp_top.sv` | `HOT_HZ=85 MHz`、`SYS_HZ=106.25 MHz`；`PERIPH_HZ` 与外设 UART 分频不变 |
-| `scripts/pango/prepare_project.py` | `BOARD_CLOCK_PROFILES[5]`、`BOARD_CLOCK_RATIOS[5]=(17,25)/(17,20)/(1,5)`、`--board-clock-profile` 接受 5、C5+加速器拒绝 |
+| `vsrc/cpu/pango_soc_pll.sv` | 新增 `CLOCK_PROFILE=5`：`VCO_RATIOF=9.0`、Core ODIV 10、SYS ODIV 9、外设 ODIV 36、NPU ODIV 9；C1/C4 参数保持不变 |
+| `vsrc/cpu/pango_200hp_top.sv` | `HOT_HZ=90 MHz`、`SYS_HZ=100 MHz`；`PERIPH_HZ` 与外设 UART 分频不变 |
+| `scripts/pango/prepare_project.py` | `BOARD_CLOCK_PROFILES[5]`、`BOARD_CLOCK_RATIOS[5]=(18,25)/(4,5)/(1,5)`、`--board-clock-profile` 接受 5、NPU 校验改为 `NPU_DIV` 参数 |
 | `scripts/pango/measurement_constraints.py` | `CLOCKS["C5"]` |
 | `tb/tools/test_pango_handoff.py` | 暂存用例扩展到 1/4/5，同步新的 Hz 公式 |
 
 验证：
 
-- 生成约束核验为 `-multiply_by 17 -divide_by 25`（85 MHz）、`17/20`（106.25 MHz）、`1/5`（25 MHz）。
-- 用 PDS 自带 `GTP_GPLL.v` 行为模型仿真 C5，600 µs 窗口计数 51000/63750/15000 个上升沿，
-  `PASS pll C5 core=85.000 sys=106.250 periph=25.000`；同一次仿真 `locked=1`。
+- 生成约束核验为 `-multiply_by 18 -divide_by 25`（90 MHz）、`4/5`（100 MHz）、`1/5`（25 MHz）。
+- 用 PDS 自带 `GTP_GPLL.v` 行为模型仿真 C5（`NPU_ENABLE=1`），600 µs 窗口计数
+  Core 54000、SYS 59999、外设 15000、NPU 59999 个上升沿，`locked=1`，输出
+  `PASS pll C5 core=90.000 sys=100.000 periph=25.000 npu=100.000`。
+  SYS/NPU 少 1 个沿是窗口边界（300 µs 与 900 µs 各有一沿落在判据之外），折算频率 99.998 MHz。
 - `make test XLEN=32` 与 `XLEN=64` 各 84 PASS、2 SKIP（RAS 关闭、RV32 下的 RV64 用例）、0 FAIL；
-  `make soc-lint` 通过；`test_pango_handoff` 38 项、`test_soc_clock_plan` 29 项通过。
-- 日志 `logs/c5-clock-20261029/test-rv32.log`、`test-rv64.log`。
+  `make soc-lint` 无 `%Error`；`test_pango_handoff`/`test_soc_clock_plan`/`test_measurement_constraints`
+  共 67 项通过。
+- 日志 `logs/c5-clock-20261029/{test-rv32.log,test-rv64.log,soc-lint.log}`。
 
-边界：C1/C4 参数与约束未变；本轮没有运行综合和 P&R，85 MHz 是目标值而非已实现频率。
-C5 不含加速器，YOLO 工程（标准 Core 93.1532、SYS 101.8537、NPU 107.9680 MHz）不适用 C5，
-其 SYS 目标需另行计算。波形与板上测量均未做。
+边界：C1/C4 参数与约束未变；本轮没有用 C5 运行综合和 P&R，90 MHz 是目标值。
+YOLO 标准策略（Core 93.1532、SYS 101.8537、NPU 107.9680 MHz）也满足 C5 的 SYS 与 NPU 目标。
+波形与板上测量均未做。
 
 ## 结果解释
 

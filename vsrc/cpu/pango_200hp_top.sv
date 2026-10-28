@@ -34,12 +34,12 @@ module pango_200hp_top #(
     logic soc_rst;
     wire hot_clk, sys_clk, periph_clk, npu_clk;
     logic ddr_reset_n, ddr_bridge_rst;
-    // C5 的 85/106.25/25 MHz 来自 850 MHz VCO 的整数分频，必须与 pango_soc_pll 一致；
+    // C5 的 90/100/25 MHz 来自 900 MHz VCO 的整数分频，必须与 pango_soc_pll 一致；
     // 这三项是软件时钟发现与 UART 分频的唯一来源，改分频时必须同步修改。
     localparam int unsigned HOT_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :
-        (BOARD_CLOCK_PROFILE == 5 ? 85000000 : 100000000);
+        (BOARD_CLOCK_PROFILE == 5 ? 90000000 : 100000000);
     localparam int unsigned SYS_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :
-        (BOARD_CLOCK_PROFILE == 5 ? 106250000 : (BOARD_CLOCK_PROFILE == 4 ? 100000000 : 80000000));
+        (BOARD_CLOCK_PROFILE == 5 ? 100000000 : (BOARD_CLOCK_PROFILE == 4 ? 100000000 : 80000000));
     localparam int unsigned PERIPH_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 : 25000000;
     logic [1:0] uart_rx, uart_tx;
     logic [31:0] gpio_in [3], gpio_out [3], gpio_oe [3];
