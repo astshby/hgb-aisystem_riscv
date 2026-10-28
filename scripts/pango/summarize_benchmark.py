@@ -18,6 +18,10 @@ def summarize(root):
     text=log.read_text(errors='replace')
     if not re.search(r'^Executing : synthesize[^\r\n]* successfully\.$',text,re.M):
         raise ValueError('missing completed synthesis action')
+    strategy = None
+    if (root/'strategy.json').exists():
+        from prepare_performance_strategy import verify_strategy
+        strategy = verify_strategy(root, text)
     report=syn/(config['pds_top']+'.snr')
     netlist=syn/(config['pds_top']+'_syn.vm')
     if not netlist.is_file(): raise ValueError('missing synthesized netlist')
@@ -41,7 +45,7 @@ def summarize(root):
         clock=row['Launch Clock']
         if clock==row['Capture Clock'] and (clock not in same_domain or float(row['Slack'])<float(same_domain[clock]['Slack'])):
             same_domain[clock]=row
-    return dict(config=config,status='native synthesis complete; estimated timing, no place/route',
+    return dict(config=config,strategy=strategy,status='native synthesis complete; estimated timing, no place/route',
                 resources=resources(report.read_text(errors='replace')),retained_memory_and_ddr=retained,
                 estimated_timing=tables,worst_path_by_family=worst,
                 worst_same_domain_path=same_domain,

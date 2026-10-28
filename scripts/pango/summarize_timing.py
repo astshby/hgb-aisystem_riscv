@@ -20,11 +20,11 @@ def table(db, name):
             for row in selected.findall("row")]
 
 
-def completed_actions(impl, placement_log=None, route_command="route"):
+def completed_actions(impl, placement_log=None, route_command="route", place_command=None):
     placement = impl if placement_log is None else placement_log
-    placements = re.findall(
-        r"^Executing : (place(?: -mode fast| -logic_optimize_lut6d FALSE(?: -logic_optimize_lut_cascade FALSE)?)?) successfully\.$",
-        placement, re.M)
+    pattern = (re.escape(place_command) if place_command is not None else
+               r"place(?: -mode fast| -logic_optimize_lut6d FALSE(?: -logic_optimize_lut_cascade FALSE)?)?")
+    placements = re.findall(r"^Executing : (" + pattern + r") successfully\.$", placement, re.M)
     if not placements:
         raise ValueError("incomplete implementation action: place")
     actions = ["dev_map -force_to_run", placements[-1], route_command, "route_optimize"]
@@ -130,7 +130,18 @@ def summarize(root, impl_log):
     # 必须保留每个实际动作的成功标记，不能把“进程消失”当成实现完成。
     impl = impl_log.read_text(errors="replace")
     reuse, placement, route_command = placement_reuse(root, impl)
-    actions = completed_actions(impl, placement, route_command)
+    strategy = None
+    place_command = None
+    if (root / "strategy.json").exists():
+        if reuse is not None:
+            raise ValueError("performance experiment cannot reuse a different placement strategy")
+        if __package__:
+            from .prepare_performance_strategy import verify_strategy
+        else:
+            from prepare_performance_strategy import verify_strategy
+        strategy = verify_strategy(root)
+        place_command, route_command = strategy['place'], strategy['route']
+    actions = completed_actions(impl, placement, route_command, place_command)
     resource_log = impl if "Device Utilization Summary" in impl else placement
     if resource_log is None or "Device Utilization Summary" not in resource_log:
         raise ValueError("missing implementation resource report")
@@ -167,6 +178,7 @@ def summarize(root, impl_log):
             "synthesis": synthesis, "physical": physical, "timing": timing,
             "resource_report_source": str(impl_log) if resource_log == impl else reuse["copied_implementation_log"],
             "placement_reuse": reuse,
+            "strategy": strategy,
             "implementation_actions": actions,
             "worst_slow_setup_path": worst, "slow_setup_paths": paths,
             "route_nets": int(re.search(r"Total route nets size:\s*(\d+)", impl)[1]),
