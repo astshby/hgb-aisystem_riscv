@@ -47,7 +47,8 @@ module axi_bus_target #(
     assign write_step = 6'(LOCAL_BYTES);
     assign read_end = read_offset_q + read_step >= read_bytes;
     assign write_end = write_offset_q + write_step >= write_bytes;
-    assign allowed_strb = (32'hffffffff >> (32-int'(write_bytes))) << write_q.addr[4:0];
+    // INCR窄传输的有效字节随当前beat地址移动，跨256位总线字边界后从低lane重新开始。
+    assign allowed_strb = (32'hffffffff >> (32-int'(write_bytes))) << write_beat_addr_q[4:0];
     assign bad_write = READ_ONLY ||
                        (q.w.last != (write_beat_q == write_q.len)) || |(q.w.strb & ~allowed_strb);
     assign local_error = response.error == BUS_OK ? AXI_OKAY :

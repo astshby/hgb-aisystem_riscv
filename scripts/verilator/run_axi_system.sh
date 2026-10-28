@@ -21,7 +21,7 @@ for spec in 5000:5000:8:0 5000:6250:8:0 6250:4000:8:0 4274:5376:8:0 5000:5000:2:
     if rg '(%Fatal|%Error)' "${log_root}/$name.run.log"; then exit 1; fi
     rg '^PASS' "${log_root}/$name.run.log"
 done
-for spec in tb_soc_cdc:2 tb_soc_cdc:8 tb_ddr_axi_target:0 tb_tcm_system_target:0 tb_axi_bus_target:0 tb_axi_bus_target:1; do
+for spec in tb_soc_cdc:2 tb_soc_cdc:8 tb_ddr_axi_target:0 tb_tcm_system_target:0 tb_axi_bus_target:0 tb_axi_bus_target:1 tb_axi_narrow_burst:0; do
     IFS=: read -r top depth <<< "$spec"
     name="$top-rv$xlen-d$depth"
     out="build/p2/$name-$p2_core_build_tag"
