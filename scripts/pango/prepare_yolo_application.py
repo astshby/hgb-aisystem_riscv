@@ -96,10 +96,17 @@ def stage(application, output, ip):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--application', type=Path, required=True)
+    parser.add_argument('--application', type=Path)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--ip-dir', type=Path, required=True)
+    parser.add_argument('--ip-dir', type=Path)
+    parser.add_argument('--verify', action='store_true')
     args = parser.parse_args()
+    if args.verify:
+        verify(args.output.resolve())
+        print('PASS paired YOLO application inputs')
+        return
+    if args.application is None or args.ip_dir is None:
+        parser.error('--application and --ip-dir are required when staging')
     stage(args.application.resolve(), args.output.resolve(), args.ip_dir.resolve())
 
 

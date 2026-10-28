@@ -11,7 +11,8 @@ from summarize_measurement import read_table, resources, path_family
 
 
 def summarize(root):
-    if (root/'application.json').exists():
+    manifest_name='application.json' if (root/'application.json').exists() else 'benchmark.json'
+    if manifest_name=='application.json':
         from prepare_yolo_application import verify as verify_application
         manifest=verify_application(root)
     else:
@@ -30,7 +31,7 @@ def summarize(root):
     netlist=syn/(config['pds_top']+'_syn.vm')
     if not netlist.is_file(): raise ValueError('missing synthesized netlist')
     tables={}
-    files=[root/'benchmark.json',report,netlist,log]
+    files=[root/manifest_name,report,netlist,log]
     for name in ('resource_utilization','report_timing_fmax','report_timing_clock_summary',
                  'report_timing_setup','report_timing_hold','report_timing_path_setup','check_timing_summary'):
         path=syn/'report_db'/('synthesize_'+name+'.db')

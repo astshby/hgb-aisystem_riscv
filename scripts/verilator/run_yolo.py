@@ -27,10 +27,11 @@ def main():
     parser.add_argument('--icache-bytes',type=int,default=16384)
     parser.add_argument('--dcache-bytes',type=int,default=8192)
     parser.add_argument('--bank-xor-mask',type=int,choices=(0,1,2,3),default=2)
+    parser.add_argument('--output',type=Path,help='new result directory; existing runs are preserved')
     args=parser.parse_args();os.chdir(ROOT)
     width=args.xlen;opt=optimization()
     config=hardware_configuration('yolo',width,args.icache_bytes,args.dcache_bytes,args.bank_xor_mask)
-    root=ROOT/f'build/yolo/system-rv{width}-{opt}-i{args.icache_bytes}-d{args.dcache_bytes}-h{args.bank_xor_mask}'
+    root=args.output.resolve() if args.output else ROOT/f'build/yolo/system-rv{width}-{opt}-i{args.icache_bytes}-d{args.dcache_bytes}-h{args.bank_xor_mask}'
     root.mkdir(parents=True,exist_ok=False)
     env=dict(os.environ,SOC='1',SOC_DDR='0',CCACHE_DIR=str(ROOT/'build/ccache'),
              CCACHE_TEMPDIR=str(ROOT/'build/ccache-tmp'))
