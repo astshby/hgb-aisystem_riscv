@@ -13,6 +13,8 @@ ITCM/DTCM 各 64 KiB，I$/D$ 各 4 KiB、两路、32 B 行；I$ 当前填充粒�
 TCM 与 Cache 命中逻辑仍在 Core 域；Core 与它们进一步分域仅是未来候选。
 SYS 负责统一 AXI 仲裁，DDR 与外设分别通过 FIFO 跨域。DMA 是 SYS 域主设备，
 CPU 提交地址/长度/方向、启动、核对完成和处理 Cache 所有权；不允许 DMA 写 START 等控制寄存器。
+生产顶层为 `soc_system.sv`，CPU 侧使用 `cpu_memory_adapter` 与 `tcm_bram`。
+SYS 与 Core 是并行的时钟域；SYS 域不包含 Core、TCM 或 Cache。各域组件见[系统结构](understand/SOC_SYSTEM.md)。
 
 | 发布分支 | CoreMark | RT-Thread | 加速器 |
 |---|---|---|---|
@@ -23,6 +25,8 @@ CPU 提交地址/长度/方向、启动、核对完成和处理 Cache 所有权�
 
 所有分支保留公共功能、ISA、AXI、CDC、UART 下载验证。加速器分支不携带 CoreMark 算法、
 跑分脚本或 RT-Thread。原作者 MiniMind C 代码、模型锁和导出工具保留在 MiniMind/all。
+
+当前实验分支 `integrate/yolo-tcm-boundaries` 另保留 CoreMark/RT 独立回归入口，并接入已有 YOLO；不含 MiniMind。上述四个正式分支尚未更新。
 
 ## 环境与命令
 
@@ -84,10 +88,46 @@ DDR 退休计数均超过 260 万，I$/D$ 命中和 DMA 热代码搬运均被检
 
 ## FPGA 边界
 
-本树无加速器。三层硬件标准综合分别测资源、域内 Fmax/WNS 和最差路径。
+当前实验三层 CoreMark 综合关闭 NPU；YOLO 应用工程单独打开第五域。分别测资源、域内 Fmax/WNS 和最差路径。
 本轮没有 P&R、bitstream 或板级结果；CDC/PHY/I/O 的原始报告仍需后续处理。
 
-## 最新路径实验
+## 本轮 TCM 与 YOLO 实验
+
+TCM 改用双端口 BRAM：取指/数据主口固定，辅助口公平仲裁，CPU 读不增加一级。AXI beat 级写校验、已有请求队列的静态路由预译码、8 路 SYS 复位释放副本和同步器保护已加入组合。
+真实 TCM 64 次为 3.095736/3.081770 CoreMark/MHz，较 R3 的 3.054825/3.040240 提高约 1.34%/1.37%。
+SoC+TCM 加 DMA/IRQ 为 2.750866/2.737537；DDR cold 为 2.530971/2.513669，warm 为 2.532010/2.514682，后台为 2.207755/2.194270。
+14 项长测已用冻结固件重放，周期与原汇总逐项相同。
+
+| 工程/策略 | Core MHz / WNS ns | SYS MHz | DDR-user MHz | 外设 MHz | NPU MHz | LUT / FF |
+|---|---:|---:|---:|---:|---:|---:|
+| 组合 Core+TCM，标准 | 103.5733 / +0.345 | 无 | 无 | 无 | 无 | 26031 / 19682 |
+| 组合 SoC+TCM，标准 | 96.4413 / −0.369 | 110.1200 | 无 | 98.7362 | 无 | 40759 / 39286 |
+| 组合完整 DDR，标准 | 90.0252 / −1.108 | 107.6310 | 150.5117 | 87.6808 | 无 | 55906 / 55348 |
+| 组合 Core+TCM，性能 | 104.1016 / +0.394 | 无 | 无 | 无 | 无 | 26939 / 24465 |
+| YOLO，标准 | 93.1532 / −0.735 | 101.8537 | 146.4772 | 85.9107 | 107.9680 | 64816 / 67831 |
+| YOLO，性能 | 92.9282 / −0.761 | 113.9212 | 146.0494 | 92.1574 | 114.8633 | 66393 / 72759 |
+
+上表全部是综合估计。两套 TCM 工程用 32 DRM/4 APM，完整 DDR 用 38 DRM/4 APM，YOLO 用 164.5 DRM/86 APM，均无 latch。
+加上端口单项三层，本轮 9 组综合均完成。Core+TCM 性能策略较组合标准提高约 0.51%，FF 增加约 24.3%；
+YOLO 性能策略改善 SYS/NPU，但 Core 略退。尚未达到 Core+TCM 超过 130 MHz 或联合指标不退，正式基线未升级。
+SYS 的 Fmax 可以高于 Core；它们分别由域内最差路径决定。目标频率仍为 100/80/125/25/100 MHz。
+
+YOLO O3/I16/D8/mask2 双宽裸机通过，RV32/RV64 为 418463/423721 周期；实际 MAC 工作 83 次，与 DMA 重叠 28 次。NPU AXI 四种频率、双宽共 8 项各 14 检查通过。只验证小卷积与搬运，没有完整 YOLO 网络 FPS/mAP。
+RT-Thread 在无 NPU 组合单独通过，RV32/RV64 为 2741224/2752870 周期、各 39 次 trap；它们是功能耗时。
+
+RTL 组合测量提交 a7b25c2，YOLO 集成 76139dc，配对原生工程工具 8277462。命令、ELF/HEX 和日志哈希在
+`logs/tcm-bram-20261028/`、`build/yolo/system-rv{32,64}-O3-i16384-d8192-h2/result.json`。
+临时树跨文件系统迁移失败后被删除，部分原始仿真日志丢失；原生 PDS 工程、报告、冻结固件及汇总保留。
+组合双宽回归、14 短/14 长/3 项 RV64、RT 与 PLL 已补测，新的证据在 `logs/tcm-bram-20261028/recovery/`，与丢失原件分开记录。
+SoC+TCM 26 个 FIFO/358 个同步寄存器及 YOLO 36 个 FIFO/502 个同步寄存器已核对原生对象和时钟归属。
+约束前后对照已通过：6/11 组功能跨域 setup 裕量为正，同域时钟、Fmax、setup/hold 和端点数一致，
+同域例外及无匹配路径告警均为 0。146 项工具测试与新增 2 项时序对照测试通过，工具提交 5b29642。
+YOLO 的 `physical-ready` 工程与启动脚本已冻结；预检为物理 14.988 GiB、提交余量 8.370 GiB。
+按用户要求停在 dev_map/place/route 之前。Core 100 MHz 的综合 WNS 仍为 −0.761 ns，物理结果待测。
+补测重复快照和可重建编译产物已清理，日志、固件和结果保留约 74 MB，清单为
+`logs/tcm-bram-20261028/recovery/retained-evidence.json`。所有原生 PDS 报告保留。
+
+## 上轮路径实验
 
 收尾分支integrate/soc-path-selected基于47aec08，保留SYS独热控制和可配置bank入口，不含A/B；正式baseline未升级。
 I16/D8/mask2是显式性能候选，默认I4/D4/mask0保持。六项64次DDR与bank-only对照同周期，TCM周期保持。

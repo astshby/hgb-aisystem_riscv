@@ -1,5 +1,36 @@
 # FPGA 适配与综合
 
+## 当前停止点：可启动布局布线
+
+2026-10-29，实验分支 `integrate/yolo-tcm-boundaries` 已完成 TCM 重构后的 9 组综合、双宽仿真和 CDC 核验。
+本轮按要求停在 dev_map/place/route 前。组合 RTL 为 a7b25c2，YOLO 集成 76139dc，CDC 工具为 5b29642；正式基线未升级。
+当前分层综合数值见[项目介绍](../PROJECT_INTRO.md)，下方日期更早的表保留为历史对照。
+
+SoC+TCM 的 26 个 FIFO/358 个同步寄存器、YOLO 的 36 个 FIFO/502 个同步寄存器已核对原生引脚与时钟。
+PDS 查询使用 128 项精确引脚分组，避开延迟集合句柄及 1000 项打印截断。Gray 指针约束到第一同步级；
+载荷限定源时钟、实际 RAM/FF 数据输出和目标时钟；IRQ/DDR 就绪限定原生时钟树中的源寄存器及第一同步级。
+第二同步级和普通同域路径继续接受 setup/hold 检查，时钟定义未变，没有加入整域 false path。
+前后报告中的同域 Fmax、setup/hold、端点数一致，6/11 组功能跨域 setup 裕量为正，SDC-2040 和无匹配路径告警均为 0。
+证据为 `logs/tcm-bram-20261028/cdc-{soc-tcm,yolo}-effectiveness.json`；146 项工具测试和新增 2 项对照检查通过。
+
+准备好的原生工程在 `$PDS_WORK_ROOT/work/tcm-bram-20261028/yolo/physical-ready/`。
+保留性能策略综合数据库、配对 O3 YOLO 固件、`backend_cdc.scf`、`backend_sync.lcf`、`ready-inputs.json` 和 `READY.json`。
+`implement_ready.tcl` 每次打开工程后显式加载两份约束，再运行物理阶段；PDS CLI 的 `save_project` 仅适用于 GUI，
+此入口不依赖它保存约束。`launch-physical.ps1` 先核对文件哈希和内存，再调用上述入口。
+使用 performance 放置和布线，非 fast；单线程，约 10 分钟打印进度，结束/失败立即返回。
+映射、布局、布线、优化前分别检查物理与提交余量各至少 6 GiB。最终报告启用 max-skew 与 exception 明细。
+
+2026-10-29 00:15 的预检为物理 14.988 GiB、提交余量 8.370 GiB；下次启动时重新查询。
+待审核后，从 Windows PowerShell 执行以下入口，本轮未执行：
+
+```powershell
+& "$env:PDS_WORK_ROOT\work\tcm-bram-20261028\yolo\physical-ready\launch-physical.ps1" -PdsHome $env:PDS_HOME
+```
+
+这份工程仅含已有 128-MAC YOLO，目标 Core/SYS/DDR-user/外设/NPU 为 100/80/125/25/100 MHz。
+Core 综合为 92.9282 MHz、100 MHz 下 WNS −0.761 ns。当前没有布线 Fmax/WNS、零未布通、bitstream 或板级结果；
+物理阶段继续检查 Gray 最大偏斜、同域 setup/hold、DDR PHY 和 I/O，不能据本次 CDC 对照宣称整体时序闭合。
+
 ## 配置与入口
 
 Windows PDS 2025.2 ADS，器件 PG2L200H-6IFBB676，HMIC_S 1.10 DDR3 IP。
