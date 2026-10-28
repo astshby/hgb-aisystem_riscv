@@ -63,3 +63,4 @@ vsrc/soc/flash/spi_flash_reader.sv
 vsrc/soc/flash/flash_axi_target.sv
 vsrc/soc/soc_system.sv
 vsrc/soc/soc_top.sv
+-f scripts/npu_files.f

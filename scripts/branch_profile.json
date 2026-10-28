@@ -1,7 +1,7 @@
 {
-  "variant": "main",
+  "variant": "yolo-tcm-experiment",
   "default_accelerator": "none",
-  "accelerators": [],
+  "accelerators": ["yolo"],
   "coremark": true,
   "rt_thread": true
 }

@@ -463,8 +463,17 @@ module tb_soc_system #(
             $clog2(dut.u_memory.u_dcache.LINE_BYTES),dut.u_memory.u_dcache.BANK_BIT-1);
     end
 
-    initial assert (!(NPU_ENABLE || MM3_ENABLE)) else $fatal(1,"accelerator unavailable in this branch");
-    if (1) begin : g_no_npu
+    initial assert (!MM3_ENABLE) else $fatal(1,"MiniMind unavailable in the YOLO experiment");
+    if (NPU_ENABLE) begin : g_npu
+        assign external_req='0;
+        logic clk_npu=0, rst_npu;
+        always #(NPU_PERIOD_PS * 0.5ps) clk_npu=~clk_npu;
+        soc_reset_controller u_reset (.reset_async,.clk_core(clk_npu),.clk_sys,.clk_ddr,.clk_periph,
+            .rst_core(rst_npu),.rst_sys(),.rst_ddr(),.rst_periph(),.rst_sys_local());
+        npu_axi_target u_npu (.clk_sys,.rst_sys(dut.rst_sys),.clk_npu,.rst_npu,
+            .axi_req(npu_req),.axi_rsp(npu_rsp));
+        initial $display("NPU_HARDWARE enabled=1 period_ps=%0d implementation=128mac mmio_abi=65536",NPU_PERIOD_PS);
+    end else begin : g_no_npu
         assign external_req='0;
         assign npu_rsp='0;
     end
