@@ -1,5 +1,6 @@
 // Module: async_fifo
 // Description: Dual-clock payload storage with Gray pointers and coordinated reset contract.
+(* syn_allow_retiming = 0 *)
 module async_fifo #(
     parameter int WIDTH = 32,
     parameter int DEPTH = 8
@@ -15,9 +16,12 @@ module async_fifo #(
     localparam int ADDR_W = $clog2(DEPTH);
     localparam int PTR_W = ADDR_W+1;
     logic [WIDTH-1:0] payload [DEPTH];
-    logic [PTR_W-1:0] write_q, read_q, write_gray_q, read_gray_q;
-    (* ASYNC_REG = "TRUE" *) logic [PTR_W-1:0] read_sync1_q, read_sync2_q;
-    (* ASYNC_REG = "TRUE" *) logic [PTR_W-1:0] write_sync1_q, write_sync2_q;
+    logic [PTR_W-1:0] write_q, read_q;
+    // Gray源寄存器保留独立对象，时序约束逐位绑定，不与二进制计数位合并。
+    (* syn_preserve = 1, syn_allow_retiming = 0 *) logic [PTR_W-1:0] write_gray_q, read_gray_q;
+    // 紫光使用PAP_ASYNC_REG识别同步链；保留通用属性供其他综合工具使用。
+    (* ASYNC_REG = "TRUE", PAP_ASYNC_REG = 1, syn_allow_retiming = 0 *) logic [PTR_W-1:0] read_sync1_q, read_sync2_q;
+    (* ASYNC_REG = "TRUE", PAP_ASYNC_REG = 1, syn_allow_retiming = 0 *) logic [PTR_W-1:0] write_sync1_q, write_sync2_q;
     logic [PTR_W-1:0] write_next, read_next;
     logic full_q, empty_q, in_fire, out_fire;
     assign in_ready = !s_rst && !full_q;

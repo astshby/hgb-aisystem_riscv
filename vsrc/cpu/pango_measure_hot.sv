@@ -41,7 +41,7 @@ module pango_measure_hot #(
     import block_types_pkg::*;
     import axi_types_pkg::*;
     logic [2:0] core_pending;
-    (* ASYNC_REG = "TRUE" *) logic [2:0] irq_sync1_q, irq_sync2_q;
+    (* ASYNC_REG = "TRUE", PAP_ASYNC_REG = 1, syn_allow_retiming = 0 *) logic [2:0] irq_sync1_q, irq_sync2_q;
     always_ff @(posedge clk_core) begin
         if (rst_core) begin irq_sync1_q <= 0; irq_sync2_q <= 0; end
         else begin irq_sync1_q <= device_pending; irq_sync2_q <= irq_sync1_q; end

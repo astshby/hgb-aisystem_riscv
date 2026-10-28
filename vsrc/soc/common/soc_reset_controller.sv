@@ -12,7 +12,7 @@ module soc_reset_controller #(
     logic [3:0] resets;
     logic sys_release_d;
     for (genvar d = 0; d < 4; d++) begin : g_domain
-        (* ASYNC_REG = "TRUE" *) logic [2:0] release_q;
+        (* ASYNC_REG = "TRUE", PAP_ASYNC_REG = 1, syn_allow_retiming = 0 *) logic [2:0] release_q;
         always_ff @(posedge clocks[d] or posedge reset_async) begin
             if (reset_async) release_q <= '1;
             else release_q <= {release_q[1:0], 1'b0};

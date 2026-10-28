@@ -61,17 +61,17 @@ module soc_system #(
     soc_reset_controller #(.SYS_COPIES(8)) u_reset (.reset_async,.clk_core,.clk_sys,.clk_ddr,.clk_periph,
         .rst_core,.rst_sys,.rst_ddr,.rst_periph,.rst_sys_local);
     logic [2:0] device_pending, core_pending;
-    (* ASYNC_REG = "TRUE" *) logic [1:0] ddr_system_online_q;
+    (* ASYNC_REG = "TRUE", PAP_ASYNC_REG = 1, syn_allow_retiming = 0 *) logic [1:0] ddr_system_online_q;
     always_ff @(posedge clk_sys) begin
         if (rst_sys) ddr_system_online_q<=0;
         else ddr_system_online_q<={ddr_system_online_q[0],ddr_ready};
     end
-    (* ASYNC_REG = "TRUE" *) logic [1:0] ddr_online_q;
+    (* ASYNC_REG = "TRUE", PAP_ASYNC_REG = 1, syn_allow_retiming = 0 *) logic [1:0] ddr_online_q;
     always_ff @(posedge clk_periph) begin
         if (rst_periph) ddr_online_q<=0;
         else ddr_online_q<={ddr_online_q[0],ddr_ready};
     end
-    (* ASYNC_REG = "TRUE" *) logic [2:0] irq_sync1_q, irq_sync2_q;
+    (* ASYNC_REG = "TRUE", PAP_ASYNC_REG = 1, syn_allow_retiming = 0 *) logic [2:0] irq_sync1_q, irq_sync2_q;
     always_ff @(posedge clk_core) begin
         if (rst_core) begin irq_sync1_q <= 0; irq_sync2_q <= 0; end
         else begin irq_sync1_q <= device_pending; irq_sync2_q <= irq_sync1_q; end
