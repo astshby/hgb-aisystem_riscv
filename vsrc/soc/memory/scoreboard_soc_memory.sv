@@ -90,7 +90,7 @@ module scoreboard_soc_memory #(
         tagged_request_queue u_request_queue (
             .clk, .rst, .in_valid(data_req_valid[p]), .in_ready(data_req_ready[p]),
             .in_request(data_request[p]), .out_valid(req_valid[p]), .out_ready(req_ready[p]),
-            .out_request(buffered_request[p])
+            .out_request(buffered_request[p]), .in_metadata('0), .out_metadata()
         );
         assign request[p] = '{addr:buffered_request[p].address, write:buffered_request[p].write,
             execute:1'b0, size:buffered_request[p].size,

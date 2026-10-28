@@ -220,6 +220,26 @@ module tb_soc_system #(
         .response_fire(dut.imem_rsp_valid&&dut.imem_rsp_ready),.response_last(1'b1),.response_id(1'b0),.response_units(32'b0),
         .request_stall(dut.imem_req_valid&&!dut.imem_req_ready),.response_stall(dut.imem_rsp_valid&&!dut.imem_rsp_ready));
     for(genvar p=0;p<2;p++) begin : g_data_latency
+        bus_types_pkg::bus_target_e checked_target;
+        bus_types_pkg::bus_error_e checked_error;
+        logic [2:0] expected_route;
+        longint unsigned route_checks = 0;
+        // 用完整地址/权限译码检查真实队头，而非复用入队的本地资格逻辑。
+        address_decode #(.DDR_BYTES(DDR_BYTES)) u_route_reference (
+            .request(dut.u_memory.request[p]), .target(checked_target), .error(checked_error));
+        always_comb begin
+            expected_route = 3'b001;
+            if (checked_error == bus_types_pkg::BUS_OK && checked_target == bus_types_pkg::TARGET_ITCM)
+                expected_route = 3'b010;
+            else if (checked_error == bus_types_pkg::BUS_OK && checked_target == bus_types_pkg::TARGET_DTCM)
+                expected_route = 3'b100;
+        end
+        always @(posedge clk_core) if (!reset_async && !dut.rst_core && dut.u_memory.req_valid[p]) begin
+            assert (dut.u_memory.queued_route[p] == expected_route)
+                else $fatal(1, "queued TCM route mismatch port=%0d address=%h", p, dut.u_memory.request[p].addr);
+            route_checks++;
+        end
+        final $display("TCM_ROUTE port=%0d checked_queue_cycles=%0d", p, route_checks);
         soc_latency_metrics #(.NAME($sformatf("cpu.d%0d",p)),.ID_W(CPU_ID_W)) u_end_to_end (
             .clk(clk_core),.rst(dut.rst_core),.enable(p2_metrics_enable&&!reset_async),.roi(metrics_roi),
             .start_fire(dut.data_req_valid[p]&&dut.data_req_ready[p]),.start_id(dut.tagged_request[p].id),
