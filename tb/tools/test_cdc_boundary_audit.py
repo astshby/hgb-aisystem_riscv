@@ -15,7 +15,7 @@ from benchmark_config import configuration
 from prepare_cdc_audit import specification, generate, bind
 
 
-def fixture(spec, missing=False, wrong_domain=False):
+def fixture(spec, missing=False, wrong_domain=False, wrong_second=False):
     pins = []
     domains = {(d, k): [] for d in spec['clocks'] for k in ('clock', 'data', 'output')}
 
@@ -47,6 +47,9 @@ def fixture(spec, missing=False, wrong_domain=False):
     for level in spec['levels']:
         for bit in level['bits']:
             register(f'{level["path"].replace(".", "/")}/{level["signal"]}[{bit}]', level['dst'])
+        for bit in level['second_bits']:
+            register(f'{level["path"].replace(".", "/")}/{level["second_signal"]}[{bit}]',
+                     level['src'] if wrong_second else level['dst'])
     lines = ['set fixture_pins {' + ' '.join('{' + p + '}' for p in pins) + '}']
     for (domain, kind), names in domains.items():
         lines.append(f'set fixture_domain({spec["clocks"][domain]},{kind}_pins) {{' +
@@ -76,15 +79,16 @@ class CdcAuditTests(unittest.TestCase):
                               periods_ps=dict(config['periods_ps'], npu=10000))
             spec = specification(config)
             audit, _ = generate(spec)
-            for missing, wrong in ((False, False), (True, False), (False, True)):
-                with self.subTest(platform=platform, missing=missing, wrong=wrong):
+            for missing, wrong, second in ((False, False, False), (True, False, False),
+                                           (False, True, False), (False, False, True)):
+                with self.subTest(platform=platform, missing=missing, wrong=wrong, second=second):
                     with tempfile.TemporaryDirectory() as temporary:
                         root = Path(temporary)
                         script = root / 'audit.tcl'
-                        script.write_text(fixture(spec, missing, wrong) + audit)
+                        script.write_text(fixture(spec, missing, wrong, second) + audit)
                         result = subprocess.run([sys.executable, __file__, '--tcl-fixture', str(script)],
                                                 text=True, capture_output=True)
-                        self.assertEqual(result.returncode == 0, not (missing or wrong), result.stderr)
+                        self.assertEqual(result.returncode == 0, not (missing or wrong or second), result.stderr)
                         if result.returncode:
                             self.assertNotIn('CDC_AUDIT_PASS', result.stdout)
                             continue
@@ -96,6 +100,9 @@ class CdcAuditTests(unittest.TestCase):
                         self.assertNotIn('sync2_q', fdc)
                         self.assertNotIn('g_cpu_master\\[0\\][./]u_cdc[./]u_aw', fdc)
                         self.assertIn('set_max_skew', fdc)
+                        lcf = (root / 'bound_sync.lcf').read_text()
+                        self.assertIn('irq_sync2_q', lcf)
+                        self.assertNotIn('gray_q', lcf)
 
     def test_incomplete_native_log_does_not_publish(self):
         spec = specification(configuration('soc_ddr'))

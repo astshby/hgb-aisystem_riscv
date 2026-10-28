@@ -41,9 +41,11 @@ def specification(config):
                               src='npu' if reverse else 'sys', dst='sys' if reverse else 'npu',
                               prunable=False, constant_payload=False))
     clocks = {d: 'ddrphy_sysclk' if d == 'ddr' else f'clk_{d}' for d in domains}
-    levels = [dict(path=root, signal='irq_sync1_q', bits=[0, 1, 2], src='periph', dst='core')]
+    levels = [dict(path=root, signal='irq_sync1_q', second_signal='irq_sync2_q',
+                   bits=[0, 1, 2], second_bits=[0, 1, 2], src='periph', dst='core')]
     if 'ddr' in domains:
-        levels += [dict(path=root, signal=signal, bits=[0], src='ddr', dst=dst)
+        levels += [dict(path=root, signal=signal, second_signal=signal,
+                        bits=[0], second_bits=[1], src='ddr', dst=dst)
                    for signal, dst in (('ddr_system_online_q', 'sys'), ('ddr_online_q', 'periph'))]
     return dict(schema=1, platform=config['platform'], clocks=clocks,
                 periods_ns={d: str(p) for d, p in periods.items()}, fifos=fifos, levels=levels,
@@ -93,6 +95,9 @@ proc cdc_pointer {label src dst bits patterns} {
         cdc_bits $names $pattern $bits $label
         cdc_domain $names $domain $kind $label
         puts "CDC_BOUND $label $domain/$kind $names"
+        if {$pattern eq $first_ck || $pattern eq $second_ck} {
+            foreach name $names {puts "CDC_SYNC $name"}
+        }
     }
 }
 '''
@@ -140,13 +145,19 @@ def generate(spec):
         constraints.append(dict(index=index, lines=local_constraints))
     for level in spec['levels']:
         budget = min(Decimal(spec['periods_ns'][level['src']]), Decimal(spec['periods_ns'][level['dst']]))
-        for bit in level['bits']:
-            p = _register_pattern(level['path'], level['signal'], 'D', bit)
-            audit += [f'set cdc_level [cdc_query {{{p}}}]',
-                      'if {[llength $cdc_level] != 1} {error "CDC level endpoint count"}',
-                      f'cdc_domain $cdc_level {level["dst"]} data {{level {level["signal"]}}}']
-            constraints.append(f'set_max_delay {budget} -datapath_only '
-                               f'-from [all_registers -clock {spec["clocks"][level["src"]]} -clock_pins] -to {pins(p)}')
+        for signal, bits, first in ((level['signal'], level['bits'], True),
+                                    (level['second_signal'], level['second_bits'], False)):
+            for bit in bits:
+                for suffix, kind in (('D', 'data'), ('CLK', 'clock')):
+                    p = _register_pattern(level['path'], signal, suffix, bit)
+                    audit += [f'set cdc_level [cdc_query {{{p}}}]',
+                              'if {[llength $cdc_level] != 1} {error "CDC level endpoint count"}',
+                              f'cdc_domain $cdc_level {level["dst"]} {kind} {{level {signal}}}']
+                    if kind == 'clock':
+                        audit.append('foreach name $cdc_level {puts "CDC_SYNC $name"}')
+                    if first and kind == 'data':
+                        constraints.append(f'set_max_delay {budget} -datapath_only '
+                                           f'-from [all_registers -clock {spec["clocks"][level["src"]]} -clock_pins] -to {pins(p)}')
     audit += ['puts "CDC_AUDIT_PASS"']
     return '\n'.join(audit) + '\n', constraints
 
@@ -162,6 +173,11 @@ def bind(directory, log):
     pruned = {int(i) for i in re.findall(r'^CDC_PRUNED (\d+) ', text, re.M)}
     if passed & pruned or passed | pruned != set(range(len(spec['fifos']))):
         raise ValueError('native FIFO audit coverage incomplete')
+    sync_registers = sorted(set(re.findall(r'^CDC_SYNC (\S+)/CLK\s*$', text, re.M)))
+    expected_syncs = sum(4 * f['bits'] for i, f in enumerate(spec['fifos']) if i in passed)
+    expected_syncs += sum(len(level['bits']) + len(level['second_bits']) for level in spec['levels'])
+    if len(sync_registers) != expected_syncs:
+        raise ValueError('native synchronizer register coverage incomplete')
     _, rows = generate(spec)
     lines = []
     for row in rows:
@@ -174,9 +190,15 @@ def bind(directory, log):
             lines += row['lines'] if payload[1].strip() else row['lines'][:-1]
     with (directory / 'bound_cdc.fdc').open('x') as f:
         f.write('\n'.join(lines) + '\n')
+    # 在物理实现入口显式保留已核对的两级同步寄存器属性；不扩大时序例外范围。
+    with (directory / 'bound_sync.lcf').open('x') as f:
+        f.write('# Both audited synchronizer stages; ordinary logic and Gray sources are not marked.\n')
+        for name in sync_registers:
+            f.write(f'define_attribute {{i:{name}}} {{PAP_ASYNC_REG}} {{TRUE}}\n')
     (directory / 'binding.json').write_text(json.dumps(dict(
         log_sha256=hashlib.sha256(log.read_bytes()).hexdigest(),
         passed_fifos=sorted(passed), pruned_fifos=sorted(pruned),
+        synchronizer_registers=sync_registers,
         status='object/domain binding passed; exception effectiveness and physical CDC timing still require reports'), indent=2)+'\n')
 
 
