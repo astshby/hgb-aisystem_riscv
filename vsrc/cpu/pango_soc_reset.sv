@@ -17,10 +17,10 @@ module pango_soc_reset #(
     localparam int unsigned WATCH_W = $clog2(WATCHDOG_CYCLES + 1);
     logic [HOLD_CYCLES-1:0] hold_q;
     logic ddr_armed_q, fault_async, ddr_healthy, ddr_fault;
-    (* ASYNC_REG = "TRUE" *) logic [2:0] healthy_sync_q;
+    (* ASYNC_REG = "TRUE", PAP_ASYNC_REG = 1, syn_allow_retiming = 0 *) logic [2:0] healthy_sync_q;
     logic [3:0] heartbeat_q;
-    (* ASYNC_REG = "TRUE" *) logic [2:0] heartbeat_release_q;
-    (* ASYNC_REG = "TRUE" *) logic [2:0] heartbeat_sync_q;
+    (* ASYNC_REG = "TRUE", PAP_ASYNC_REG = 1, syn_allow_retiming = 0 *) logic [2:0] heartbeat_release_q;
+    (* ASYNC_REG = "TRUE", PAP_ASYNC_REG = 1, syn_allow_retiming = 0 *) logic [2:0] heartbeat_sync_q;
     logic heartbeat_seen_q;
     logic [WATCH_W-1:0] watchdog_q;
 

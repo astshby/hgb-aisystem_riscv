@@ -13,7 +13,7 @@ revision=ddf52e2cdd977f14fc04035c88672ac204aec713
 [[ -z "$(git -C "$rt" status --porcelain --untracked-files=no)" ]] || { echo 'RT-Thread dependency is modified'; exit 1; }
 prefix="${CROSS_COMPILE:-${RISCV_TOOL_ROOT:?set RISCV_TOOL_ROOT to the toolchain bin directory}/riscv64-unknown-elf-}"
 bsp=software/rt-thread
-out="build/rt-thread/system-rv${xlen}-${opt}"
+out="${RTTHREAD_BUILD_DIR:-build/rt-thread/system-rv${xlen}-${opt}}"
 mkdir -p "$out" logs
 flags=(-march="rv${xlen}im_zicsr_zifencei" -mabi="$abi" -mcmodel=medany -mno-relax
     -std=gnu99 "-$opt" -g -ffreestanding -fno-builtin -fno-common -fno-pie

@@ -41,7 +41,7 @@ module pango_measure_hot #(
     import block_types_pkg::*;
     import axi_types_pkg::*;
     logic [2:0] core_pending;
-    (* ASYNC_REG = "TRUE" *) logic [2:0] irq_sync1_q, irq_sync2_q;
+    (* ASYNC_REG = "TRUE", PAP_ASYNC_REG = 1, syn_allow_retiming = 0 *) logic [2:0] irq_sync1_q, irq_sync2_q;
     always_ff @(posedge clk_core) begin
         if (rst_core) begin irq_sync1_q <= 0; irq_sync2_q <= 0; end
         else begin irq_sync1_q <= device_pending; irq_sync2_q <= irq_sync1_q; end
@@ -134,7 +134,7 @@ module pango_measure_hot #(
             assign requests[p] = t_request[b][p];
             assign t_rsp_data[b][p] = responses[p];
         end
-        tcm_dual_bank #(.BYTES(65536),.INIT_FILE(b==0 ? ITCM_INIT_FILE : DTCM_INIT_FILE)) u_ram (
+        tcm_bram #(.BYTES(65536),.INSTRUCTION(b==0),.INIT_FILE(b==0 ? ITCM_INIT_FILE : DTCM_INIT_FILE)) u_ram (
             .clk(clk_core),.rst(rst_core),.req_valid(req_v),.req_ready(req_r),.request(requests),
             .rsp_valid(rsp_v),.rsp_ready(rsp_r),.rsp_data(responses));
     end

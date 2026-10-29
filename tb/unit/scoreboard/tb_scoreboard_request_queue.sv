@@ -12,6 +12,7 @@ module tb_scoreboard_request_queue;
     logic [1:0] previous_output_stall;
     memory_request_t in_request [2], out_request [2], expected [2][$], discarded;
     memory_request_t previous_output [2];
+    logic [4:0] in_metadata [2], out_metadata [2], expected_metadata [2][$], discarded_metadata;
     int accepted [2], returned [2], dropped [2], blocked [2];
     logic [RETIRE_ENTRIES-1:0] seen_slots [2];
     logic [(1<<RETIRE_GEN_W)-1:0] seen_generations [2];
@@ -19,10 +20,11 @@ module tb_scoreboard_request_queue;
     int unsigned random_state = 32'hc0de4096;
     always #5 clk = ~clk;
     for (genvar portno = 0; portno < 2; portno++) begin : g_port
-        tagged_request_queue dut (
+        tagged_request_queue #(.META_WIDTH(5)) dut (
             .clk, .rst, .in_valid(in_valid[portno]), .in_ready(in_ready[portno]),
             .in_request(in_request[portno]), .out_valid(out_valid[portno]),
-            .out_ready(out_ready[portno]), .out_request(out_request[portno])
+            .out_ready(out_ready[portno]), .out_request(out_request[portno]),
+            .in_metadata(in_metadata[portno]), .out_metadata(out_metadata[portno])
         );
     end
     function automatic memory_request_t packet(input int portno, serial);
@@ -45,6 +47,7 @@ module tb_scoreboard_request_queue;
             for (int p = 0; p < 2; p++) begin
                 dropped[p] += expected[p].size();
                 expected[p].delete();
+                expected_metadata[p].delete();
             end
             streak = 0;
         end else begin
@@ -62,16 +65,18 @@ module tb_scoreboard_request_queue;
                         out_valid[p] == (expected[p].size() != 0))
                     else $fatal(1, "queue capacity or registered latency port=%0d", p);
                 if (out_valid[p]) begin
-                    assert (out_request[p] == expected[p][0])
+                    assert (out_request[p] == expected[p][0] && out_metadata[p] == expected_metadata[p][0])
                         else $fatal(1, "request replaced/reordered port=%0d count=%0d", p, returned[p]);
                     if (out_ready[p]) begin
                         seen_slots[p][out_request[p].id.slot] = 1;
                         seen_generations[p][out_request[p].id.generation] = 1;
                         discarded = expected[p].pop_front(); returned[p]++;
+                        discarded_metadata = expected_metadata[p].pop_front();
                     end
                 end
                 if (in_valid[p] && in_ready[p]) begin
                     expected[p].push_back(in_request[p]); accepted[p]++;
+                    expected_metadata[p].push_back(in_metadata[p]);
                 end
                 if (in_valid[p] && !in_ready[p]) blocked[p]++;
             end
@@ -80,7 +85,8 @@ module tb_scoreboard_request_queue;
     initial begin
         in_valid = 0; out_ready = 0; stalled = 0;
         for (int p = 0; p < 2; p++) begin
-            in_request[p] = '0; accepted[p] = 0; returned[p] = 0; dropped[p] = 0; blocked[p] = 0;
+            in_request[p] = '0; in_metadata[p] = 0;
+            accepted[p] = 0; returned[p] = 0; dropped[p] = 0; blocked[p] = 0;
             seen_slots[p] = 0; seen_generations[p] = 0;
         end
         streak = 0; longest = 0; dual_returns = 0;
@@ -96,6 +102,7 @@ module tb_scoreboard_request_queue;
                     if (!stalled[p] || cycle == 1201) begin
                         in_valid[p] = cycle < 96 || |random_state[4*p +: 2];
                         in_request[p] = packet(p, accepted[p]);
+                        in_metadata[p] = 5'(random_state >> (p*5));
                     end
                 end
                 // 改变下游 ready 不得组合改变上游容量许可。

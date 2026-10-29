@@ -18,7 +18,7 @@ module pango_benchmark_tcm_top #(
     import core_types_pkg::*;
     logic rst_core;
     soc_reset_controller u_reset (.reset_async,.clk_core,.clk_sys(1'b0),.clk_ddr(1'b0),.clk_periph(1'b0),
-        .rst_core,.rst_sys(),.rst_ddr(),.rst_periph());
+        .rst_core,.rst_sys(),.rst_ddr(),.rst_periph(),.rst_sys_local());
     logic commit_valid, commit_rd_we, commit_exception, dmem_store_fire;
     xlen_t commit_pc, commit_rd_data, dmem_store_addr, dmem_store_data;
     logic [31:0] commit_inst;

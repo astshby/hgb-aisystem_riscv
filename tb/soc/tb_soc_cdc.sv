@@ -5,15 +5,18 @@ module tb_soc_cdc #(parameter int DEPTH=2);
     timeprecision 1ps;
     import axi_types_pkg::*;
     logic s_clk=0, m_clk=0, enable_m=1, reset_async=1, s_rst, m_rst;
+    logic [7:0] rst_sys_local;
     always #5 s_clk=!s_clk;
     always #7 if(enable_m) m_clk=!m_clk;
-    soc_reset_controller u_reset (.reset_async,.clk_core(s_clk),.clk_sys(m_clk),.clk_ddr(s_clk),.clk_periph(m_clk),
-        .rst_core(s_rst),.rst_sys(m_rst),.rst_ddr(),.rst_periph());
+    soc_reset_controller #(.SYS_COPIES(8)) u_reset (.reset_async,.clk_core(s_clk),.clk_sys(m_clk),.clk_ddr(s_clk),.clk_periph(m_clk),
+        .rst_core(s_rst),.rst_sys(m_rst),.rst_ddr(),.rst_periph(),.rst_sys_local);
+    always @(negedge s_clk)
+        assert (rst_sys_local === {8{m_rst}}) else $fatal(1, "SYS reset copies differ with stopped clock");
     axi_req_t req='0, target_req;
     axi_rsp_t rsp,target_rsp;
     int reads=0,writes=0;
-    axi_clock_bridge #(.DEPTH(DEPTH)) dut (.s_clk,.s_rst,.m_clk,.m_rst,.s_req(req),.s_rsp(rsp),.m_req(target_req),.m_rsp(target_rsp));
-    axi_error_target u_target (.clk(m_clk),.rst(m_rst),.req(target_req),.rsp(target_rsp));
+    axi_clock_bridge #(.DEPTH(DEPTH)) dut (.s_clk,.s_rst,.m_clk,.m_rst(rst_sys_local[0]),.s_req(req),.s_rsp(rsp),.m_req(target_req),.m_rsp(target_rsp));
+    axi_error_target u_target (.clk(m_clk),.rst(rst_sys_local[1]),.req(target_req),.rsp(target_rsp));
     task automatic offer_ar(input int id,input int beats);
         @(negedge s_clk);
         req.ar='{id:axi_id_t'(id),addr:32'hdead0000,len:8'(beats-1),size:5,burst:1,default:'0};

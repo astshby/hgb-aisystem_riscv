@@ -8,10 +8,10 @@ module tb_soc_system #(
     parameter int CLOCK_HZ=100000000,
     parameter int UART_DIVISOR=4,
     parameter int CLOCK_PROFILE=1,
-    parameter int CORE_PERIOD_PS=0,
-    parameter int SYS_PERIOD_PS=0,
-    parameter int DDR_PERIOD_PS=0,
-    parameter int PERIPH_PERIOD_PS=0,
+    parameter real CORE_PERIOD_PS=0,
+    parameter real SYS_PERIOD_PS=0,
+    parameter real DDR_PERIOD_PS=0,
+    parameter real PERIPH_PERIOD_PS=0,
     parameter bit NPU_ENABLE=0,
     parameter bit MM3_ENABLE=0,
     parameter int MM3_MAC_LANES=16,
@@ -20,6 +20,8 @@ module tb_soc_system #(
     parameter int SOC_PROFILE=soc_config_pkg::SOC_PROFILE_FULL,
     parameter bit ICACHE_ENABLE=1,
     parameter bit DCACHE_ENABLE=1,
+    parameter int ICACHE_BYTES=4096,
+    parameter int DCACHE_BYTES=4096,
     parameter bit LOCAL_TCM_ENABLE=1,
     parameter bit DMA_WIDE_ENABLE=1,
     parameter bit DMA_BLOCK_ENABLE=1,
@@ -31,7 +33,7 @@ module tb_soc_system #(
     import core_config_pkg::*;
     import axi_types_pkg::*;
     // 每个模型固定一个硬件时钟配置；运行时选项仅校验，不能改时钟却留下旧寄存器元数据。
-    function automatic int period_ps(input int domain_index);
+    function automatic real period_ps(input int domain_index);
         case (domain_index)
             0: if (CORE_PERIOD_PS > 0) return CORE_PERIOD_PS;
             1: if (SYS_PERIOD_PS > 0) return SYS_PERIOD_PS;
@@ -45,12 +47,15 @@ module tb_soc_system #(
             2: case(domain_index) 0:return 8000; 1:return 10000; 2:return 12500; default:return 25000; endcase
             3: case(domain_index) 0:return 11764; 1:return 8548; 2:return 10752; default:return 27028; endcase
             4: case(domain_index) 0,1:return 10000; 2:return 8000; default:return 40000; endcase
+            6: case(domain_index) 0,1:return 10000; 2:return 8000; default:return 1000000.0/60.0; endcase
+            7: case(domain_index) 0:return 1000000.0/90.0; 1:return 10000; 2:return 8000; default:return 1000000.0/60.0; endcase
+            8: case(domain_index) 0:return 110000.0/9.0; 1:return 10000; 2:return 8000; default:return 1000000.0/60.0; endcase
             default:return 0;
         endcase
     endfunction
     function automatic int frequency_hz(input int domain_index);
-        // Hz 元数据四舍五入到整数；真正周期仍以整数 ps 驱动和测量。
-        return period_ps(domain_index)>0 ? int'((64'd1000000000000+64'(period_ps(domain_index)/2))/64'(period_ps(domain_index))) : 0;
+        // 元数据四舍五入到整数 Hz；分数周期按绝对边沿累计，避免每半拍舍入漂移。
+        return period_ps(domain_index)>0 ? int'(1.0e12/period_ps(domain_index)) : 0;
     endfunction
     // 从实际编译常量打印配置，供固定软件重放核对所选 Core，避免旧模型混入新结果。
     initial begin
@@ -75,10 +80,46 @@ module tb_soc_system #(
             CLOCK_PROFILE,dut.u_memory.u_icache.FILL_BYTES,dut.CLOCK_INFO_ENABLE,
             dut.CORE_CLOCK_HZ,dut.SYS_CLOCK_HZ,dut.DDR_CLOCK_HZ,dut.PERIPH_CLOCK_HZ,dut.PERIPH_CLOCK_HZ);
     end
-    initial begin #1ps; forever #(core_half) clk_core=!clk_core; end
-    initial begin #1ps; if(clock_config!=0) #1700ps; forever #(sys_half) clk_sys=!clk_sys; end
-    initial begin #1ps; if(clock_config!=0) #2300ps; forever #(ddr_half) clk_ddr=!clk_ddr; end
-    initial begin #1ps; if(clock_config!=0) #3100ps; forever #(periph_half) clk_periph=!clk_periph; end
+    initial begin
+        realtime origin, edge_time;
+        longint unsigned edge_count;
+        #1ps; origin=$realtime; edge_count=0;
+        forever begin
+            edge_count++;
+            edge_time=origin+real'(edge_count)*core_half;
+            #(edge_time-$realtime); clk_core=!clk_core;
+        end
+    end
+    initial begin
+        realtime origin, edge_time;
+        longint unsigned edge_count;
+        #1ps; if(clock_config!=0) #1700ps; origin=$realtime; edge_count=0;
+        forever begin
+            edge_count++;
+            edge_time=origin+real'(edge_count)*sys_half;
+            #(edge_time-$realtime); clk_sys=!clk_sys;
+        end
+    end
+    initial begin
+        realtime origin, edge_time;
+        longint unsigned edge_count;
+        #1ps; if(clock_config!=0) #2300ps; origin=$realtime; edge_count=0;
+        forever begin
+            edge_count++;
+            edge_time=origin+real'(edge_count)*ddr_half;
+            #(edge_time-$realtime); clk_ddr=!clk_ddr;
+        end
+    end
+    initial begin
+        realtime origin, edge_time;
+        longint unsigned edge_count;
+        #1ps; if(clock_config!=0) #3100ps; origin=$realtime; edge_count=0;
+        forever begin
+            edge_count++;
+            edge_time=origin+real'(edge_count)*periph_half;
+            #(edge_time-$realtime); clk_periph=!clk_periph;
+        end
+    end
     logic [1:0] uart_rx, uart_tx;
     logic [31:0] gpio_in[3], gpio_out[3], gpio_oe[3];
     logic ddr_ready=(DDR_BYTES!=0);
@@ -187,22 +228,30 @@ module tb_soc_system #(
     logic p2_metrics_enable=0, p2_platform_enable=0;
     logic [31:0] p2_periph_period_ps=0, p2_measured_periph_period_ps=0;
     logic p2_period_seen=0;
-    realtime p2_last_periph_edge=0;
+    realtime p2_first_periph_edge=0;
     longint unsigned p2_period_checks=0;
-    // 注入值与实际相邻上升沿核对；不改变时钟发生器或复位释放时刻。
+    // 分数周期的单拍会在相邻整数 ps 间变化；累计边沿误差仍必须在1ps内。
+    // 统计区间的平均周期四舍五入，与整数ps的软件平台ABI核对。
     always @(posedge clk_periph) if(p2_platform_enable) begin
         if(p2_period_seen) begin
-            p2_measured_periph_period_ps=soc_metrics_pkg::clock_period_ps(($realtime-p2_last_periph_edge)/2.0);
-            assert(p2_measured_periph_period_ps==p2_periph_period_ps)
-                else $fatal(1,"peripheral period mismatch injected=%0d measured=%0d",p2_periph_period_ps,p2_measured_periph_period_ps);
             p2_period_checks++;
+            assert ($realtime-p2_first_periph_edge >= p2_period_checks*periph_half*2.0-1ps &&
+                    $realtime-p2_first_periph_edge <= p2_period_checks*periph_half*2.0+1ps)
+                else $fatal(1,"peripheral clock accumulated phase drift");
+            p2_measured_periph_period_ps=soc_metrics_pkg::clock_period_ps(
+                ($realtime-p2_first_periph_edge)/(2.0*real'(p2_period_checks)));
+            if (p2_period_checks>=16)
+                assert(p2_measured_periph_period_ps==p2_periph_period_ps)
+                    else $fatal(1,"peripheral period mismatch injected=%0d measured=%0d",p2_periph_period_ps,p2_measured_periph_period_ps);
+        end else begin
+            p2_first_periph_edge=$realtime;
         end
-        p2_last_periph_edge=$realtime; p2_period_seen=1;
+        p2_period_seen=1;
     end
     // 专用时基测试在 CPU 解除复位前结束，仅检查配置写入和真实时钟周期。
     initial if($test$plusargs("P2_PLATFORM_CLOCK_ONLY")) begin
         assert($test$plusargs("P2_PLATFORM")) else $fatal(1,"clock-only check requires P2_PLATFORM");
-        wait(p2_period_checks!=0);
+        wait(p2_period_checks>=16);
         @(negedge clk_periph);
         $display("PASS soc-platform-clock RV%0d clock=C%0d injected_period_ps=%0d measured_period_ps=%0d",
             XLEN,clock_config,p2_periph_period_ps,p2_measured_periph_period_ps);
@@ -218,6 +267,26 @@ module tb_soc_system #(
         .response_fire(dut.imem_rsp_valid&&dut.imem_rsp_ready),.response_last(1'b1),.response_id(1'b0),.response_units(32'b0),
         .request_stall(dut.imem_req_valid&&!dut.imem_req_ready),.response_stall(dut.imem_rsp_valid&&!dut.imem_rsp_ready));
     for(genvar p=0;p<2;p++) begin : g_data_latency
+        bus_types_pkg::bus_target_e checked_target;
+        bus_types_pkg::bus_error_e checked_error;
+        logic [2:0] expected_route;
+        longint unsigned route_checks = 0;
+        // 用完整地址/权限译码检查真实队头，而非复用入队的本地资格逻辑。
+        address_decode #(.DDR_BYTES(DDR_BYTES)) u_route_reference (
+            .request(dut.u_memory.request[p]), .target(checked_target), .error(checked_error));
+        always_comb begin
+            expected_route = 3'b001;
+            if (checked_error == bus_types_pkg::BUS_OK && checked_target == bus_types_pkg::TARGET_ITCM)
+                expected_route = 3'b010;
+            else if (checked_error == bus_types_pkg::BUS_OK && checked_target == bus_types_pkg::TARGET_DTCM)
+                expected_route = 3'b100;
+        end
+        always @(posedge clk_core) if (!reset_async && !dut.rst_core && dut.u_memory.req_valid[p]) begin
+            assert (dut.u_memory.queued_route[p] == expected_route)
+                else $fatal(1, "queued TCM route mismatch port=%0d address=%h", p, dut.u_memory.request[p].addr);
+            route_checks++;
+        end
+        final $display("TCM_ROUTE port=%0d checked_queue_cycles=%0d", p, route_checks);
         soc_latency_metrics #(.NAME($sformatf("cpu.d%0d",p)),.ID_W(CPU_ID_W)) u_end_to_end (
             .clk(clk_core),.rst(dut.rst_core),.enable(p2_metrics_enable&&!reset_async),.roi(metrics_roi),
             .start_fire(dut.data_req_valid[p]&&dut.data_req_ready[p]),.start_id(dut.tagged_request[p].id),
@@ -237,13 +306,15 @@ module tb_soc_system #(
     for(genvar b=0;b<2;b++) begin : g_tcm_latency
         longint unsigned conflict_cycles=0, blocked_response_cycles=0, bank_fires=0;
         longint unsigned roi_conflict_cycles=0, roi_blocked_response_cycles=0, roi_bank_fires=0;
+        // 双端口可同时服务同bank两读；只将实际阻塞的bank竞争计为冲突。
         logic conflict;
         always_comb begin
             conflict=0;
             for(int p=0;p<4;p++) for(int q=p+1;q<4;q++)
                 if(dut.g_tcm[b].req_v[p]&&(!dut.g_tcm[b].rsp_v[p]||dut.g_tcm[b].rsp_r[p])&&
                    dut.g_tcm[b].req_v[q]&&(!dut.g_tcm[b].rsp_v[q]||dut.g_tcm[b].rsp_r[q])&&
-                   |(dut.g_tcm[b].u_ram.needed[p]&dut.g_tcm[b].u_ram.needed[q])) conflict=1;
+                   |(dut.g_tcm[b].u_ram.needed[p]&dut.g_tcm[b].u_ram.needed[q])&&
+                   (!dut.g_tcm[b].req_r[p]||!dut.g_tcm[b].req_r[q])) conflict=1;
         end
         always @(posedge clk_core) if(!reset_async&&!dut.rst_core&&p2_metrics_enable) begin
             if(conflict) begin conflict_cycles++; if(metrics_roi) roi_conflict_cycles++; end
@@ -279,26 +350,35 @@ module tb_soc_system #(
     for(genvar b=0;b<2;b++) begin : g_dcache_latency
         logic lookup_q=0;
         logic waiting_cached, cached_request_present;
+        logic [1:0] cached_pending;
+        longint unsigned roi_same_bank_compete=0, roi_active_bank_wait=0, roi_response_backpressure=0, roi_maintenance_wait=0;
         longint unsigned request_stall_cycles=0, response_with_request=0, same_cycle_turnover=0;
         longint unsigned roi_request_stall_cycles=0, roi_response_with_request=0, roi_same_cycle_turnover=0;
         // 每 bank 只记一次等待周期；请求地址/尺寸合法且整行可缓存才计入。
         always_comb begin
-            waiting_cached=0; cached_request_present=0;
+            waiting_cached=0; cached_request_present=0; cached_pending=0;
             for(int p=0;p<2;p++) begin
                 if(dut.u_memory.u_dcache.ENABLE&&dut.u_memory.u_dcache.req_valid[p]&&
-                   dut.u_memory.u_dcache.request[p].addr[dut.u_memory.u_dcache.BANK_BIT]==1'(b)&&
+                   dut.u_memory.u_dcache.request_bank[p]==1'(b)&&
                    dut.u_memory.u_dcache.request[p].addr>=XLEN'(soc_addr_pkg::DDR_BASE)&&
                    (65'(dut.u_memory.u_dcache.request[p].addr)&~65'(dut.u_memory.u_dcache.LINE_BYTES-1))+
                        65'(dut.u_memory.u_dcache.LINE_BYTES)<=65'(soc_addr_pkg::DDR_BASE)+65'(DDR_BYTES)&&
                    (XLEN==64||dut.u_memory.u_dcache.request[p].size!=core_types_pkg::MEM_DWORD)&&
                    (dut.u_memory.u_dcache.request[p].addr&((XLEN'(1)<<dut.u_memory.u_dcache.request[p].size)-1))==0) begin
-                    cached_request_present=1;
+                    cached_request_present=1; cached_pending[p]=1;
                     if(!dut.u_memory.u_dcache.req_ready[p]) waiting_cached=1;
                 end
             end
         end
         always @(posedge clk_core) if(!reset_async&&!dut.rst_core&&p2_metrics_enable) begin
             if(waiting_cached) begin request_stall_cycles++; if(metrics_roi) roi_request_stall_cycles++; end
+            // 各原因独立计数，可重叠；不能相加当作总停顿或全部解释成双口竞争。
+            if(metrics_roi) begin
+                if(&cached_pending) roi_same_bank_compete++;
+                if(waiting_cached && dut.u_memory.u_dcache.bank_busy_q[b]) roi_active_bank_wait++;
+                if(waiting_cached && dut.u_memory.u_dcache.b_rsp_valid[b] && !dut.u_memory.u_dcache.b_rsp_ready[b]) roi_response_backpressure++;
+                if(waiting_cached && (dut.u_memory.u_dcache.maintenance_q || dut.u_memory.u_dcache.maint_req_valid)) roi_maintenance_wait++;
+            end
             if(dut.u_memory.u_dcache.response_fire[b]&&cached_request_present) begin
                 response_with_request++; if(metrics_roi) roi_response_with_request++;
             end
@@ -306,9 +386,10 @@ module tb_soc_system #(
                 same_cycle_turnover++; if(metrics_roi) roi_same_cycle_turnover++;
             end
         end
-        final if(p2_metrics_enable) $display("P2_CACHE_BANK name=dcache%0d request_stall_cycles=%0d response_with_request=%0d same_cycle_turnover=%0d roi_request_stall_cycles=%0d roi_response_with_request=%0d roi_same_cycle_turnover=%0d",
+        final if(p2_metrics_enable) $display("P2_CACHE_BANK name=dcache%0d request_stall_cycles=%0d response_with_request=%0d same_cycle_turnover=%0d roi_request_stall_cycles=%0d roi_response_with_request=%0d roi_same_cycle_turnover=%0d roi_same_bank_compete=%0d roi_active_bank_wait=%0d roi_response_backpressure=%0d roi_maintenance_wait=%0d",
             b,request_stall_cycles,response_with_request,same_cycle_turnover,
-            roi_request_stall_cycles,roi_response_with_request,roi_same_cycle_turnover);
+            roi_request_stall_cycles,roi_response_with_request,roi_same_cycle_turnover,
+            roi_same_bank_compete,roi_active_bank_wait,roi_response_backpressure,roi_maintenance_wait);
         // D-cache 在接受 cache 请求后的下一拍作唯一 LOOKUP 决策。
         always_ff @(posedge clk_core) lookup_q<=!dut.rst_core&&dut.u_memory.u_dcache.g_bank[b].u_cache.request_fire;
         soc_cache_latency_metrics #(.NAME($sformatf("dcache%0d",b))) u_latency (
@@ -423,9 +504,9 @@ module tb_soc_system #(
         $display("P2_STACK roi_ddr_sp_writes=%0d roi_tcm_sp_writes=%0d roi_bad_sp_writes=%0d roi_sp_construction_writes=%0d roi_ddr_stack_accesses=%0d roi_tcm_stack_accesses=%0d roi_bad_stack_accesses=%0d",
             roi_ddr_sp_writes,roi_tcm_sp_writes,roi_bad_sp_writes,roi_sp_construction_writes,
             roi_ddr_stack_accesses,roi_tcm_stack_accesses,roi_bad_stack_accesses);
-        $display("P2_CACHE_CONFIG icache_bytes=%0d icache_line_bytes=%0d icache_ways=2 icache_fill_bytes=%0d dcache_bytes=%0d dcache_line_bytes=%0d dcache_ways=2 dcache_banks=2 dcache_bank_bit=%0d dcache_set_low=%0d dcache_set_high=%0d",
+        $display("P2_CACHE_CONFIG icache_bytes=%0d icache_line_bytes=%0d icache_ways=2 icache_fill_bytes=%0d dcache_bytes=%0d dcache_line_bytes=%0d dcache_ways=2 dcache_banks=2 dcache_bank_bit=%0d dcache_bank_xor_mask=%0d dcache_set_low=%0d dcache_set_high=%0d",
             dut.u_memory.u_icache.CACHE_BYTES,dut.u_memory.u_icache.LINE_BYTES,dut.u_memory.u_icache.FILL_BYTES,
-            dut.u_memory.u_dcache.CACHE_BYTES,dut.u_memory.u_dcache.LINE_BYTES,dut.u_memory.u_dcache.BANK_BIT,
+            dut.u_memory.u_dcache.CACHE_BYTES,dut.u_memory.u_dcache.LINE_BYTES,dut.u_memory.u_dcache.BANK_BIT,dut.u_memory.u_dcache.BANK_XOR_MASK,
             $clog2(dut.u_memory.u_dcache.LINE_BYTES),dut.u_memory.u_dcache.BANK_BIT-1);
     end
 
@@ -441,7 +522,8 @@ module tb_soc_system #(
     soc_system #(.DDR_BYTES(DDR_BYTES),.FLASH_BYTES(FLASH_BYTES),.NPU_BYTES((NPU_ENABLE || MM3_ENABLE) ? 65536 : 0),.UART_DIVISOR(UART_DIVISOR),
         .CLOCK_INFO_ENABLE(1),.CORE_CLOCK_HZ(frequency_hz(0)),.SYS_CLOCK_HZ(frequency_hz(1)),
         .DDR_CLOCK_HZ(DDR_BYTES!=0 ? frequency_hz(2) : 0),.PERIPH_CLOCK_HZ(frequency_hz(3)),
-        .SOC_PROFILE(SOC_PROFILE),.ICACHE_ENABLE(ICACHE_ENABLE),.DCACHE_ENABLE(DCACHE_ENABLE),.CLOCK_HZ(CLOCK_HZ)) dut(.*);
+        .SOC_PROFILE(SOC_PROFILE),.ICACHE_ENABLE(ICACHE_ENABLE),.DCACHE_ENABLE(DCACHE_ENABLE),
+        .ICACHE_BYTES(ICACHE_BYTES),.DCACHE_BYTES(DCACHE_BYTES),.CLOCK_HZ(CLOCK_HZ)) dut(.*);
     axi_system_memory_model #(.BYTES(DDR_MODEL_BYTES == 0 ? 32 : DDR_MODEL_BYTES), .WORD_BYTES(XLEN/8)) u_ddr (.clk(clk_ddr),.rst(dut.rst_ddr),.stall(1'b0),
         .req(ddr_req),.rsp(ddr_rsp),.fault_read_addr,.fault_write_addr);
     spi_flash_model u_flash (.cs_n(flash_cs_n),.sck(flash_sck),.mosi(flash_mosi),.miso(flash_miso));
@@ -503,7 +585,7 @@ module tb_soc_system #(
             $display("P2_PLATFORM magic=50324346 version=1 periph_period_ps=%0d clock=%0d",p2_periph_period_ps,clock_config);
         end
         repeat(10) @(negedge clk_core);
-        reset_async=0;
+        if (!$test$plusargs("P2_PLATFORM_CLOCK_ONLY")) reset_async=0;
         while(cycles<max_cycles) begin
             @(negedge clk_core);
             if($test$plusargs("EXPECT_CACHE_FATAL") && dut.cache_fatal) begin

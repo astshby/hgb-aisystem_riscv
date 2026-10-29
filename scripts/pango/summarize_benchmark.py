@@ -11,18 +11,27 @@ from summarize_measurement import read_table, resources, path_family
 
 
 def summarize(root):
-    manifest=verify(root)
+    manifest_name='application.json' if (root/'application.json').exists() else 'benchmark.json'
+    if manifest_name=='application.json':
+        from prepare_yolo_application import verify as verify_application
+        manifest=verify_application(root)
+    else:
+        manifest=verify(root)
     config=manifest['config']
     syn=root/'prj_tasks/syn_1/synthesize'
     log=root/'native-synthesis.stdout.log'
     text=log.read_text(errors='replace')
     if not re.search(r'^Executing : synthesize[^\r\n]* successfully\.$',text,re.M):
         raise ValueError('missing completed synthesis action')
+    strategy = None
+    if (root/'strategy.json').exists():
+        from prepare_performance_strategy import verify_strategy
+        strategy = verify_strategy(root, text)
     report=syn/(config['pds_top']+'.snr')
     netlist=syn/(config['pds_top']+'_syn.vm')
     if not netlist.is_file(): raise ValueError('missing synthesized netlist')
     tables={}
-    files=[root/'benchmark.json',report,netlist,log]
+    files=[root/manifest_name,report,netlist,log]
     for name in ('resource_utilization','report_timing_fmax','report_timing_clock_summary',
                  'report_timing_setup','report_timing_hold','report_timing_path_setup','check_timing_summary'):
         path=syn/'report_db'/('synthesize_'+name+'.db')
@@ -41,7 +50,7 @@ def summarize(root):
         clock=row['Launch Clock']
         if clock==row['Capture Clock'] and (clock not in same_domain or float(row['Slack'])<float(same_domain[clock]['Slack'])):
             same_domain[clock]=row
-    return dict(config=config,status='native synthesis complete; estimated timing, no place/route',
+    return dict(config=config,strategy=strategy,status='native synthesis complete; estimated timing, no place/route',
                 resources=resources(report.read_text(errors='replace')),retained_memory_and_ddr=retained,
                 estimated_timing=tables,worst_path_by_family=worst,
                 worst_same_domain_path=same_domain,

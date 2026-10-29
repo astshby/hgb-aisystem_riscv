@@ -9,6 +9,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.pango.summarize_timing import completed_actions, placement_reuse, setup_paths
+from scripts.pango.prepare_performance_strategy import PLACEMENT, ROUTE
 
 
 class TimingEvidenceTests(unittest.TestCase):
@@ -28,6 +29,23 @@ class TimingEvidenceTests(unittest.TestCase):
     def test_default_place_command(self):
         expected = ["dev_map -force_to_run", "place", "route", "route_optimize", "report_timing"]
         self.assertEqual(completed_actions(self.log().replace("place -mode fast", "place")), expected)
+
+    def test_explicit_performance_commands(self):
+        route = ROUTE.replace('$hgb_threads', '4')
+        expected = ['dev_map -force_to_run', PLACEMENT, route, 'route_optimize', 'report_timing']
+        log = '\n'.join(f'Executing : {action} successfully.' for action in expected)
+        self.assertEqual(completed_actions(log, route_command=ROUTE, place_command=PLACEMENT), expected)
+        for changed in (log.replace(PLACEMENT, 'place -mode fast'),
+                        log.replace(route, 'route'), log.replace(route+' successfully.', route)):
+            with self.subTest(), self.assertRaises(ValueError):
+                completed_actions(changed, route_command=ROUTE, place_command=PLACEMENT)
+
+    def test_normal_multithread_completion_and_thread_override(self):
+        for threads in (1, 4):
+            route = f'route -route_mode normal -number_of_router_thread {threads}'
+            log = self.log().replace('place -mode fast', 'place').replace('Executing : route successfully.',
+                                                                                     f'Executing : {route} successfully.')
+            self.assertEqual(completed_actions(log)[2], route)
 
     def test_standard_place_without_lut_combining(self):
         for command in ("place -logic_optimize_lut6d FALSE",

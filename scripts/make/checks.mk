@@ -185,5 +185,9 @@ soc-system-test:
 soc-axi-test:
 	bash scripts/verilator/run_axi_system.sh $(XLEN)
 
+.PHONY: tcm-bram-test
+tcm-bram-test:
+	bash scripts/verilator/run_tcm_bram.sh $(XLEN)
+
 soc-irq-cdc-test:
 	bash scripts/verilator/run_soc_irq_cdc.sh $(XLEN)

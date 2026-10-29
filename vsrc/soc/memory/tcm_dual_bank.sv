@@ -138,10 +138,12 @@ module tcm_bank_arbiter (
     output logic [1:0] selected [2],
     output logic [1:0] first_selected
 );
-    logic [3:0] eligible, first_grant, remaining, second_grant;
+    logic [3:0] eligible, first_grant, second_grant;
+    logic [3:0] compatible [4], second_for_first [4];
     logic [3:0] higher_priority [4];
-    logic [1:0] rank [4], first_needed;
-    // 两个物理 bank 最多接纳两个请求。先并行找轮询首选，再找与其不冲突的次选，
+    logic [1:0] rank [4];
+    // 两个物理 bank 最多接纳两个请求。为每个可能首选并行预选不冲突的次选，
+    // 首选确定后直接挑选结果，避免首选 bank 掩码再串行驱动第二次仲裁。
     // 与逐项 greedy 的选择完全相同；IF64 需要两 bank，不能拆成两个独立仲裁器。
     for (genvar c = 0; c < 4; c++) begin : g_priority
         assign rank[c] = 2'(c) - next_q;
@@ -150,14 +152,20 @@ module tcm_bank_arbiter (
             assign higher_priority[c][other] = rank[other] < rank[c];
         end
         assign first_grant[c] = eligible[c] && !(|(eligible & higher_priority[c]));
-        assign remaining[c] = eligible[c] && ((needed[c] & first_needed) == 0);
-        assign second_grant[c] = remaining[c] && !(|(remaining & higher_priority[c]));
+        for (genvar first = 0; first < 4; first++) begin : g_second_candidate
+            assign compatible[first][c] = eligible[c] && ((needed[c] & needed[first]) == 0);
+            assign second_for_first[first][c] = compatible[first][c] &&
+                !(|(compatible[first] & higher_priority[c]));
+        end
+        always_comb begin
+            second_grant[c] = 1'b0;
+            for (int first = 0; first < 4; first++)
+                second_grant[c] |= first_grant[first] && second_for_first[first][c];
+        end
     end
     always_comb begin
-        first_needed = '0;
         first_selected = '0;
         for (int c = 0; c < 4; c++) begin
-            first_needed |= needed[c] & {2{first_grant[c]}};
             first_selected |= 2'(c) & {2{first_grant[c]}};
         end
     end

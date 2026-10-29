@@ -130,11 +130,14 @@ def build(config, root):
         command += ['vsrc/cpu/pango_measure_hot.sv','vsrc/cpu/benchmark_core_tcm.sv','tb/benchmark/tb_coremark_tcm.sv',
                     f'-GCORE_PERIOD_PS={periods["core"]}']
     else:
+        memory=config['memory']
         command += ['tb/soc/axi_system_memory_model.sv','tb/soc/spi_flash_model.sv','tb/soc/tb_soc_system.sv',
                     f'-GDDR_BYTES={config["ddr_bytes"]}', f'-GNPU_ENABLE={config.get("npu_enable",0)}',
                     f'-GNPU_PERIOD_PS={config.get("npu_period_ps",10000)}', '-GDDR_MODEL_BYTES=262144', '-GFLASH_BYTES=0',
                     f'-GICACHE_ENABLE={config["cache_enable"]}',f'-GDCACHE_ENABLE={config["cache_enable"]}',
-                    '-GCLOCK_HZ=125000000',f'-GUART_DIVISOR={(10**12//periods["periph"]+57600)//115200}',
+                    f'-GICACHE_BYTES={memory["icache_bytes"]}',f'-GDCACHE_BYTES={memory["dcache_bytes"]}',
+                    '-GCLOCK_HZ=125000000',f'-GUART_DIVISOR={(config["frequencies_hz"]["periph"]+57600)//115200}',
+                    f'-GCLOCK_PROFILE={config["native_board_profile"] or 1}',
                     *[f'-G{d.upper()}_PERIOD_PS={periods[d]}' for d in DOMAINS]]
     command += ['--top-module',top,'-Mdir',str(root)]
     env=dict(os.environ,CCACHE_TEMPDIR=str(ROOT/'build/ccache-tmp'),CCACHE_DIR=str(ROOT/'build/ccache'))
@@ -211,7 +214,8 @@ def replay(binary, config, bundle, image, output, receipt):
     periods=[config['periods_ps'][d] for d in DOMAINS]
     result=(p2.parse_result(text,image['mode'],image['iterations'],
                            'background' if image['scenario']=='npu_background' else image['scenario'],
-                           expected_core=core_record(config),expected_periods_ps=periods)
+                           expected_core=core_record(config),expected_periods_ps=periods,
+                           expected_cache=config['memory'])
             if ddr else parse_tcm(text,image,config))
     result.update(score(image['iterations'],result['cycles'],periods[0]))
     if config.get('npu_enable'):
@@ -277,6 +281,9 @@ def main():
     parser.add_argument('--scenarios',nargs='+',choices=sorted({s for p in CONFIG['platforms'].values() for s in p['scenarios']}))
     parser.add_argument('--modes',nargs='+',choices=p2.EXPECTED,default=list(p2.EXPECTED))
     parser.add_argument('--iterations',type=int,default=2)
+    parser.add_argument('--icache-bytes',type=int)
+    parser.add_argument('--dcache-bytes',type=int)
+    parser.add_argument('--dcache-bank-xor-mask',type=int,choices=(0,1,2,3),default=0)
     parser.add_argument('--build-only',action='store_true')
     parser.add_argument('--functional',action='store_true',help='Run boot/TCM/DMA/cache functionality without CoreMark')
     parser.add_argument('--xlen',type=int,choices=(32,64),default=32)
@@ -294,7 +301,7 @@ def main():
     results=[]
     for platform in args.platforms:
         for clock in args.clocks:
-            config=configuration(platform,clock,args.xlen)
+            config=configuration(platform,clock,args.xlen,args.icache_bytes,args.dcache_bytes,args.dcache_bank_xor_mask)
             binary,receipt=build(config,(args.models.resolve() if args.models else output/'models')/f'{platform}-{clock}-rv{args.xlen}')
             if args.functional:
                 functional(binary,config,output,receipt)

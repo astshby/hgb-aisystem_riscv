@@ -34,7 +34,9 @@ DEFAULT_SCOREBOARD_CONFIGURATION = dict(P1_SCOREBOARD_CONFIGURATION,
                                         core_ras_enable=0, core_limited_integer_ooo=0,
                                         core_retire_entries=16)
 BOARD_CLOCK_DOMAINS = dict.fromkeys(("core", "sys", "ddr", "periph"), 125000000)
-# C1/C4 的时钟来自 800 MHz VCO 的 GPLL；DDR 用户钟仍由 DDR IP 的 125 MHz 输出提供。
+# C1/C4 的时钟来自 800 MHz VCO 的 GPLL；C5 改用 900 MHz VCO 以整数分频得到
+# 90/100/25 MHz 与 100 MHz NPU（YOLO 性能策略综合估计 92.9282/113.9212/114.8633 MHz
+# 向下取 5 的倍数）。DDR 用户钟仍由 DDR IP 的 125 MHz 输出提供，不随该表变化。
 BOARD_CLOCK_PROFILES = {
     0: {"name": "common", "core": 125000000, "sys": 125000000,
         "ddr": 125000000, "periph": 125000000},
@@ -42,11 +44,24 @@ BOARD_CLOCK_PROFILES = {
         "ddr": 125000000, "periph": 25000000},
     4: {"name": "C4", "core": 100000000, "sys": 100000000,
         "ddr": 125000000, "periph": 25000000},
+    5: {"name": "C5", "core": 90000000, "sys": 100000000,
+        "ddr": 125000000, "periph": 25000000},
+    6: {"name": "C6", "core": 100000000, "sys": 100000000,
+        "ddr": 125000000, "periph": 60000000},
+    7: {"name": "C7", "core": 90000000, "sys": 100000000,
+        "ddr": 125000000, "periph": 60000000},
+    8: {"name": "C8", "core": 81818182, "sys": 100000000,
+        "ddr": 125000000, "periph": 60000000},
 }
 # 相对 125 MHz ref_clk 的 GTP_GPLL 输出比；与 pango_soc_pll 的 STATIC_RATIO* 对齐。
+# C5 的 GPLL 分频是 900/10、900/9、900/36，折算到 ref_clk 即 18/25、4/5、1/5。
 BOARD_CLOCK_RATIOS = {
     1: {"core": (4, 5), "sys": (16, 25), "periph": (1, 5)},
     4: {"core": (4, 5), "sys": (4, 5), "periph": (1, 5)},
+    5: {"core": (18, 25), "sys": (4, 5), "periph": (1, 5)},
+    6: {"core": (4, 5), "sys": (4, 5), "periph": (12, 25)},
+    7: {"core": (18, 25), "sys": (4, 5), "periph": (12, 25)},
+    8: {"core": (36, 55), "sys": (4, 5), "periph": (12, 25)},
 }
 
 
@@ -81,9 +96,9 @@ def verify_default_board_clocks(wrapper):
 
 
 def verify_independent_board_clocks(wrapper, profile):
-    """C1/C4：默认仍为 profile 0，实际 profile 由 compile 参数覆盖。"""
+    """默认仍为 profile 0，独立应用档由 compile 参数覆盖。"""
     if profile not in BOARD_CLOCK_RATIOS:
-        raise ValueError("independent board clock profile must be C1 or C4")
+        raise ValueError("unsupported independent board clock profile")
     text = re.sub(r"//[^\n]*|/\*.*?\*/", "", wrapper, flags=re.S)
     if not re.search(r"parameter\s+int\s+unsigned\s+BOARD_CLOCK_PROFILE\s*=\s*0\s*,", text):
         raise ValueError("staged wrapper must default to BOARD_CLOCK_PROFILE 0")
@@ -101,21 +116,27 @@ def verify_independent_board_clocks(wrapper, profile):
         raise ValueError("missing independent boot reset supervisor")
     if not re.search(r"CLOCK_INFO_ENABLE\(BOARD_CLOCK_PROFILE\s*!=\s*0\)", body):
         raise ValueError("clock discovery is not enabled for independent profiles")
-    if not re.search(r"HOT_HZ\s*=\s*BOARD_CLOCK_PROFILE\s*==\s*0\s*\?\s*125000000\s*:\s*100000000", text):
-        raise ValueError("unexpected HOT_HZ profile formula")
-    if not re.search(r"SYS_HZ\s*=\s*BOARD_CLOCK_PROFILE\s*==\s*0\s*\?\s*125000000\s*:\s*"
-                     r"\(\s*BOARD_CLOCK_PROFILE\s*==\s*4\s*\?\s*100000000\s*:\s*80000000\s*\)", text):
-        raise ValueError("unexpected SYS_HZ profile formula")
-    if not re.search(r"PERIPH_HZ\s*=\s*BOARD_CLOCK_PROFILE\s*==\s*0\s*\?\s*125000000\s*:\s*25000000", text):
-        raise ValueError("unexpected PERIPH_HZ profile formula")
+    # 兼容历史工程的旧公式；新档必须有对应的全部频率分支，避免只改元数据。
+    compact = re.sub(r"\s+", "", text)
+    formulas = {
+        "HOT_HZ": ("(BOARD_CLOCK_PROFILE==5?90000000:100000000)",
+                   "(BOARD_CLOCK_PROFILE==8?81818182:((BOARD_CLOCK_PROFILE==5||BOARD_CLOCK_PROFILE==7)?90000000:100000000))"),
+        "SYS_HZ": ("(BOARD_CLOCK_PROFILE==5?100000000:(BOARD_CLOCK_PROFILE==4?100000000:80000000))",
+                   "(BOARD_CLOCK_PROFILE>=4?100000000:80000000)"),
+        "PERIPH_HZ": ("25000000", "(BOARD_CLOCK_PROFILE>=6?60000000:25000000)"),
+    }
+    for name, choices in formulas.items():
+        allowed = choices[1:] if profile >= 6 else choices
+        if not any(f"{name}=BOARD_CLOCK_PROFILE==0?125000000:{formula};" in compact for formula in allowed):
+            raise ValueError(f"unexpected {name} profile formula")
 
 
 def board_clock_constraints(profile, npu_enable=False):
-    """只生成 C1/C4 的 generated clock 与时钟不确定性，不加载 CDC 例外。"""
+    """生成精确分数 generated clock 与时钟不确定性，不加载 CDC 例外。"""
     if profile not in BOARD_CLOCK_RATIOS:
-        raise ValueError("board clock constraints require C1 or C4")
+        raise ValueError("unsupported board clock constraints profile")
     lines = [
-        "# C1/C4 board clocks from the 125 MHz ref_clk through GTP_GPLL.",
+        "# Board clocks from the 125 MHz ref_clk through GTP_GPLL.",
         "# board_ddr.fdc defines ref_clk; PLL/DDR site coexistence is left to PDS placement.",
         "# All cross-domain paths remain timed; no clock group, false path or max_delay is loaded.",
     ]
@@ -145,7 +166,9 @@ def verify_npu_board_clocks(root):
     checks = ((wrapper, r'\.NPU_ENABLE\(NPU_ENABLE(?:\s*\|\|\s*MM3_ENABLE)?\)'),
               (wrapper, r'\.clk_npu\(npu_clk\)'),
               (wrapper, r'\.NPU_BYTES\((?:NPU_ENABLE|\(NPU_ENABLE\s*\|\|\s*MM3_ENABLE\))\s*\?\s*65536\s*:\s*0\)'),
-              (pll, r'\.STATIC_RATIO3\(8\)'),
+              (pll, r'\.STATIC_RATIO3\(NPU_DIV\)'),
+              (pll, r'HIGH_VCO\s*=\s*CLOCK_PROFILE\s*>=\s*5'),
+              (pll, r'NPU_DIV\s*=\s*HIGH_VCO\s*\?\s*9\s*:\s*8'),
               (pll, r'\.CLKOUT3\(pll_npu\)'),
               (pll, r'if\s*\(NPU_ENABLE\).*?\.CLKIN\(pll_npu\),\s*\.CLKOUT\(clk_npu\)'))
     if any(not re.search(pattern, text, re.S) for text, pattern in checks):
@@ -170,7 +193,8 @@ def core_profile(configuration):
 
 def compile_command(xlen, profile_id, local_tcm, dma_wide=1,
                     cache_block=None, dma_block=None, core_issue_width=None, scoreboard=False,
-                    scoreboard_config=None, soc_system=False, board_clock_profile=0, npu_enable=False, mm3_enable=False):
+                    scoreboard_config=None, soc_system=False, board_clock_profile=0, npu_enable=False, mm3_enable=False,
+                    icache_bytes=4096, dcache_bytes=4096, dcache_bank_xor_mask=0):
     if soc_system and not scoreboard:
         raise ValueError("soc_system requires scoreboard")
     # schema 1--7 保持历史 Tcl；schema 8 的 AXI 系统没有这些 legacy 开关。
@@ -200,8 +224,16 @@ def compile_command(xlen, profile_id, local_tcm, dma_wide=1,
                 issue_directive += f" CORE_LIMITED_INTEGER_OOO={scoreboard_config['core_limited_integer_ooo']}"
             if "core_scheduler_forward_mode" in scoreboard_config:
                 issue_directive += f" CORE_SCHEDULER_FORWARD_MODE={scoreboard_config['core_scheduler_forward_mode']}"
+    if dcache_bank_xor_mask:
+        if not soc_system or dcache_bank_xor_mask not in (1, 2, 3):
+            raise ValueError('bank XOR override requires supported soc_system mapping')
+        issue_directive += f" SOC_DCACHE_BANK_XOR_MASK={dcache_bank_xor_mask}"
     # profile 0 不写入 BOARD_CLOCK_PROFILE，保持既有 compile.tcl 逐字节兼容。
     board_directive = "" if board_clock_profile == 0 else f" BOARD_CLOCK_PROFILE {board_clock_profile}"
+    if (icache_bytes, dcache_bytes) != (4096, 4096):
+        if not soc_system:
+            raise ValueError('cache capacity overrides require soc_system')
+        board_directive += f" ICACHE_BYTES {icache_bytes} DCACHE_BYTES {dcache_bytes}"
     if npu_enable and mm3_enable:
         raise ValueError("select one accelerator")
     if npu_enable or mm3_enable:
@@ -242,7 +274,20 @@ def verify_staged_manifest(root, manifest):
         for key in ("cache_block_enable", "dma_block_enable", "core_issue_width"):
             if type(manifest.get(key)) is not int or manifest.get(key) != 1:
                 raise ValueError(f"invalid staged block/issue configuration: {key}")
+    if type(manifest.get('dcache_bank_xor_mask', 0)) is not int or manifest.get('dcache_bank_xor_mask', 0) not in (0,1,2,3):
+        raise ValueError('invalid staged D-cache bank mapping')
     scoreboard_config = dict(SCOREBOARD_CONFIGURATION)
+    if schema in (8, 9):
+        for key in ('icache_bytes', 'dcache_bytes'):
+            size = manifest.get(key)
+            if type(size) is not int or size < 4096 or size > 65536 or size & (size - 1):
+                raise ValueError('invalid staged cache capacity: ' + key)
+            scoreboard_config[key] = size
+        if (manifest['icache_bytes'], manifest['dcache_bytes']) != (4096, 4096):
+            wrapper = (root / 'vsrc/cpu/pango_200hp_top.sv').read_text()
+            for name in ('ICACHE_BYTES', 'DCACHE_BYTES'):
+                if not re.search(rf'parameter\s+int\s+unsigned\s+{name}\s*=', wrapper) or not re.search(rf'\.{name}\({name}\)', wrapper):
+                    raise ValueError('cache capacity is not forwarded by the board wrapper: ' + name)
     if schema >= 5:
         choices = {"core_retire_entries": (16, 32), "core_issue_queue_entries": (2, 4, 8, 16),
                    "core_split_issue_queue": (0, 1), "core_memory_queue_entries": (2, 4, 8),
@@ -292,7 +337,7 @@ def verify_staged_manifest(root, manifest):
                 expected_domains["npu"] = 100000000
             if (manifest.get("clock_profile") != BOARD_CLOCK_PROFILES[profile]["name"] or
                     manifest.get("board_clock_domains_hz") != expected_domains or
-                    manifest.get("clock_relationship") != "independent_gpll_800mhz_vco" or
+                    manifest.get("clock_relationship") != f"independent_gpll_{900 if profile >= 5 else 800}mhz_vco" or
                     manifest.get("mtime_clock_domain") != "periph"):
                 raise ValueError("unexpected independent board clock configuration")
             if "board_clocks.fdc" not in manifest["files"]:
@@ -336,7 +381,10 @@ def verify_staged_manifest(root, manifest):
                                        soc_system=schema in (8, 9),
                                        board_clock_profile=manifest.get("board_clock_profile", 0),
                                        npu_enable=manifest.get("npu_enable", False),
-                                       mm3_enable=manifest.get("mm3_enable", False))
+                                       mm3_enable=manifest.get("mm3_enable", False),
+                                       icache_bytes=manifest.get('icache_bytes', 4096),
+                                       dcache_bytes=manifest.get('dcache_bytes', 4096),
+                                       dcache_bank_xor_mask=manifest.get('dcache_bank_xor_mask', 0))
     accepted_commands = [[expected_compile]]
     # P2 在合入 P1 前使用 schema 4。仅其已覆盖哈希的 AXI wrapper 可省略旧参数。
     if schema == 4 and staged_soc_system(root, manifest):
@@ -391,6 +439,9 @@ def main():
     parser.add_argument("--output", type=Path, required=True, help="empty local ASCII Windows directory")
     parser.add_argument("--ip-dir", type=Path, required=True, help="generated ddr3_test candidate directory")
     parser.add_argument("--xlen", type=int, choices=(32, 64), default=32)
+    parser.add_argument('--icache-bytes', type=int, choices=(4096, 8192, 16384, 32768, 65536), default=4096)
+    parser.add_argument('--dcache-bank-xor-mask', type=int, choices=(0,1,2,3), default=0)
+    parser.add_argument('--dcache-bytes', type=int, choices=(4096, 8192, 16384, 32768, 65536), default=4096)
     parser.add_argument("--soc-profile", choices=("full", "lite"), default="full")
     parser.add_argument("--local-tcm", type=int, choices=(0, 1), default=None,
                         help="legacy switch; soc_system requires 1 (automatic for scoreboard)")
@@ -404,8 +455,8 @@ def main():
     parser.add_argument("--memory-queue-entries", type=int, choices=(2, 4, 8), default=None)
     parser.add_argument("--predictor-mode", type=int, choices=(0, 1), default=None)
     parser.add_argument("--ras-enable", type=int, choices=(0, 1), default=None)
-    parser.add_argument("--board-clock-profile", type=int, choices=(0, 1, 4), default=None,
-                        help="default C1 for scoreboard, common for legacy; 0=125 MHz common, 1=C1, 4=C4")
+    parser.add_argument("--board-clock-profile", type=int, choices=tuple(BOARD_CLOCK_PROFILES), default=None,
+                        help="0=common; C1/C4/C5 historical; C6=100/100/60, C7=90/100/60, C8=(900/11)/100/60 MHz; DDR125/NPU100")
     parser.add_argument("--npu-enable", action="store_true", help="attach pinned 128-MAC NPU on dedicated 100 MHz clock")
     parser.add_argument("--mm3-enable", action="store_true", help="attach MiniMind on dedicated 100 MHz clock")
     args = parser.parse_args()
@@ -420,12 +471,14 @@ def main():
     if selected != "none" and selected not in branch["accelerators"]:
         parser.error("accelerator source is absent from this branch: " + selected)
     scoreboard = args.core_backend == "scoreboard"
+    if not scoreboard and (args.icache_bytes, args.dcache_bytes) != (4096, 4096):
+        parser.error('cache capacity overrides require scoreboard soc_system')
     if args.board_clock_profile is None:
         args.board_clock_profile = 1 if scoreboard else 0
     if (args.npu_enable or args.mm3_enable) and (not scoreboard or not args.board_clock_profile):
-        parser.error("NPU requires scoreboard C1/C4")
+        parser.error("NPU requires scoreboard C1/C4/C5")
     if args.board_clock_profile and not scoreboard:
-        parser.error("C1/C4 board clock profiles require --core-backend scoreboard")
+        parser.error("C1/C4/C5 board clock profiles require --core-backend scoreboard")
     if args.local_tcm is None:
         args.local_tcm = int(scoreboard)
     if scoreboard and args.local_tcm != 1:
@@ -526,6 +579,7 @@ def main():
                 "status": "candidate; no timing closure or board compatibility claim", "files": {}}
     if scoreboard:
         manifest.update(SCOREBOARD_CONFIGURATION)
+        manifest.update(icache_bytes=args.icache_bytes, dcache_bytes=args.dcache_bytes, dcache_bank_xor_mask=args.dcache_bank_xor_mask)
         manifest.update(core_retire_entries=args.retire_entries,
                         core_split_issue_queue=args.split_issue_queue,
                         core_limited_integer_ooo=args.limited_integer_ooo,
@@ -540,7 +594,7 @@ def main():
                             clock_profile=profile["name"],
                             board_clock_domains_hz={domain: profile[domain]
                                                     for domain in ("core", "sys", "ddr", "periph")},
-                            clock_relationship="independent_gpll_800mhz_vco",
+                            clock_relationship=f"independent_gpll_{900 if args.board_clock_profile >= 5 else 800}mhz_vco",
                             mtime_clock_domain="periph")
         else:
             manifest.update(soc_topology="soc_system", core_profile=core_profile(manifest),
@@ -592,7 +646,8 @@ def main():
                                  core_issue_width=2 if scoreboard else 1, scoreboard=scoreboard,
                                  scoreboard_config=manifest if scoreboard else None,
                                  soc_system=scoreboard,
-                                 board_clock_profile=args.board_clock_profile,npu_enable=args.npu_enable,mm3_enable=args.mm3_enable)]
+                                 board_clock_profile=args.board_clock_profile,npu_enable=args.npu_enable,mm3_enable=args.mm3_enable,
+                                 icache_bytes=args.icache_bytes,dcache_bytes=args.dcache_bytes, dcache_bank_xor_mask=args.dcache_bank_xor_mask)]
     (root / "compile.tcl").write_text("\n".join(commands) + "\n", encoding="utf-8")
     (root / "synthesize.tcl").write_text(SYNTHESIZE_COMMANDS, encoding="utf-8")
     shutil.copyfile(repo / "scripts/pango/implement.tcl", root / "implement.tcl")

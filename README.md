@@ -1,28 +1,40 @@
-# hgb-aisystem：main
+# hgb-aisystem：四域 RISC-V SoC
 
-分层裸机 CoreMark 与独立 RT-Thread，完整四域 SoC 无 NPU。Core 使用 ROB16、int8/mem4、LQ4/SQ4、forward3、Tournament1、RAS0、OOO0。
-RV32 优先优化，RV64 验证功能。正常 ALU/Load/DSP 为 8/10/10 级，C 扩展尚未实现。
+本分支保存无 NPU 的 Core/SoC、分层裸机 CoreMark 和独立 RT-Thread。
+Core 为 RV32/RV64 IM+Zicsr，双发射、按序双退休；ROB16、int8/mem4、LQ4/SQ4、
+forward3、Tournament1、RAS0、OOO0，正常 ALU/Load/DSP 为 8/10/10 级。
+RV32 优先优化，RV64 验证功能，C 扩展尚未实现。
 
-Core/SYS/DDR-user/外设目标为 100/80/125/25 MHz。
-这些是配置目标，综合估计另列，本轮没有布局布线或上板结果。
+完整系统的 C6 目标为 Core/SYS/DDR-user/外设 = 100/100/125/60 MHz。
+TCM 和 Cache 当前与 Core 同域，SYS 包含总线与 DMA。配置目标与综合、布线测量分别记录。
+基线和 PDS 执行入口共同维护；选定策略为 8 线程、fanout128、布局双输出 LUT 合并关闭、
+布线时序权重90，布局和布线均使用 normal 模式。每次运行前重新检查物理与提交内存余量。
 
-设置 `RISCV_TOOL_ROOT` 为交叉编译器 bin。`make help` 显示本分支入口：
+设置 `RISCV_TOOL_ROOT` 为交叉编译器 bin。`make help` 显示可执行入口：
 
 ```bash
 make check XLEN=32
 make check XLEN=64
-SOFTWARE_OPT=O3 make score COREMARK_PLATFORM_OUT=build/score-O3
+SOFTWARE_OPT=O3 make score COREMARK_PLATFORM_OUT=build/score-O3 \
+  COREMARK_PLATFORM_ARGS='--clocks main60 --iterations 64 --icache-bytes 16384 --dcache-bytes 8192 --dcache-bank-xor-mask 2'
 make rt-thread-fetch
 make rt-thread XLEN=32
 ```
 
-软件默认 `SOFTWARE_OPT=O3`，可选 O2/Ofast。公共 Core/SoC 配置在
-`scripts/hardware_profile.json`，分支功能在 `scripts/branch_profile.json`。
+软件默认 `SOFTWARE_OPT=O3`，可选 O2/Ofast。公共配置见
+`scripts/hardware_profile.json`，当前应用范围见 `scripts/branch_profile.json`。
+本次基线测量显式选择 I$16 KiB、D$8 KiB、bank XOR mask2；通用 API 的4/4 KiB默认值保留历史兼容。
+O3/64轮已测 M0 performance/validation 为3.590617/3.570731 CoreMark/MHz；
+真实 TCM 为3.095736/3.081770。两者的存储路径分别记录。
+M0 使用 TB 一周期存储；`core_tcm`、`soc_tcm`、`soc_ddr` 分别测真实 Core+TCM、
+SoC+TCM、SoC+Cache+DDR。CoreMark/MHz 的分母均为 Core 计时区周期。
+RT-Thread 为独立应用，不参加这组 CoreMark 测量；程序主体在 DDR，热 trap 驻 ITCM。
+短仿真和64轮仿真均须另核对实际计时时间，满十秒后才满足正式 CoreMark 时间要求。
 
-M0 64 次 O3 为 3.590617/3.570731 CoreMark/MHz；真实 TCM 短测为 3.052755/3.035846。
-两者的存储路径不同，分别记录。RT-Thread 不参加 CoreMark，程序主体在 DDR，热 trap 驻 ITCM。
-短 CoreMark 仿真未满足正式十秒要求。
+YOLO 保存在 `baseline-yolo`，MiniMind 保存在 `baseline-minimind`；
+`baseline-all` 保存两套加速器和全部软件，仅用于联合仿真。
+本分支不保留加速器实体源码、专属软件或专属执行入口。
 
-说明见[项目介绍](docs/PROJECT_INTRO.md)、[系统结构](docs/understand/SOC_SYSTEM.md)、
-[FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。全部源码与可选应用集中保存在 baseline-all；
-本分支只保留上述应用。历史分支已保存为本地 archive 标签，详细变更用 git log/git show 查询。
+详细配置、数据和待办见[项目介绍](docs/PROJECT_INTRO.md)、
+[系统结构](docs/understand/SOC_SYSTEM.md)、[FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。
+工作区 `2-coremark/record.md` 保存各次镜像、命令和测量记录。
