@@ -15,6 +15,7 @@ module axi_to_axil (
     logic read_q, write_q, aw_sent_q, w_sent_q;
     logic read_error_q, write_error_q, write_collected_q;
     logic [7:0] drain_q, read_beat_q;
+    logic [31:0] allowed_strb_q;
     function automatic logic legal(input axi_a_t a);
         logic timer64;
         timer64 = core_config_pkg::XLEN == 64 && a.addr[31:16] == 16'h0200 &&
@@ -55,13 +56,15 @@ module axi_to_axil (
             end
             if (q.aw_valid && p.aw_ready) begin
                 write_q <= 1; aw_q <= q.aw; write_error_q <= !legal(q.aw);
+                // AW接纳后才允许接收W；提前保存合法字节mask，移出W到错误寄存器的动态移位链。
+                allowed_strb_q <= (32'hffffffff >> (32-(1<<q.aw.size))) << q.aw.addr[4:0];
                 write_collected_q <= 0; aw_sent_q <= 0; w_sent_q <= 0; drain_q <= 0;
             end
             if (q.w_valid && p.w_ready) begin
                 w_q <= q.w; drain_q <= drain_q+1'b1;
                 if (drain_q == aw_q.len) write_collected_q <= 1;
                 if (q.w.last != (drain_q == aw_q.len) ||
-                    |(q.w.strb & ~((32'hffffffff >> (32-(1<<aw_q.size))) << aw_q.addr[4:0])))
+                    |(q.w.strb & ~allowed_strb_q))
                     write_error_q <= 1;
             end
             if (m_req.aw_valid && m_rsp.aw_ready) aw_sent_q <= 1;
