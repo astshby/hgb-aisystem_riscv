@@ -13,6 +13,43 @@ $ErrorActionPreference = 'Stop'
 $projectPath = [IO.Path]::GetFullPath($Project)
 $projectRoot = Split-Path -Parent $projectPath
 $name = [IO.Path]::GetFileNameWithoutExtension($projectPath)
+function Assert-InputHashes($Root, $Files) {
+    $prefix = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    foreach ($item in $Files.PSObject.Properties) {
+        $path = [IO.Path]::GetFullPath((Join-Path $Root $item.Name))
+        if (-not $path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or
+            -not (Test-Path -LiteralPath $path -PathType Leaf) -or
+            (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $item.Value) {
+            throw "Frozen PDS input missing or changed: $($item.Name)"
+        }
+    }
+}
+function Assert-InteractiveInputs {
+    $manifestPath = Join-Path $projectRoot 'manifest.json'
+    if (-not (Test-Path -LiteralPath $manifestPath)) { return }
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    if ($manifest.firmware_manifest_version -ne 1) { return }
+    if ($manifest.firmware_role -cne 'coremark-interactive' -or
+        $manifest.firmware.elf -cne 'program.elf' -or
+        $manifest.firmware.build_config.test_iterations -ne 0 -or
+        $manifest.firmware.build_config.xlen -ne $manifest.xlen -or
+        @($manifest.firmware.source_sha256.PSObject.Properties).Count -ne 20) {
+        throw 'Invalid production interactive firmware identity.'
+    }
+    Assert-InputHashes $projectRoot $manifest.files
+    if ($Phase -eq 'implementation') {
+        if ($ImplementationScript -cne 'implement_cdc.tcl') { throw 'Interactive implementation requires native CDC binding.' }
+        $receiptPath = Join-Path $projectRoot 'cdc-scope-receipt.json'
+        if (-not (Test-Path -LiteralPath $receiptPath)) { throw 'Missing native CDC scope receipt; audit and bind this synthesis first.' }
+        $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+        if ($receipt.schema -ne 1 -or $receipt.input_manifest -cne 'manifest.json' -or
+            (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $receipt.input_manifest_sha256) {
+            throw 'Native CDC binding belongs to different frozen inputs.'
+        }
+        Assert-InputHashes $projectRoot $receipt.files
+    }
+    Write-Output "PASS frozen interactive firmware: $($manifest.firmware.firmware_id); RV$($manifest.xlen)"
+}
 if ([IO.Path]::GetExtension($projectPath) -ne '.pds') { throw 'Project must name a staged .pds file.' }
 if ($Phase -eq 'implementation' -and -not (Test-Path -LiteralPath $projectPath)) {
     throw 'Implementation requires the synthesized .pds file.'
@@ -20,6 +57,7 @@ if ($Phase -eq 'implementation' -and -not (Test-Path -LiteralPath $projectPath))
 if ($Phase -eq 'synthesis' -and (Test-Path -LiteralPath $projectPath)) {
     throw 'Synthesis requires a fresh project; refusing to replace an existing .pds file.'
 }
+Assert-InteractiveInputs
 if ([string]::IsNullOrWhiteSpace($PdsHome)) { throw 'Set PDS_HOME or pass -PdsHome.' }
 $executable = Join-Path $PdsHome 'bin\pds_shell.exe'
 if (-not (Test-Path -LiteralPath $executable)) { throw 'Missing pds_shell.exe.' }
@@ -41,6 +79,23 @@ if ($Phase -eq 'synthesis') {
     $backup = Join-Path $LogDirectory "before-implementation-$name.pds"
     if (Test-Path -LiteralPath $backup) { throw 'Preserve the prior native project snapshot.' }
     Copy-Item -LiteralPath $projectPath -Destination $backup
+}
+$inputManifestPath = Join-Path $projectRoot 'manifest.json'
+if (Test-Path -LiteralPath $inputManifestPath) {
+    $inputManifest = Get-Content -LiteralPath $inputManifestPath -Raw | ConvertFrom-Json
+    if ($inputManifest.firmware_manifest_version -eq 1) {
+        $receiptPath = Join-Path $LogDirectory "$Phase-$name-input.json"
+        if (Test-Path -LiteralPath $receiptPath) { throw 'Preserve the existing phase input receipt.' }
+        [ordered]@{
+            schema = 1; phase = $Phase; project = $projectPath; script = $scriptName
+            executable = $executable; arguments = $arguments; log = $log
+            input_manifest_sha256 = (Get-FileHash -LiteralPath $inputManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            source_commit = $inputManifest.source_commit; source_branch = $inputManifest.source_branch
+            firmware_role = $inputManifest.firmware_role; firmware_id = $inputManifest.firmware.firmware_id
+            xlen = $inputManifest.xlen; synthesis_strategy = $inputManifest.synthesis_strategy
+            started_utc = [DateTime]::UtcNow.ToString('o')
+        } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $receiptPath -Encoding UTF8
+    }
 }
 Push-Location -LiteralPath $projectRoot
 try {

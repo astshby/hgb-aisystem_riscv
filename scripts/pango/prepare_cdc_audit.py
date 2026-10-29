@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
+from prepare_project import timing_input
 
 from measurement_constraints import _fifo_inventory, _path_pattern, _register_pattern
 
@@ -239,7 +240,9 @@ def load_inputs(project, summary_file, spec):
     manifest_path = project / spec['input_manifest']
     if sha(manifest_path) != spec['input_manifest_sha256']:
         raise ValueError('staged manifest changed after query preparation')
-    config = json.loads(manifest_path.read_text())['config']
+    input_path, _, config = timing_input(project)
+    if input_path != manifest_path:
+        raise ValueError('native input manifest selection changed')
     summary = json.loads(summary_file.read_text())
     if summary['config'] != config:
         raise ValueError('timing summary configuration mismatch')
@@ -279,13 +282,48 @@ def bind(directory, log, project, summary_file):
     for name in ('bound_cdc.fdc', 'bound_sync.lcf', 'binding.json'):
         if (directory / name).exists():
             raise FileExistsError(directory / name)
+    _, manifest, config = timing_input(project)
+    publish = manifest.get('firmware_manifest_version') == 1
+    if publish:
+        for name in ('backend_cdc.scf', 'backend_sync.lcf', 'cdc-scope-receipt.json'):
+            if (project / name).exists():
+                raise FileExistsError(project / name)
     (directory / 'bound_cdc.fdc').write_text(constraints)
     (directory / 'bound_sync.lcf').write_text(''.join(
         f'define_attribute {{i:{name}}} {{PAP_ASYNC_REG}} {{TRUE}}\n'
         for name in result['synchronizer_registers']))
     (directory / 'binding.json').write_text(json.dumps(result, indent=2)+'\n')
+    if publish:
+        publish_native_binding(project, directory, spec, result, config)
     print(f'PASS native CDC object/clock binding: {len(result["passed_fifos"])} FIFOs, '
           f'{len(result["synchronizer_registers"])} synchronizer registers')
+
+
+def publish_native_binding(project, directory, spec, result, config):
+    """Keep audited native constraints and their synthesized-input identity together."""
+    names = ('backend_cdc.scf', 'backend_sync.lcf', 'cdc-scope-receipt.json')
+    if any((project / name).exists() for name in names):
+        raise FileExistsError('native CDC binding already published')
+    native = f'prj_tasks/syn_1/synthesize/{config["pds_top"]}_syn.vm'
+    report = 'prj_tasks/syn_1/synthesize/report_db/synthesize_'
+    inputs = [spec['input_manifest'], native] + [report + name + '.db' for name in (
+        'report_timing_clock_summary', 'report_timing_path_setup', 'report_clock_network')]
+    hashes = {name: sha(project / name) for name in inputs}
+    constraints = (directory / 'bound_cdc.fdc').read_text()
+    attributes = (directory / 'bound_sync.lcf').read_text()
+    receipt = dict(schema=1, input_manifest=spec['input_manifest'],
+                   input_manifest_sha256=spec['input_manifest_sha256'],
+                   binding_sha256=sha(directory / 'binding.json'),
+                   native_query_log_sha256=result['log_sha256'],
+                   fifos=len(result['passed_fifos']),
+                   synchronizer_registers=len(result['synchronizer_registers']),
+                   max_delay_commands=sum(line.startswith('set_max_delay ') for line in constraints.splitlines()),
+                   max_skew_commands=sum(line.startswith('set_max_skew ') for line in constraints.splitlines()),
+                   status='native objects and clock roots bound; routed effectiveness pending', files=hashes)
+    (project / 'backend_cdc.scf').write_text(constraints)
+    (project / 'backend_sync.lcf').write_text(attributes)
+    receipt['files'].update({name: sha(project / name) for name in names[:2]})
+    (project / 'cdc-scope-receipt.json').write_text(json.dumps(receipt, indent=2)+'\n')
 
 
 def main():
@@ -300,9 +338,8 @@ def main():
             p.error('--timing-summary required for native clock-root verification')
         bind(a.output, a.bind_log, a.project, a.timing_summary)
         return
-    manifest_path = a.project / ('application.json' if (a.project / 'application.json').exists() else 'benchmark.json')
-    manifest = json.loads(manifest_path.read_text())
-    spec = specification(manifest['config'])
+    manifest_path, manifest, config = timing_input(a.project)
+    spec = specification(config)
     spec['schema'] = 3
     spec['input_manifest'] = manifest_path.name
     spec['input_manifest_sha256'] = sha(manifest_path)
