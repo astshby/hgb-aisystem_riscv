@@ -37,6 +37,18 @@ SYS 与 Core 是并行的时钟域；SYS 域不包含 Core、TCM 或 Cache。各
 `make check XLEN=32|64` 运行通用功能、scoreboard、ISA、SoC、五组时钟、AXI 和 C smoke。
 `make loader-host-test` 与 `make loader-soc-test XLEN=32|64` 检查下载协议和 UART 实际引脚。
 本分支应用入口以 `make help` 为准。
+`make yolo-demo-build XLEN=32|64` 仅编译常驻 UART 演示固件，`make yolo-demo-test`
+运行 C 接收程序、PC 串口程序、卷积分块驱动与层计划的 32 项轻量测试。原 `make yolo` 保留卷积和 DMA 回归。
+PC 使用 `scripts/yolo/host.py --port COM5 status|selftest|upload|read|detect`，上传为 RGB888 原始字节，
+每块最多 1024 B，逐包和整帧均核对 CRC32。帧缓冲预留在 DDR `0x81000000`，最大 1920×1080。
+`SELFTEST` 调用已有两组卷积与 DMA 重叠检查，完成后再次发送 READY；不运行 RT-Thread。
+`conv_schedule.c` 提供 CHW/OIHW INT8 到 CHW INT32 的 NPU1 驱动，按 16×16 空间输入块、
+8 输入通道组和 16 输出通道调度，边缘 halo 由 CPU 填零。测试使用字节 UART、DDR 和标量 CSR 设备替身，
+没有启动本轮 RTL 仿真。新驱动尚未在真实 NPU RTL 或板上运行。
+该驱动当前逐寄存器装载输入和权重；DMA/计算重叠由原 SELFTEST 单独检查。
+完整 YOLOX 图的量化、非卷积层执行器和 HDMI 尚未接入；DETECT/HDMI 能力位为 0，
+`detect` 返回 NOT_READY。`scripts/yolo/model_plan.py` 可核对固定模型审计和权重哈希，列出 83 层的分块计划，
+计划文件不充当整图推理结果。UART 演示固件尚未装入当前 PDS 冻结工程。
 软件默认 O3，用 `SOFTWARE_OPT=O2|O3|Ofast` 覆盖。Ofast 本轮没有稳定额外收益，未设为默认。
 
 Cache 容量实验共用上述软件入口。`coremark-platforms`、独立 RT 测试和 PDS 暂存均支持

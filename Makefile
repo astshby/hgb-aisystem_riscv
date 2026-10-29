@@ -34,6 +34,7 @@ ifneq ($(wildcard scripts/make/rt_thread.mk),)
 endif
 ifneq ($(wildcard scripts/make/yolo.mk),)
 	@printf '%s\n' 'make yolo (five domains, convolution + DMA overlap)'
+	@printf '%s\n' 'make yolo-demo-build XLEN=32|64 (UART RGB/SELFTEST firmware)' 'make yolo-demo-test (lightweight software tests)'
 endif
 ifneq ($(wildcard scripts/make/minimind.mk),)
 	@printf '%s\n' 'make minimind (five domains, runtime + 38-command layer)'

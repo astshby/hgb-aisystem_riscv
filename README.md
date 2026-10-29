@@ -17,11 +17,14 @@ SOFTWARE_OPT=O3 make score COREMARK_PLATFORM_OUT=build/score-O3
 make rt-thread-fetch
 make rt-thread XLEN=32
 make yolo XLEN=32
+make yolo-demo-build XLEN=32
+make yolo-demo-test
 ```
 
 软件默认 `SOFTWARE_OPT=O3`，可选 O2/Ofast。公共 Core/SoC 配置在
 `scripts/hardware_profile.json`，分支功能在 `scripts/branch_profile.json`。
 YOLO 重跑时用 `YOLO_OUT=build/yolo/new-run` 指定新目录，保留原镜像和测量日志。
+UART 演示支持 RGB888 上传/读回及已有卷积 SELFTEST，使用独立固件入口；完整 YOLOX 推理与 HDMI 尚未接入。
 
 M0 64 次 O3 为 3.590617/3.570731 CoreMark/MHz；本轮真实 TCM 64 次为 3.095736/3.081770。
 两者的存储路径不同，分别记录。RT-Thread 不参加 CoreMark，程序主体在 DDR，热 trap 驻 ITCM。
