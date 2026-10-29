@@ -14,9 +14,26 @@ PLL、板级时钟发现、UART/timer和应用仿真同步改档；仿真使用�
 
 新建工程由prepare_project/prepare_benchmark复制CDC入口并写入输入哈希；旧清单仍按旧字段核验，不回写历史输入。对已完成SYN的工程在新物理目录追加CDC约束和新入口，保留原RTL/IP/固件/SYN文件哈希，不重新compile/synthesize。原生查询必须在`open_design`的synthesize动作内执行；仅open_project返回的`::tcicmd::`延迟句柄不计绑定证据。C6的60 MHz报告周期16.6667 ns按报告小数位与真实分数周期核对，不能因显示舍入改FDC周期。
 
-当前运行`$PDS_WORK_ROOT/work/main-coremark-c6-cdc-20261029/`，31个FIFO、442同步寄存器、16244原生引脚核验通过，93条max_delay和60条max_skew按既有策略限定在第一同步级/稳定载荷，不例外同域或DDR PHY。启动前287项输入SHA通过，Windows物理/提交余量14.856/11.306 GiB；每个大阶段仍检查各≥6 GiB。23:32复查dev_map/place已完成、normal route运行中，实际布线8进程、Timing 4进程，物理/提交余量11.339/8.601 GiB；最终setup/hold、Gray skew、PHY/I/O、资源与未布通见完成后的原始报告，当前没有新布线Fmax。
+### C6最终布局布线（2026-10-30）
 
-本次固件是冻结O3/64次TCM performance，输出`sim_console`，未装生产UART loader。新独立UART CoreMark固件/PC解析与RT终端已双宽编译、软件测试通过，UART TB仅lint，尚未替换物理工程镜像。完整YOLO/HDMI、TF加载及MiniMind板级文本仍须补齐。不能承诺只替换HEX即可免SYN/P&R：本机旧RAMupdate文档将bts_modify_rtl_data限定Logos系列，尚无本器件Logos2的受验证更新流程。
+工程`$PDS_WORK_ROOT/work/main-coremark-c6-cdc-20261029/`于01:27:37完成。复用80576b9的baseline-main SYN，硬件与main@e3bcf17等价；RV32、I16/D8/hash2、TCM各64 KiB。31个FIFO、442同步寄存器、16244原生引脚已绑定，93条max_delay及60条max_skew在映射前加载。
+
+| 域 | 目标MHz | 最终Fmax MHz | setup WNS ns |
+|---|---:|---:|---:|
+| Core | 100 | 87.3057 | −1.454 |
+| SYS | 100 | 98.2415 | −0.179 |
+| DDR user | 125 | 122.5490 | −0.160 |
+| 外设 | 60 | 72.2201 | +2.820 |
+
+0未布通；LUT74,746、FF61,967、38 DRM36K、4 APM。物理LUT包含常量/旁路，不能直接与综合逻辑LUT比较。总耗时2小时19分10秒；place峰值14,079 MB，route4,555 MB，route_optimize4,780 MB。请求8线程，实际route8、Timing4；没有同输入1/8线程速度对照。
+
+slow/fast全部hold、recovery、removal、MPW、PHY skew通过，fast hold最小+0.025 ns。CDC max_delay最小+1.741 ns、Gray max_skew最小+5.144 ns，无同步路径误例外。DDR→PHY0另有setup−0.027 ns、5失败端点；35 input/73 output缺delay逐端口保存。Core/SYS/DDR user同域setup未闭合，不能据CDC通过宣布整机100 MHz通过。
+
+Core前100路径中，79条为系统TCM读地址→译码/辅助口选择/碰撞→fetch_fire，最差−1.454 ns；15条reset→ROB/commit→rename→IQ，最差−1.215 ns、复位扇出2372；6条ISS反馈经过分支/ROB取消/完成选择/广播/IQ，最差−1.134 ns。TCM末网fetch_fire扇出195、单网2.462 ns。先评估原推进边沿保存地址游标、局部TCM合法位、并行碰撞比较，同时检查复位与ISS反馈；单改TCM不足以承诺100 MHz。SYS的write_error−0.179 ns、DDR写/读选择及PHY0分别处理。
+
+原件摘要和76条逐arc分析保存在`logs/main-coremark-c6-cdc-20261029/{physical-summary.json,physical-path-analysis.json,physical-worst-paths.txt}`，完整原生报告仍在Windows工程。hold修复前后最差setup均−1.454 ns，逻辑数据实例和LUT/FF未变，没有新增数据buffer导致Core下降的证据。每次启动/大阶段检查物理与提交余量各≥6 GiB；未改分页、未停止无关进程。
+
+本次固件是冻结O3/64次TCM performance、sim_console输出。新独立UART CoreMark已通过双宽真实SoC流程短测，RT终端已双宽构建；均未替换该物理工程固件，没有bitstream或板级验收。Logos2的免重布线INIT更新流程尚未验证。按用户顺序先完成演示仿真；频率仍未达标且候选验证有收益后，才追加一次优化P&R。
 
 ## 历史停止点：TCM重构后布局布线前
 

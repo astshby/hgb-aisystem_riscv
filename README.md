@@ -27,8 +27,10 @@ make rt-thread-demo-test
 
 新裸机UART固件回车/P运行performance、V运行validation，返回64位周期/CRC后再次READY；
 电脑用`scripts/coremark/host.py`接收计算。独立RT终端支持STATUS/PING/ECHO/DEMO，
-不参加裸机CoreMark。两者双宽构建与软件测试通过，真实串口RTL/板级运行尚未完成。
-当前C6布局布线仍使用冻结的自动运行CoreMark固件，没有切换为新交互镜像。
+不参加裸机CoreMark。CoreMark双宽真实SoC串口闭环已通过：P/V、CRLF单触发、64位回传、DONE/READY及PC解析。
+2次迭代的短测formal=0，尚无正式十秒或板上成绩；新RT终端仍只有构建/软件测试。
+C6布局布线已完成，Core/SYS/DDR-user/外设Fmax为87.3057/98.2415/122.5490/72.2201 MHz，
+0未布通，Core未达100 MHz。该工程使用冻结的自动运行CoreMark固件，新交互镜像尚未布线。
 
 软件默认 `SOFTWARE_OPT=O3`，可选 O2/Ofast。公共配置见
 `scripts/hardware_profile.json`，当前应用范围见 `scripts/branch_profile.json`。

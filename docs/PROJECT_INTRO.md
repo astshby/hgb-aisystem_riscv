@@ -46,7 +46,9 @@ main 已吸收复核后的共享 TCM/Cache/总线/CDC/时钟基线和统一 PDS 
 短校准选择12秒目标迭代，实测至少10秒才发布formal标志。
 PC工具`scripts/coremark/host.py --port COM5 --require-formal`保存UART和JSON；
 也可`--input uart.log`离线解析，无须pyserial。计分使用独立64位roi_cycles，忽略vendor的32位Total ticks。
-四组双宽正式/短测固件编译与双宽UART TB lint通过，RTL UART及正式长测未运行，没有新分数。
+双宽正式/短测固件编译后，已运行真实四域SoC UART闭环：无命令不启动、CRLF单触发、两次P/V请求、CRC、u64计数、DONE及三次READY全部通过，PC解析valid且official=false。
+C6=100/100/125/60 MHz、I16/D8/hash2，UART500000、迭代2。RV32 P/V ROI为646078/650897周期，RV64为725475/727605周期。
+上述只验收演示流程，不替换冻结64次分层成绩。命令为`python3 scripts/coremark/run_uart.py --xlen 32 --jobs 1 --output build/demo-software-20261030/coremark-uart-rv32`，RV64改宽度及新输出目录；收据`logs/demo-software-20261030/coremark-uart-summary.json`。
 固件为TCM初始化镜像；当前PDS仍是旧自动运行sim_console固件，不能直接把新镜像当DDR loader载荷。
 
 Cache 容量实验共用上述软件入口。`coremark-platforms`、独立 RT 测试和 PDS 暂存均支持
@@ -107,8 +109,10 @@ DDR预装和ITCM热代码DMA路径保持，Flash/TF装载未实现。
 ## FPGA 边界
 
 main 的三层 CoreMark 综合关闭 NPU；YOLO 用途分支的应用工程单独打开第五域。分别测资源、域内 Fmax/WNS 和最差路径。
-无NPU C6工程已加载原生绑定CDC约束并进入normal route，尚无最终P&R、bitstream或板级结果；
-CDC/PHY/I/O的最终时序原件待本轮完成后处理。软件开发没有改动这份冻结工程。
+C6完整系统P&R于2026-10-30完成，Core/SYS/DDR-user/外设Fmax为87.3057/98.2415/122.5490/72.2201 MHz，
+setup WNS分别−1.454/−0.179/−0.160/+2.820 ns，0未布通。Core100 MHz未通过；hold、复位时序及已绑定CDC/Gray通过。
+DDR→PHY0另有setup−0.027 ns；I/O仍缺35 input/73 output delay。资源与真实路径见[FPGA适配](fpga/FPGA_ADAPTATION.md)。
+软件开发没有改动该冻结工程，新UART固件未参加本次物理实现，尚无bitstream或板级验收。
 
 ## 本轮 TCM 与 YOLO 实验
 
