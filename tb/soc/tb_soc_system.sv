@@ -8,10 +8,10 @@ module tb_soc_system #(
     parameter int CLOCK_HZ=100000000,
     parameter int UART_DIVISOR=4,
     parameter int CLOCK_PROFILE=1,
-    parameter int CORE_PERIOD_PS=0,
-    parameter int SYS_PERIOD_PS=0,
-    parameter int DDR_PERIOD_PS=0,
-    parameter int PERIPH_PERIOD_PS=0,
+    parameter real CORE_PERIOD_PS=0,
+    parameter real SYS_PERIOD_PS=0,
+    parameter real DDR_PERIOD_PS=0,
+    parameter real PERIPH_PERIOD_PS=0,
     parameter bit NPU_ENABLE=0,
     parameter bit MM3_ENABLE=0,
     parameter int MM3_MAC_LANES=16,
@@ -33,7 +33,7 @@ module tb_soc_system #(
     import core_config_pkg::*;
     import axi_types_pkg::*;
     // 每个模型固定一个硬件时钟配置；运行时选项仅校验，不能改时钟却留下旧寄存器元数据。
-    function automatic int period_ps(input int domain_index);
+    function automatic real period_ps(input int domain_index);
         case (domain_index)
             0: if (CORE_PERIOD_PS > 0) return CORE_PERIOD_PS;
             1: if (SYS_PERIOD_PS > 0) return SYS_PERIOD_PS;
@@ -47,12 +47,15 @@ module tb_soc_system #(
             2: case(domain_index) 0:return 8000; 1:return 10000; 2:return 12500; default:return 25000; endcase
             3: case(domain_index) 0:return 11764; 1:return 8548; 2:return 10752; default:return 27028; endcase
             4: case(domain_index) 0,1:return 10000; 2:return 8000; default:return 40000; endcase
+            6: case(domain_index) 0,1:return 10000; 2:return 8000; default:return 1000000.0/60.0; endcase
+            7: case(domain_index) 0:return 1000000.0/90.0; 1:return 10000; 2:return 8000; default:return 1000000.0/60.0; endcase
+            8: case(domain_index) 0:return 110000.0/9.0; 1:return 10000; 2:return 8000; default:return 1000000.0/60.0; endcase
             default:return 0;
         endcase
     endfunction
     function automatic int frequency_hz(input int domain_index);
-        // Hz 元数据四舍五入到整数；真正周期仍以整数 ps 驱动和测量。
-        return period_ps(domain_index)>0 ? int'((64'd1000000000000+64'(period_ps(domain_index)/2))/64'(period_ps(domain_index))) : 0;
+        // 元数据四舍五入到整数 Hz；分数周期按绝对边沿累计，避免每半拍舍入漂移。
+        return period_ps(domain_index)>0 ? int'(1.0e12/period_ps(domain_index)) : 0;
     endfunction
     // 从实际编译常量打印配置，供固定软件重放核对所选 Core，避免旧模型混入新结果。
     initial begin
@@ -77,10 +80,26 @@ module tb_soc_system #(
             CLOCK_PROFILE,dut.u_memory.u_icache.FILL_BYTES,dut.CLOCK_INFO_ENABLE,
             dut.CORE_CLOCK_HZ,dut.SYS_CLOCK_HZ,dut.DDR_CLOCK_HZ,dut.PERIPH_CLOCK_HZ,dut.PERIPH_CLOCK_HZ);
     end
-    initial begin #1ps; forever #(core_half) clk_core=!clk_core; end
-    initial begin #1ps; if(clock_config!=0) #1700ps; forever #(sys_half) clk_sys=!clk_sys; end
-    initial begin #1ps; if(clock_config!=0) #2300ps; forever #(ddr_half) clk_ddr=!clk_ddr; end
-    initial begin #1ps; if(clock_config!=0) #3100ps; forever #(periph_half) clk_periph=!clk_periph; end
+    initial begin
+        realtime edge_time;
+        #1ps; edge_time=$realtime;
+        forever begin edge_time+=core_half; #(edge_time-$realtime); clk_core=!clk_core; end
+    end
+    initial begin
+        realtime edge_time;
+        #1ps; if(clock_config!=0) #1700ps; edge_time=$realtime;
+        forever begin edge_time+=sys_half; #(edge_time-$realtime); clk_sys=!clk_sys; end
+    end
+    initial begin
+        realtime edge_time;
+        #1ps; if(clock_config!=0) #2300ps; edge_time=$realtime;
+        forever begin edge_time+=ddr_half; #(edge_time-$realtime); clk_ddr=!clk_ddr; end
+    end
+    initial begin
+        realtime edge_time;
+        #1ps; if(clock_config!=0) #3100ps; edge_time=$realtime;
+        forever begin edge_time+=periph_half; #(edge_time-$realtime); clk_periph=!clk_periph; end
+    end
     logic [1:0] uart_rx, uart_tx;
     logic [31:0] gpio_in[3], gpio_out[3], gpio_oe[3];
     logic ddr_ready=(DDR_BYTES!=0);

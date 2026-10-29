@@ -18,7 +18,8 @@ EXPECTED = {
     'validation': {'seedcrc': 0x18f2, 'crclist': 0xe3c1, 'crcmatrix': 0x0747, 'crcstate': 0x8d84},
 }
 CLOCKS = {0: [5, 5, 5, 5], 1: [5, 6.25, 4, 20], 2: [4, 5, 6.25, 12.5],
-          3: [5.882, 4.274, 5.376, 13.514], 4: [5, 5, 4, 20]}
+          3: [5.882, 4.274, 5.376, 13.514], 4: [5, 5, 4, 20],
+          6: [5, 5, 4, 25/3], 7: [50/9, 5, 4, 25/3], 8: [55/9, 5, 4, 25/3]}
 LAYERS = {'cold': (0, 0), 'warm': (1, 0), 'background': (1, 1)}
 CORE_FIELDS = ('xlen', 'backend', 'issue_width', 'retire_entries', 'split_issue_queue',
                'integer_queue_entries', 'memory_queue_entries', 'limited_integer_ooo',
@@ -61,7 +62,7 @@ def optimization():
 def soc_build_configuration(clock_profile=1, icache_fill_bytes=4):
     if clock_profile not in CLOCKS or icache_fill_bytes not in (4, 8):
         raise ValueError('invalid static SoC clock profile or I-cache install width')
-    hz = [(10**12 + round(half * 2000) // 2) // round(half * 2000) for half in CLOCKS[clock_profile]]
+    hz = [round(10**12 / (half * 2000)) for half in CLOCKS[clock_profile]]
     return dict(zip(('clock_profile', 'icache_fill_bytes', 'metrics_schema', 'clock_info_enable',
                      'core_hz', 'sys_hz', 'ddr_hz', 'periph_hz', 'timer_hz'),
                     (clock_profile, icache_fill_bytes, 2, 1, *hz, hz[3])))
@@ -75,7 +76,7 @@ def validate_soc_config(config, expected_periods_ps=None):
         if len(expected_periods_ps) != 4 or any(p <= 0 for p in expected_periods_ps):
             raise ValueError('four positive clock periods required')
         for domain, period in zip(('core', 'sys', 'ddr', 'periph'), expected_periods_ps):
-            expected[domain + '_hz'] = (10**12 + period // 2) // period
+            expected[domain + '_hz'] = round(10**12 / period)
         expected['timer_hz'] = expected['periph_hz']
     if config != expected:
         raise ValueError('invalid or incomplete compiled SoC configuration')
@@ -373,7 +374,7 @@ def parse_result(text, mode, iterations, layer, expected_core=None, expected_soc
     warm, busy = LAYERS[layer]
     if config is None or tuple(map(int, config.groups())) != (warm, busy, 1-warm, iterations):
         raise ValueError('software cache/background configuration does not match requested layer')
-    clock = re.search(r'^PASS p2-coremark-.* clocks=C([0-4]) core_half_ns=([0-9.]+) sys_half_ns=([0-9.]+) ddr_half_ns=([0-9.]+) periph_half_ns=([0-9.]+)', text, re.M)
+    clock = re.search(r'^PASS p2-coremark-.* clocks=C([0-8]) core_half_ns=([0-9.]+) sys_half_ns=([0-9.]+) ddr_half_ns=([0-9.]+) periph_half_ns=([0-9.]+)', text, re.M)
     if clock is None:
         raise ValueError('missing complete simulator clock configuration record')
     clock_config = int(clock[1])

@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from scripts.verilator.check_soc_profile_structure import instantiated_modules, parameter, walk
-from scripts.pango.prepare_project import P1_SCOREBOARD_CONFIGURATION
+from scripts.pango.prepare_project import DEFAULT_SCOREBOARD_CONFIGURATION, BOARD_CLOCK_PROFILES
 
 
 def write_vendor_stub(path):
@@ -115,9 +115,7 @@ def check_scoreboard_tree(path, xlen, profile, clock_profile=0):
     assert parameter(soc, "DDR_BYTES") == 512 * 1024 * 1024
     assert parameter(soc, "CLOCK_HZ") == 125000000
     assert parameter(wrapper, "BOARD_CLOCK_PROFILE") == clock_profile
-    expected_clocks = dict(core=125000000, sys=125000000, ddr=125000000, periph=125000000)
-    if clock_profile:
-        expected_clocks.update(core=100000000, sys=100000000 if clock_profile == 4 else 80000000, periph=25000000)
+    expected_clocks = {d:BOARD_CLOCK_PROFILES[clock_profile][d] for d in ('core','sys','ddr','periph')}
     assert parameter(soc, "CLOCK_INFO_ENABLE") == int(clock_profile != 0)
     for domain, frequency in expected_clocks.items():
         assert parameter(soc, f"{domain.upper()}_CLOCK_HZ") == frequency
@@ -129,30 +127,30 @@ def check_scoreboard_tree(path, xlen, profile, clock_profile=0):
                  "axi_availability_gate", "ddr_axi_target", "pango_block_bridge",
                  "dma_axi_master", "dma_block_engine", "mmio_bus"):
         assert counts[name] == 1, (name, counts[name])
-    assert counts["tcm_dual_bank"] == 2
+    assert counts["tcm_bram"] == 2
     for name in ("scoreboard_soc_memory", "ddr_port_arbiter", "ddr_block_fabric", "dma_legacy_engine"):
         assert counts[name] == 0, (name, counts[name])
     config = next(node for node in tree["modulesp"] if node.get("origName") == "core_config_pkg")
     assert parameter(config, "XLEN") == xlen
     actual_core = {}
-    for key, expected in P1_SCOREBOARD_CONFIGURATION.items():
+    for key, expected in DEFAULT_SCOREBOARD_CONFIGURATION.items():
         if key.startswith("core_") and type(expected) is int:
             actual_core[key] = parameter(config, key.removeprefix("core_").upper())
-            assert actual_core[key] == expected, f"P1 parameter did not reach core_config_pkg: {key}"
-    assert parameter(config, "RETIRE_IDX_W") == 5
+            assert actual_core[key] == expected, f"baseline parameter did not reach core_config_pkg: {key}"
+    assert parameter(config, "RETIRE_IDX_W") == 4
     assert parameter(config, "SCHEDULER_ENTRIES") == 12
     assert counts["uart"] == (1 if profile == "lite" else 2)
     assert counts["gpio"] == (1 if profile == "lite" else 3)
     return {"xlen": xlen, "profile": profile, "backend": "scoreboard",
             "system": "AXI4", "physical_tcm": 2, "board_clock_profile": clock_profile, "board_clock_domains_hz": expected_clocks,
-            "flash_pins_connected": False, "core_profile": "p1", "core_configuration": actual_core}
+            "flash_pins_connected": False, "core_profile": "custom", "core_configuration": actual_core}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=REPO / "build/pango-handoff-wrapper")
     parser.add_argument("--backend", choices=("legacy", "scoreboard"), default="legacy")
-    parser.add_argument("--clock-profile", type=int, choices=(0, 1, 4), default=0)
+    parser.add_argument("--clock-profile", type=int, choices=tuple(BOARD_CLOCK_PROFILES), default=0)
     args = parser.parse_args()
     if args.backend == "legacy" and args.clock_profile:
         parser.error("independent domains require scoreboard")
@@ -176,7 +174,7 @@ def main():
                            f"-GSOC_PROFILE={int(profile == 'lite')}", f"-GBOARD_CLOCK_PROFILE={args.clock_profile}"]
                 if args.backend == "scoreboard":
                     command += ["-DCORE_SCOREBOARD"]
-                    command += [f"-D{key.upper()}={value}" for key, value in P1_SCOREBOARD_CONFIGURATION.items()
+                    command += [f"-D{key.upper()}={value}" for key, value in DEFAULT_SCOREBOARD_CONFIGURATION.items()
                                 if key.startswith("core_") and type(value) is int]
                 else:
                     command += [f"-GLOCAL_TCM_ENABLE={local}"]

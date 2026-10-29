@@ -29,7 +29,8 @@ def stage(application, output, ip):
     config = run['config']
     memory = config['memory']
     if run['status'] != 'PASS' or run['xlen'] != 32 or config != hardware_configuration(
-            'yolo', 32, memory['icache_bytes'], memory['dcache_bytes'], memory.get('dcache_bank_xor_mask', 0)):
+            'yolo', 32, memory['icache_bytes'], memory['dcache_bytes'], memory.get('dcache_bank_xor_mask', 0),
+            clock=config.get('clock')):
         raise ValueError('requires passing RV32 YOLO with the current hardware configuration')
     if model['config'] != config:
         raise ValueError('YOLO simulation model configuration mismatch')

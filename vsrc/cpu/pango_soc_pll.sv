@@ -12,22 +12,23 @@ module pango_soc_pll #(
     output wire clk_npu,
     output wire locked
 );
-    // C1/C4 沿用 800 MHz VCO；C5 改用 900 MHz VCO，使四个域都能整数分频：
-    // 900/10=90 MHz、900/9=100 MHz、900/36=25 MHz、900/9=100 MHz（NPU）。
-    // C5 是 YOLO 性能策略综合估计 92.9282/113.9212/114.8633 MHz 向下取 5 的倍数
-    // 后能落地的档位；NPU 保持 100 MHz，加速器工程可用。不是时序闭合结论。
-    localparam real VCO_RATIOF = CLOCK_PROFILE == 5 ? 9.0 : 8.0;
-    localparam int unsigned VCO_DUTY = CLOCK_PROFILE == 5 ? 9 : 8;
-    localparam real CORE_RATIO = CLOCK_PROFILE == 5 ? 10.0 : 8.0;
-    localparam int unsigned CORE_DUTY = CLOCK_PROFILE == 5 ? 10 : 8;
-    localparam int unsigned SYS_DIV = CLOCK_PROFILE == 1 ? 10 : (CLOCK_PROFILE == 5 ? 9 : 8);
-    localparam int unsigned PERIPH_DIV = CLOCK_PROFILE == 5 ? 36 : 32;
-    localparam int unsigned NPU_DIV = CLOCK_PROFILE == 5 ? 9 : 8;
+    // C1/C4 保留 800 MHz 历史档；C5-C8 共用一颗 900 MHz VCO GPLL。
+    // C6: 100/100/60；C7: 90/100/60；C8: (900/11)/100/60 MHz。
+    // DDR 用户钟独立为 125 MHz；NPU 输出仍为 100 MHz。各档均待物理验收。
+    localparam bit HIGH_VCO = CLOCK_PROFILE >= 5;
+    localparam real VCO_RATIOF = HIGH_VCO ? 9.0 : 8.0;
+    localparam int unsigned VCO_DUTY = HIGH_VCO ? 9 : 8;
+    localparam int unsigned CORE_DIV = CLOCK_PROFILE == 8 ? 11 :
+        ((CLOCK_PROFILE == 5 || CLOCK_PROFILE == 7) ? 10 : (HIGH_VCO ? 9 : 8));
+    localparam real CORE_RATIO = real'(CORE_DIV);
+    localparam int unsigned CORE_DUTY = CORE_DIV;
+    localparam int unsigned SYS_DIV = CLOCK_PROFILE == 1 ? 10 : (HIGH_VCO ? 9 : 8);
+    localparam int unsigned PERIPH_DIV = CLOCK_PROFILE >= 6 ? 15 : (HIGH_VCO ? 36 : 32);
+    localparam int unsigned NPU_DIV = HIGH_VCO ? 9 : 8;
     wire pll_core, pll_sys, pll_periph, pll_npu;
 
-    // 125 / 5 = 25 MHz PFD；25 * 4 * 8 = 800 MHz VCO（C1/C4），25 * 4 * 9 = 900 MHz（C5）。
-    // CLKOUTF 内反馈，C1 的 ODIV=8/10/32 对应 100/80/25 MHz，C4 仅把 SYS 改为 /8=100 MHz，
-    // C5 的 ODIV=10/9/36 对应 90/100/25 MHz，CLKOUT3 的 /9 对应 100 MHz。占空比均取 50%。
+    // 125 / 5 = 25 MHz PFD；25 * 4 * 8/9 = 800/900 MHz VCO。
+    // CLKOUTF 内反馈；C6-C8 的 /15 外设输出为 60 MHz，占空比均取 50%。
     // 参数依据 LOGOS2 PLL IP 的公式/检查范围；站点及 DDR IP 共存留给物理实现核对。
     GTP_GPLL #(
         .CLKIN_FREQ(125.0), .STATIC_RATIOI(5), .STATIC_RATIOM(4),
@@ -56,7 +57,7 @@ module pango_soc_pll #(
     GTP_CLKBUFG u_core_clock (.CLKIN(pll_core), .CLKOUT(clk_core));
     GTP_CLKBUFG u_sys_clock (.CLKIN(pll_sys), .CLKOUT(clk_sys));
     GTP_CLKBUFG u_periph_clock (.CLKIN(pll_periph), .CLKOUT(clk_periph));
-    // 独立输出：C1/C4 为 /8=100 MHz，C5 为 /9=100 MHz，加速器工程的 NPU 时钟保持 100 MHz。
+    // 独立输出：800 MHz /8 或 900 MHz /9，NPU 均为 100 MHz。
     if (NPU_ENABLE) begin : g_npu_clock
         GTP_CLKBUFG u_clock (.CLKIN(pll_npu), .CLKOUT(clk_npu));
     end else begin : g_no_npu_clock
@@ -64,7 +65,7 @@ module pango_soc_pll #(
     end
 
     initial begin
-        assert (CLOCK_PROFILE == 1 || CLOCK_PROFILE == 4 || CLOCK_PROFILE == 5)
-            else $fatal(1, "pango_soc_pll supports C1, C4 and C5 only");
+        assert (CLOCK_PROFILE == 1 || (CLOCK_PROFILE >= 4 && CLOCK_PROFILE <= 8))
+            else $fatal(1, "pango_soc_pll supports C1 and C4-C8 only");
     end
 endmodule

@@ -1,6 +1,24 @@
 # FPGA 适配与综合
 
-## 当前停止点：可启动布局布线
+## 当前应用时钟与PDS入口
+
+2026-10-29，`clocks/final-app60-flow`新增C6无NPU完整系统100/100/125/60 MHz，
+C7 YOLO为90/100/125/60/100 MHz，C8将YOLO Core改为900/11≈81.818182 MHz。
+系统GPLL的900 MHz VCO分别使用/9、/10或/11、/9、/15、/9分频；DDR用户钟125 MHz仍由DDR IP提供。
+C8频率寄存器四舍五入为81818182 Hz，FDC用36/55的精确参考比。C1/C4/C5保留历史对照。
+PLL、板级时钟发现、UART/timer和应用仿真同步改档；仿真使用分数周期累计边沿，避免逐半拍取整漂移。
+
+物理入口`implement.tcl`默认`max_threads=4`，`HGB_PDS_THREADS`可覆盖。
+本机`pds_shell`已接受`set_option max_threads 4`；实际各阶段线程数、峰值内存和耗时需从随后运行日志记录，
+尚无四线程加速比。使用normal布局/布线和原有内存预检；性能策略生成器已取消本机不支持的performance模式。
+原生帮助的`route`未列旧手册的`number_of_router_thread`，新入口通过全局max_threads控制并行，不传该旧参数。
+对应选项帮助保存在`$PDS_WORK_ROOT/work/final-app60-20261029/option-check/`，仿真证据在`logs/final-app60-20261029/`。
+
+新档尚未综合或布线。此前C5的Core/NPU布线Fmax为85.7036/97.9528 MHz，不能继承为新档结果。
+完整程序仍须完成真实UART的CoreMark命令循环、独立RT-Thread演示、板端完整YOLO及HDMI、MiniMind文本交互。
+仅算子或一次性软件测试不计完整程序交付；增加视频通路后必须对最终YOLO硬件重新物理验收。
+
+## 历史停止点：TCM重构后布局布线前
 
 2026-10-29，实验分支 `integrate/yolo-tcm-boundaries` 已完成 TCM 重构后的 9 组综合、双宽仿真和 CDC 核验。
 本轮按要求停在 dev_map/place/route 前。组合 RTL 为 a7b25c2，YOLO 集成 76139dc，CDC 工具为 5b29642；正式基线未升级。

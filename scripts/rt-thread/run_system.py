@@ -28,11 +28,13 @@ def main():
     parser.add_argument('--icache-bytes',type=int)
     parser.add_argument('--dcache-bytes',type=int)
     parser.add_argument('--dcache-bank-xor-mask',type=int,choices=(0,1,2,3),default=0)
+    parser.add_argument('--output',type=Path,help='fresh result directory; preserve existing measurements')
     args=parser.parse_args();os.chdir(ROOT)
     opt=support.optimization();width=args.xlen
     suffix='' if args.icache_bytes is None and args.dcache_bytes is None else f'-i{args.icache_bytes or 4096}-d{args.dcache_bytes or 4096}'
     if args.dcache_bank_xor_mask: suffix += f'-h{args.dcache_bank_xor_mask}'
-    root=ROOT/f'build/rt-thread/system-rv{width}-{opt}{suffix}';root.mkdir(parents=True,exist_ok=True)
+    root=args.output.resolve() if args.output else ROOT/f'build/rt-thread/system-rv{width}-{opt}{suffix}'
+    root.mkdir(parents=True,exist_ok=args.output is None)
     run(['bash','scripts/rt-thread/build.sh',str(width)],root/'software-build.log',
         env=dict(os.environ,RTTHREAD_BUILD_DIR=str(root)))
     config=hardware_configuration('none',width,args.icache_bytes,args.dcache_bytes,args.dcache_bank_xor_mask)
@@ -48,6 +50,8 @@ def main():
                  'tb/common/store_result_monitor.sv','tb/soc/axi_system_memory_model.sv',
                  'tb/soc/spi_flash_model.sv','tb/soc/tb_soc_system.sv','tb/soc/tb_rt_thread_system.sv',
                  f'-GICACHE_BYTES={config["memory"]["icache_bytes"]}',f'-GDCACHE_BYTES={config["memory"]["dcache_bytes"]}',
+                 f'-GCLOCK_PROFILE={config["board_clock_profile"]}',
+                 f'-GUART_DIVISOR={(config["frequencies_hz"]["periph"]+57600)//115200}',
                  '--top-module','tb_rt_thread_system','-Mdir',str(model)]
         run(command,model/'build.log',model/'source',env)
         (model/'build.json').write_text(json.dumps(dict(config=config,command=command,source_sha256=sources,binary_sha256=sha(binary)),indent=2)+'\n')

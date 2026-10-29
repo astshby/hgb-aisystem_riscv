@@ -31,13 +31,21 @@ class TimingEvidenceTests(unittest.TestCase):
         self.assertEqual(completed_actions(self.log().replace("place -mode fast", "place")), expected)
 
     def test_explicit_performance_commands(self):
-        expected = ['dev_map -force_to_run', PLACEMENT, ROUTE, 'route_optimize', 'report_timing']
+        route = ROUTE.replace('$hgb_threads', '4')
+        expected = ['dev_map -force_to_run', PLACEMENT, route, 'route_optimize', 'report_timing']
         log = '\n'.join(f'Executing : {action} successfully.' for action in expected)
         self.assertEqual(completed_actions(log, route_command=ROUTE, place_command=PLACEMENT), expected)
         for changed in (log.replace(PLACEMENT, 'place -mode fast'),
-                        log.replace(ROUTE, 'route'), log.replace(ROUTE+' successfully.', ROUTE)):
+                        log.replace(route, 'route'), log.replace(route+' successfully.', route)):
             with self.subTest(), self.assertRaises(ValueError):
                 completed_actions(changed, route_command=ROUTE, place_command=PLACEMENT)
+
+    def test_normal_multithread_completion_and_thread_override(self):
+        for threads in (1, 4):
+            route = f'route -route_mode normal -number_of_router_thread {threads}'
+            log = self.log().replace('place -mode fast', 'place').replace('Executing : route successfully.',
+                                                                                     f'Executing : {route} successfully.')
+            self.assertEqual(completed_actions(log)[2], route)
 
     def test_standard_place_without_lut_combining(self):
         for command in ("place -logic_optimize_lut6d FALSE",

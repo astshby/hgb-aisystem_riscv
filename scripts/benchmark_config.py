@@ -29,7 +29,7 @@ def configuration(platform, clock='target', xlen=32, icache_bytes=None, dcache_b
     result.update(platform=platform, clock=clock, xlen=xlen,
                   macros=dict(CONFIG['core_macros'], CORE_XLEN=xlen),
                   memory=memory, periods_ps=periods,
-                  frequencies_hz={d: 10**12 // periods[d] if d in result['domains'] else None for d in (*DOMAINS, *(['npu'] if result.get('npu_enable') else []))},
+                  frequencies_hz={d: round(10**12 / periods[d]) if d in result['domains'] else None for d in (*DOMAINS, *(['npu'] if result.get('npu_enable') else []))},
                   config_sha256=hashlib.sha256(identity.encode()).hexdigest(),
                   native_board_profile=CONFIG['native_board_profiles'].get(clock),
                   timing_status='unvalidated_target')

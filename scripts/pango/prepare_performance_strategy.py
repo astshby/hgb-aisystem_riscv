@@ -18,8 +18,8 @@ def sha(path):
 SYNTHESIS = ('synthesize -ads -selected_syn_tool_opt 2 -resource_sharing false '
              '-fanout_guide 64 -retiming -max_path 100 -nworst 3 '
              '-report_logic_level_distribution -report_exception TRUE')
-PLACEMENT = 'place -mode performance -dc_duplication TRUE -refineplacement_cluster TRUE'
-ROUTE = 'route -route_mode performance -number_of_router_thread 1 -slack_weight 80'
+PLACEMENT = 'place -mode normal -optimize_gp_recovery TRUE -logic_optimize_lut6d FALSE'
+ROUTE = 'route -route_mode normal -slack_weight 80 -optimize_routing_recovery TRUE'
 
 
 def scripts(synthesis, implementation):
@@ -27,10 +27,11 @@ def scripts(synthesis, implementation):
                 '-report_logic_level_distribution -report_exception TRUE')
     if synthesis.splitlines().count(standard) != 1:
         raise ValueError('unsupported paired synthesis entry')
-    if implementation.splitlines().count('place') != 1 or implementation.splitlines().count('route') != 1:
+    standard_route = 'route -route_mode normal'
+    if implementation.splitlines().count('place') != 1 or implementation.splitlines().count(standard_route) != 1:
         raise ValueError('unsupported implementation entry')
     return (synthesis.replace(standard, SYNTHESIS),
-            implementation.replace('\nplace\n', '\n'+PLACEMENT+'\n').replace('\nroute\n', '\n'+ROUTE+'\n'))
+            implementation.replace('\nplace\n', '\n'+PLACEMENT+'\n').replace('\n'+standard_route+'\n', '\n'+ROUTE+'\n'))
 
 
 def stage(source, output):
@@ -57,7 +58,7 @@ def stage(source, output):
                                          (source / 'implement.tcl').read_text())
     (output / 'performance_synthesize.tcl').write_text(synthesis)
     (output / 'performance_implement.tcl').write_text(implementation)
-    strategy = dict(name='timing-v1', synthesis=SYNTHESIS, place=PLACEMENT, route=ROUTE,
+    strategy = dict(name='timing-v2', synthesis=SYNTHESIS, place=PLACEMENT, route=ROUTE,
                     clocks='unchanged from paired standard project',
                     input_manifest=manifest_name, input_manifest_sha256=sha(output / manifest_name),
                     source_project=source.name,
@@ -73,7 +74,7 @@ def stage(source, output):
 def verify_strategy(root, synthesis_log=None):
     strategy = json.loads((root / 'strategy.json').read_text())
     expected = dict(synthesis=SYNTHESIS, place=PLACEMENT, route=ROUTE)
-    if strategy['name'] != 'timing-v1' or any(strategy[k] != v for k, v in expected.items()):
+    if strategy['name'] != 'timing-v2' or any(strategy[k] != v for k, v in expected.items()):
         raise ValueError('unknown performance strategy')
     manifest_name = strategy.get('input_manifest', 'benchmark.json')
     if manifest_name not in ('benchmark.json', 'application.json'):

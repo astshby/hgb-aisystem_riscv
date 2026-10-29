@@ -34,7 +34,7 @@ def main():
     sources = ["vsrc/cpu/pango_soc_reset.sv", "vsrc/soc/common/soc_reset_controller.sv",
                "vsrc/soc/common/async_fifo.sv", "tb/fpga/tb_pango_soc_reset.sv"]
     jobs = [("reset", "tb_pango_soc_reset", sources, [])]
-    for profile in (1, 4):
+    for profile in (1, 4, 5, 6, 7, 8):
         for npu in (0, 1):
             jobs.append((f"pll-c{profile}-npu{npu}", "tb_pango_soc_pll",
                          [str(path) for path in libraries] + ["vsrc/cpu/pango_soc_pll.sv", "tb/fpga/tb_pango_soc_pll.sv"],

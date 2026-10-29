@@ -46,6 +46,12 @@ BOARD_CLOCK_PROFILES = {
         "ddr": 125000000, "periph": 25000000},
     5: {"name": "C5", "core": 90000000, "sys": 100000000,
         "ddr": 125000000, "periph": 25000000},
+    6: {"name": "C6", "core": 100000000, "sys": 100000000,
+        "ddr": 125000000, "periph": 60000000},
+    7: {"name": "C7", "core": 90000000, "sys": 100000000,
+        "ddr": 125000000, "periph": 60000000},
+    8: {"name": "C8", "core": 81818182, "sys": 100000000,
+        "ddr": 125000000, "periph": 60000000},
 }
 # 相对 125 MHz ref_clk 的 GTP_GPLL 输出比；与 pango_soc_pll 的 STATIC_RATIO* 对齐。
 # C5 的 GPLL 分频是 900/10、900/9、900/36，折算到 ref_clk 即 18/25、4/5、1/5。
@@ -53,6 +59,9 @@ BOARD_CLOCK_RATIOS = {
     1: {"core": (4, 5), "sys": (16, 25), "periph": (1, 5)},
     4: {"core": (4, 5), "sys": (4, 5), "periph": (1, 5)},
     5: {"core": (18, 25), "sys": (4, 5), "periph": (1, 5)},
+    6: {"core": (4, 5), "sys": (4, 5), "periph": (12, 25)},
+    7: {"core": (18, 25), "sys": (4, 5), "periph": (12, 25)},
+    8: {"core": (36, 55), "sys": (4, 5), "periph": (12, 25)},
 }
 
 
@@ -87,9 +96,9 @@ def verify_default_board_clocks(wrapper):
 
 
 def verify_independent_board_clocks(wrapper, profile):
-    """C1/C4/C5：默认仍为 profile 0，实际 profile 由 compile 参数覆盖。"""
+    """默认仍为 profile 0，独立应用档由 compile 参数覆盖。"""
     if profile not in BOARD_CLOCK_RATIOS:
-        raise ValueError("independent board clock profile must be C1, C4 or C5")
+        raise ValueError("unsupported independent board clock profile")
     text = re.sub(r"//[^\n]*|/\*.*?\*/", "", wrapper, flags=re.S)
     if not re.search(r"parameter\s+int\s+unsigned\s+BOARD_CLOCK_PROFILE\s*=\s*0\s*,", text):
         raise ValueError("staged wrapper must default to BOARD_CLOCK_PROFILE 0")
@@ -107,23 +116,27 @@ def verify_independent_board_clocks(wrapper, profile):
         raise ValueError("missing independent boot reset supervisor")
     if not re.search(r"CLOCK_INFO_ENABLE\(BOARD_CLOCK_PROFILE\s*!=\s*0\)", body):
         raise ValueError("clock discovery is not enabled for independent profiles")
-    if not re.search(r"HOT_HZ\s*=\s*BOARD_CLOCK_PROFILE\s*==\s*0\s*\?\s*125000000\s*:\s*"
-                     r"\(\s*BOARD_CLOCK_PROFILE\s*==\s*5\s*\?\s*90000000\s*:\s*100000000\s*\)", text):
-        raise ValueError("unexpected HOT_HZ profile formula")
-    if not re.search(r"SYS_HZ\s*=\s*BOARD_CLOCK_PROFILE\s*==\s*0\s*\?\s*125000000\s*:\s*"
-                     r"\(\s*BOARD_CLOCK_PROFILE\s*==\s*5\s*\?\s*100000000\s*:\s*"
-                     r"\(\s*BOARD_CLOCK_PROFILE\s*==\s*4\s*\?\s*100000000\s*:\s*80000000\s*\)\s*\)", text):
-        raise ValueError("unexpected SYS_HZ profile formula")
-    if not re.search(r"PERIPH_HZ\s*=\s*BOARD_CLOCK_PROFILE\s*==\s*0\s*\?\s*125000000\s*:\s*25000000", text):
-        raise ValueError("unexpected PERIPH_HZ profile formula")
+    # 兼容历史工程的旧公式；新档必须有对应的全部频率分支，避免只改元数据。
+    compact = re.sub(r"\s+", "", text)
+    formulas = {
+        "HOT_HZ": ("(BOARD_CLOCK_PROFILE==5?90000000:100000000)",
+                   "(BOARD_CLOCK_PROFILE==8?81818182:((BOARD_CLOCK_PROFILE==5||BOARD_CLOCK_PROFILE==7)?90000000:100000000))"),
+        "SYS_HZ": ("(BOARD_CLOCK_PROFILE==5?100000000:(BOARD_CLOCK_PROFILE==4?100000000:80000000))",
+                   "(BOARD_CLOCK_PROFILE>=4?100000000:80000000)"),
+        "PERIPH_HZ": ("25000000", "(BOARD_CLOCK_PROFILE>=6?60000000:25000000)"),
+    }
+    for name, choices in formulas.items():
+        allowed = choices[1:] if profile >= 6 else choices
+        if not any(f"{name}=BOARD_CLOCK_PROFILE==0?125000000:{formula};" in compact for formula in allowed):
+            raise ValueError(f"unexpected {name} profile formula")
 
 
 def board_clock_constraints(profile, npu_enable=False):
-    """只生成 C1/C4/C5 的 generated clock 与时钟不确定性，不加载 CDC 例外。"""
+    """生成精确分数 generated clock 与时钟不确定性，不加载 CDC 例外。"""
     if profile not in BOARD_CLOCK_RATIOS:
-        raise ValueError("board clock constraints require C1, C4 or C5")
+        raise ValueError("unsupported board clock constraints profile")
     lines = [
-        "# C1/C4/C5 board clocks from the 125 MHz ref_clk through GTP_GPLL.",
+        "# Board clocks from the 125 MHz ref_clk through GTP_GPLL.",
         "# board_ddr.fdc defines ref_clk; PLL/DDR site coexistence is left to PDS placement.",
         "# All cross-domain paths remain timed; no clock group, false path or max_delay is loaded.",
     ]
@@ -154,7 +167,8 @@ def verify_npu_board_clocks(root):
               (wrapper, r'\.clk_npu\(npu_clk\)'),
               (wrapper, r'\.NPU_BYTES\((?:NPU_ENABLE|\(NPU_ENABLE\s*\|\|\s*MM3_ENABLE\))\s*\?\s*65536\s*:\s*0\)'),
               (pll, r'\.STATIC_RATIO3\(NPU_DIV\)'),
-              (pll, r'NPU_DIV\s*=\s*CLOCK_PROFILE\s*==\s*5\s*\?\s*9\s*:\s*8'),
+              (pll, r'HIGH_VCO\s*=\s*CLOCK_PROFILE\s*>=\s*5'),
+              (pll, r'NPU_DIV\s*=\s*HIGH_VCO\s*\?\s*9\s*:\s*8'),
               (pll, r'\.CLKOUT3\(pll_npu\)'),
               (pll, r'if\s*\(NPU_ENABLE\).*?\.CLKIN\(pll_npu\),\s*\.CLKOUT\(clk_npu\)'))
     if any(not re.search(pattern, text, re.S) for text, pattern in checks):
@@ -441,8 +455,8 @@ def main():
     parser.add_argument("--memory-queue-entries", type=int, choices=(2, 4, 8), default=None)
     parser.add_argument("--predictor-mode", type=int, choices=(0, 1), default=None)
     parser.add_argument("--ras-enable", type=int, choices=(0, 1), default=None)
-    parser.add_argument("--board-clock-profile", type=int, choices=(0, 1, 4, 5), default=None,
-                        help="default C1 for scoreboard, common for legacy; 0=125 MHz common, 1=C1, 4=C4, 5=C5 90/100/25 MHz with 100 MHz NPU")
+    parser.add_argument("--board-clock-profile", type=int, choices=tuple(BOARD_CLOCK_PROFILES), default=None,
+                        help="0=common; C1/C4/C5 historical; C6=100/100/60, C7=90/100/60, C8=(900/11)/100/60 MHz; DDR125/NPU100")
     parser.add_argument("--npu-enable", action="store_true", help="attach pinned 128-MAC NPU on dedicated 100 MHz clock")
     parser.add_argument("--mm3-enable", action="store_true", help="attach MiniMind on dedicated 100 MHz clock")
     args = parser.parse_args()

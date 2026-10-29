@@ -21,12 +21,25 @@ class NpuStagingTest(unittest.TestCase):
         for name, expected in manifest['files'].items():
             self.assertEqual(hashlib.sha256((root/name).read_bytes()).hexdigest(), expected, name)
 
-    def test_added_domain_keeps_existing_clock_ratio(self):
+    def test_application_clock_profiles_match_new_board_targets(self):
         old, new = hardware_configuration(), hardware_configuration('yolo')
-        for domain in old['periods_ps']:
-            self.assertEqual(old['frequencies_hz'][domain], new['frequencies_hz'][domain])
+        self.assertEqual(old['frequencies_hz'], dict(core=100000000,sys=100000000,ddr=125000000,periph=60000000))
+        self.assertEqual(new['frequencies_hz']['core'],90000000)
+        for domain in ('sys','ddr','periph'):
+            self.assertEqual(old['frequencies_hz'][domain],new['frequencies_hz'][domain])
+        self.assertEqual((old['board_clock_profile'],new['board_clock_profile']),(6,7))
         self.assertEqual(new['frequencies_hz']['npu'], 100000000)
         self.assertEqual(new['macros'], old['macros'])
+
+    def test_yolo_fallback_keeps_precise_divider_and_peripheral_rate(self):
+        c = hardware_configuration('yolo',clock='yolo60_core81')
+        self.assertEqual(c['board_clock_profile'],8)
+        self.assertEqual(c['frequencies_hz']['core'],81818182)
+        self.assertAlmostEqual(c['periods_ps']['core'],110000/9)
+        self.assertEqual(c['frequencies_hz']['periph'],60000000)
+        clocks = board_clock_constraints(8,True)
+        self.assertIn('-multiply_by {36} -divide_by {55}',clocks)
+        self.assertIn('-multiply_by {12} -divide_by {25}',clocks)
 
     def test_npu_requires_independent_scoreboard_clock(self):
         with self.assertRaises(ValueError):
@@ -54,7 +67,10 @@ class NpuStagingTest(unittest.TestCase):
                 path=root/'vsrc/cpu'/source; path.parent.mkdir(parents=True,exist_ok=True)
                 path.write_text((ROOT/'vsrc/cpu'/source).read_text())
             pll=root/'vsrc/cpu/pango_soc_pll.sv'
-            pll.write_text(pll.read_text().replace('.STATIC_RATIO3(8)', '.STATIC_RATIO3(10)'))
+            original = pll.read_text()
+            changed = original.replace('.STATIC_RATIO3(NPU_DIV)', '.STATIC_RATIO3(10)')
+            self.assertNotEqual(original, changed)
+            pll.write_text(changed)
             with self.assertRaises(ValueError): verify_npu_board_clocks(root)
 
 

@@ -136,7 +136,8 @@ def build(config, root):
                     f'-GNPU_PERIOD_PS={config.get("npu_period_ps",10000)}', '-GDDR_MODEL_BYTES=262144', '-GFLASH_BYTES=0',
                     f'-GICACHE_ENABLE={config["cache_enable"]}',f'-GDCACHE_ENABLE={config["cache_enable"]}',
                     f'-GICACHE_BYTES={memory["icache_bytes"]}',f'-GDCACHE_BYTES={memory["dcache_bytes"]}',
-                    '-GCLOCK_HZ=125000000',f'-GUART_DIVISOR={(10**12//periods["periph"]+57600)//115200}',
+                    '-GCLOCK_HZ=125000000',f'-GUART_DIVISOR={(config["frequencies_hz"]["periph"]+57600)//115200}',
+                    f'-GCLOCK_PROFILE={config["native_board_profile"] or 1}',
                     *[f'-G{d.upper()}_PERIOD_PS={periods[d]}' for d in DOMAINS]]
     command += ['--top-module',top,'-Mdir',str(root)]
     env=dict(os.environ,CCACHE_TEMPDIR=str(ROOT/'build/ccache-tmp'),CCACHE_DIR=str(ROOT/'build/ccache'))

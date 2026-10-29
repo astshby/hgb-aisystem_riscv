@@ -27,6 +27,14 @@ def completed_actions(impl, placement_log=None, route_command="route", place_com
     placements = re.findall(r"^Executing : (" + pattern + r") successfully\.$", placement, re.M)
     if not placements:
         raise ValueError("incomplete implementation action: place")
+    if '$hgb_threads' in route_command or route_command == 'route':
+        route_pattern = (r'route(?: -route_mode normal(?: -number_of_router_thread [0-9]+)?)?'
+                         if route_command == 'route' else
+                         re.escape(route_command).replace(re.escape('$hgb_threads'), r'[0-9]+'))
+        routes = re.findall(r'^Executing : (' + route_pattern + r') successfully\.$', impl, re.M)
+        if not routes:
+            raise ValueError('incomplete implementation action: route')
+        route_command = routes[-1]
     actions = ["dev_map -force_to_run", placements[-1], route_command, "route_optimize"]
     for index, action in enumerate(actions):
         evidence = placement if index < 2 else impl
