@@ -47,7 +47,10 @@ SYS AXI-Lite 控制在 `0x10070000`，UART/MMIO 仍经 60 MHz 外设 CDC；SDA �
 独立视频双宽完整 1080p 仿真、真实 UART/原视频驱动两轮 A/B 扫描已通过；
 完整 416 模型的 83 Conv/266 节点通过 NPU 部件仿真，电脑执行 C 图，耗时 33 分 28.7 秒。
 真实 RV32/RV64 Core 驱动各通过 3 个小卷积/171 输出/5 个量化值。
-320 完整应用联合长测已启动，尚无 PASS；没有完整 RV32 整网或板上 HDMI 结果。
+320 完整应用联合仿真已通过真实 UART 收图、83 Conv、框/画框图回传和 1080p 扫描后回 READY，
+共核对 5,775,300 个 INT32 输出，11,638.68 秒、峰值 RSS 78,476 KiB，全部错误计数为 0。
+C 在电脑执行，没有 RISC-V Core、CPU Cache 或 Flash，DDR 为行为模型；没有完整 RV32 整网或板上 HDMI 结果。
+冻结来源 `6008bc5`、命令与哈希见 `logs/demo-software-20261029/yolo-full/app320-full-rtl-v2/result.json`。
 证据与入口见[项目介绍](../PROJECT_INTRO.md#环境与命令)。预载模型 CRC 检查不代表 Flash 冷启动已接通，
 模型 UART 命令已有软件测试，尚无板上约 5 MB 模型全传验收。
 

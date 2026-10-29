@@ -13,6 +13,8 @@ Windows PDS 2025.2 ADS、PG2L200H-6IFBB676。当前演示配置为：
 交互固件和新增视频/YOLO 组合尚未布线、未上板。
 系统仍用一颗 GPLL 分频，视频另用 27 MHz 输入 PPLL，DDR IP 内部时钟另计。
 完整结果、约束缺口、视频/驱动仿真证据与历史表见 [FPGA_ADAPTATION.md](FPGA_ADAPTATION.md)。
+完整 320 应用已通过电脑 C + 真实 UART/NPU/AXI/视频 RTL 联合仿真；DDR 为行为模型，
+未执行完整 RV32 整网，交互固件与显示通路仍没有布局布线或上板结果。
 
 统一入口要求 8 线程，可用 `HGB_PDS_THREADS` 覆盖；place/route 使用 normal，
 不传 PDS 2025.2 不支持的 performance 模式或旧 router-thread 选项。

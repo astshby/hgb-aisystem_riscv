@@ -64,10 +64,11 @@ READY 的 DETECT/HDMI 位由模型发布、NPU 和显示状态决定；缺模型
 | 真实 RV32/RV64 Core 执行生产驱动 | 各 3 个小卷积、171 个输出、5 个量化值通过 | `logs/demo-software-20261030/yolo-driver-rv{32,64}/receipt.json` |
 | 视频独立 RTL，RV32/64 配置 | 每宽 4 个健康完整 1080p 帧，A/B CRC、反压、旧响应排空和欠载恢复通过 | `logs/demo-software-20261029/yolo-full/video-receipt.json` |
 | 真实 UART 与原 C 应用短流程 | SELFTEST、两轮上传/回读、A/B 显示通过；CRC `a417d1cf` / `fd1074b8` | `logs/demo-software-20261029/yolo-full/app-tiny-3m/result.json` |
-| 320 模型完整应用联合运行 | 已启动，尚无 PASS | `logs/demo-software-20261029/yolo-full/app320-full-rtl-v2/` |
+| 320 模型完整应用联合运行 | 83 Conv/266 节点、3,233 块、5,775,300 个 INT32 输出逐项通过，3 框；真实 UART 收图/回图、1080p 扫描、回 READY；11,638.68 秒 | `logs/demo-software-20261029/yolo-full/app320-full-rtl-v2/result.json` |
 
 部件整网与共同 I/O 平台都由电脑执行 C，没有 RISC-V Core 或 CPU Cache；前者使用真实 NPU/AXI/CDC，
-后者增加真实 UART 引脚、系统总线、DMA 和显示。真实 Core 另已通过同源5组图算子、BN、量化、Focus/拼接/池化/上采样/SiLU/sigmoid、解码和NMS检查；复用模型的90项Core/pkg SHA一致、SoC仍为C1，不作当前整机时序或整网结果。尚无完整RV32整网。
+后者增加真实 UART 引脚、系统总线、DMA 和显示，DDR 为行为模型，没有 Flash。
+完整应用的 C 也在电脑执行；真实 Core 另已通过同源5组图算子、BN、量化、Focus/拼接/池化/上采样/SiLU/sigmoid、解码和NMS检查；复用模型的90项Core/pkg SHA一致、SoC仍为C1，不作当前整机时序或整网结果。尚无完整RV32整网。
 短流程的 3 Mbaud 是仿真参数，没有板上高波特率测试。I/O 平台仿真缩短 I2C reset/settle 等待到 600 周期，
 400 kHz SDA 传输和 49 项寄存器写入保持。视频 PLL 的厂商模型实测 148.499986 MHz；板上 HDMI 尚未测试。
 
@@ -85,9 +86,19 @@ make yolo-demo-cosim-full YOLO_IO_LIBRARY=<已生成的.so> YOLO_MODEL=<320模�
 ```
 
 联合入口执行同一 C 服务和真实 I/O RTL；完整网络为数小时长测，普通短测不会隐式启动它。
-已启动的 320 联合运行使用 192×144 dog RGB，经真实 UART 收入，再由同一 C 预处理到 320；
+已通过的 320 联合运行使用 192×144 dog RGB，经真实 UART 收入，再由同一 C 预处理到 320；
 `app320-full-rtl-v2/app-progress.jsonl` 记录逐层/分块进度，`app-packets.jsonl` 记录串口包。
-首轮观察器漏读8字节trace签名，在第1卷积开始前退出，FAIL现场保留；快速83层trace与坏magic测试通过后，v2重新上传并进入真实NPU计算。结束后才生成结果文件，当前没有这次完整应用的PASS。
+首轮观察器漏读8字节trace签名，在第1卷积开始前退出，FAIL现场保留；修正后的 v2 完成整网与画框图回传。
+v2 处理 172 个真实 UART 请求，累计 RX/TX 为 88,060/88,720 B；第二次 DETECT 复用已缓存结果，没有再次执行 83 层。
+显示完成 596 个 1920×1080 帧，最终返回 READY、内存池 live=0；AXI、串口帧、显示欠载、视频总线和 I2C 错误均为 0。
+8,208,000 个量化输入字节、全部 INT32 输出和 3 框与同源参考精确一致；画框 RGB CRC32 为 `d47715d8`，
+完整显示帧 CRC32 为 `4f3b0e78`。`finalreceipt.json`、`sourceidentity.json` 和 `seal.json` 同目录保存，
+20 份应用文件与 58 份 RTL/fixture 哈希逐项一致；最终收据 SHA256 为
+`fee1f2a08395b2fde9ce563a1693cb45bd03c3f9e486727686753d34eda1a8cc`。
+耗时 11,638.68 秒、峰值 RSS 78,476 KiB。构建记录基于 `6008bc5` 并包含当时未提交的联合入口，
+这些源文件已由 `a91c795` 保存且逐项 SHA256 相同；结果记录 C 源码、模型与库 SHA256。
+I/O 库为 `e229c17576903fe0e7f063f5ef30e5eb826197a6ec87805e10e7a6a0e23ed450`，模型为
+`50fb5df506e4763dc07e65a394396df1215487150cafd66a219282751d48ee71`。
 每次指定新输出/日志目录，收据保存命令、源代码、ELF/HEX 或库与资产哈希。
 
 Cache 容量实验共用上述软件入口。`coremark-platforms`、独立 RT 测试和 PDS 暂存均支持

@@ -113,7 +113,11 @@ CPU 决定层次和分块；当前完整驱动逐寄存器装载权重/激活，
 完整 416 模型的 83 Conv/266 节点已由电脑 C + 真实 AXI/CDC/NPU RTL 执行，耗时 33 分 28.7 秒；
 共同 I/O 平台进一步接真实 UART、DMA、DDR 行为模型和视频，两轮上传/回读及 A/B 完整帧 CRC 通过。
 共同平台没有 RISC-V Core 或 CPU Cache，Core 90 MHz 只作为软件发现元数据，不产生 CoreMark 或 CPU 性能成绩。
-320 模型完整应用联合长测已启动，尚无 PASS；没有完整 RV32 整网或板上 HDMI 结果。
+320 模型完整应用联合仿真也已通过：真实 UART 收入 192×144 RGB，C 预处理到 320，
+真实 NPU 执行 83 Conv，逐项核对 5,775,300 个 INT32 输出，返回 3 框和画框图，再完成 1080p 扫描并回 READY。
+耗时 11,638.68 秒、峰值 RSS 78,476 KiB；第二次 DETECT 使用缓存结果，完整网络实际执行一次。
+该运行没有 Core、CPU Cache 或 Flash，DDR 使用行为模型；没有完整 RV32 整网或板上 HDMI 结果。
+冻结来源 `6008bc5` 与各文件哈希见 `logs/demo-software-20261029/yolo-full/app320-full-rtl-v2/result.json`。
 
 | 演示 DDR 分区 | 容量/格式 | 所有权 |
 |---|---|---|

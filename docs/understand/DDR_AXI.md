@@ -96,7 +96,9 @@ DDR 原生目标测试；DDR 测试包含 11 个检查，覆盖时钟停止时�
 长 R/B 反压、非法 burst、早/晚 LAST 和错误后复用，历史日志在 `logs/p2/unified-bus/final/`。
 
 实际 RV32/RV64 Core 已执行生产卷积驱动的 3 个小卷积、171 输出和 5 个量化值；
-416 全图 83 Conv 部件结果由电脑 C + 真实 NPU/AXI/CDC 取得；320 完整应用联合长测已启动，尚无 PASS。
+416 全图 83 Conv 部件结果由电脑 C + 真实 NPU/AXI/CDC 取得；320 完整应用也已通过真实 UART 收图、
+83 Conv、框/画框图回传和完整 1080p 扫描，最终回 READY。后者逐项核对 5,775,300 个 INT32 输出，
+AXI、UART 帧、显示欠载、视频总线和 I2C 错误均为 0。C 在电脑执行，没有 Core、CPU Cache 或 Flash；DDR 为共享行为模型。
 入口与收据见[项目介绍](../PROJECT_INTRO.md#环境与命令)。原完整 SoC 的 DMA/Cache 软件测试，
 Flash→DDR→执行、4 KiB 拆分、非对齐尾部、成功前缀与故障地址回归继续保留。
 

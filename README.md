@@ -13,7 +13,7 @@ CoreMark 与 RT-Thread 的正式演示在无 NPU 的 main 分支单独验证，R
 | RV32/RV64 真实 Core 驱动 | 各通过 3 个小卷积、171 个输出、5 个量化值；未执行完整网络 |
 | 1920×1080 视频 RTL | 双宽通过完整帧 CRC、A/B 切换、AXI 反压、欠载恢复及 49 项 MS7210 初始化 |
 | 真实 UART + 原 C 应用短流程 | 两轮上传/回读、SELFTEST、原视频驱动与 A/B 全帧 CRC 通过；CPU 在电脑执行 |
-| 320 模型完整应用联合仿真 | 已启动，尚无 PASS；不计为完整 RV32 整网通过 |
+| 320 模型完整应用联合仿真 | 3 小时 13 分 58.68 秒通过；真实 UART 收图、83 Conv、框/画框图回传、1080p 扫描后回 READY；电脑执行 C |
 
 YOLO C7 目标 Core/SYS/DDR-user/外设/NPU 为 **90/100/125/60/100 MHz**，视频独立为 **148.5 MHz**。
 系统仍用一颗 GPLL 分频，视频另用 27 MHz 输入的 PPLL，DDR 保留控制器自己的时钟结构。
@@ -41,6 +41,10 @@ RV64 完整固件使用纯 RV64IM 软浮点库，源码根通过 `RISCV_GNU_SOUR
 PC 工具为 `scripts/yolo/host.py --port COM5 status|model|upload|detect|read|selftest`；
 模型、图块和整帧均核对 CRC32。预载模型经过 CRC/图结构检查，不代表 Flash 启动已接通；
 模型 UART 命令已有软件测试，尚无板上约 5 MB 模型全传结果。
+完整应用使用 192×144 RGB 输入，C 预处理到 320；83 层共 5,775,300 个 INT32 输出逐项核对，返回 3 框。
+执行时没有 RISC-V Core、CPU Cache 或 Flash，DDR 使用共享行为模型；完整 RV32 整网仍未运行。
+本次冻结来源为 `6008bc5`，结果和源码/库哈希见
+`logs/demo-software-20261029/yolo-full/app320-full-rtl-v2/result.json`。
 
 历史裸机数据：M0 O3 64 次为 3.590617/3.570731 CoreMark/MHz，真实 TCM 为
 3.095736/3.081770；短仿真没有达到正式十秒要求。分层结果、历史综合和布线分别记录在
