@@ -66,7 +66,7 @@ def main():
         cases.extend([
             ("tb_d1_stage", root / "tb/unit/tb_d1_stage.sv", []),
             ("tb_branch_unit", root / "tb/unit/tb_branch_unit.sv", []),
-            ("tb_pc_target_miter", root / "tb/unit/tb_pc_target_miter.sv",
+            ("tb_pc_target_miter", root / "tb/unit/scoreboard/tb_pc_target_miter.sv",
              [refs / "d1_stage_reference.sv", refs / "branch_unit_reference.sv"]),
         ])
     if args.group in ("issue", "all"):
