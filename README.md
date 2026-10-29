@@ -19,7 +19,16 @@ SOFTWARE_OPT=O3 make score COREMARK_PLATFORM_OUT=build/score-O3 \
   COREMARK_PLATFORM_ARGS='--clocks main60 --iterations 64 --icache-bytes 16384 --dcache-bytes 8192 --dcache-bank-xor-mask 2'
 make rt-thread-fetch
 make rt-thread XLEN=32
+make coremark-board XLEN=32
+make coremark-board-test
+make rt-thread-demo XLEN=32
+make rt-thread-demo-test
 ```
+
+新裸机UART固件回车/P运行performance、V运行validation，返回64位周期/CRC后再次READY；
+电脑用`scripts/coremark/host.py`接收计算。独立RT终端支持STATUS/PING/ECHO/DEMO，
+不参加裸机CoreMark。两者双宽构建与软件测试通过，真实串口RTL/板级运行尚未完成。
+当前C6布局布线仍使用冻结的自动运行CoreMark固件，没有切换为新交互镜像。
 
 软件默认 `SOFTWARE_OPT=O3`，可选 O2/Ofast。公共配置见
 `scripts/hardware_profile.json`，当前应用范围见 `scripts/branch_profile.json`。

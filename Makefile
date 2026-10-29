@@ -27,8 +27,10 @@ help:
 	@printf '%s\n' 'make check XLEN=32|64' 'SOFTWARE_OPT=O2|O3|Ofast (default O3)'
 ifneq ($(wildcard scripts/make/coremark.mk),)
 	@printf '%s\n' 'make score (M0 + runnable CoreMark platforms)'
+	@printf '%s\n' 'make coremark-board (persistent UART firmware; RV32|64)' 'make coremark-board-test (software tests)' 'make coremark-board-uart (short RTL UART test; builds a model)'
 endif
 ifneq ($(wildcard scripts/make/rt_thread.mk),)
 	@printf '%s\n' 'make rt-thread (standalone four-domain DDR system)'
+	@printf '%s\n' 'make rt-thread-demo (independent UART firmware; requires DDR loading)' 'make rt-thread-demo-test (bounded command parser)'
 endif
 check: test scoreboard-test riscv-tests soc-test soc-riscv-tests soc-system-test soc-axi-test tcm-bram-test benchmark-smoke

@@ -14,9 +14,9 @@ PLL、板级时钟发现、UART/timer和应用仿真同步改档；仿真使用�
 
 新建工程由prepare_project/prepare_benchmark复制CDC入口并写入输入哈希；旧清单仍按旧字段核验，不回写历史输入。对已完成SYN的工程在新物理目录追加CDC约束和新入口，保留原RTL/IP/固件/SYN文件哈希，不重新compile/synthesize。原生查询必须在`open_design`的synthesize动作内执行；仅open_project返回的`::tcicmd::`延迟句柄不计绑定证据。C6的60 MHz报告周期16.6667 ns按报告小数位与真实分数周期核对，不能因显示舍入改FDC周期。
 
-当前运行`$PDS_WORK_ROOT/work/main-coremark-c6-cdc-20261029/`，31个FIFO、442同步寄存器、16244原生引脚核验通过，93条max_delay和60条max_skew按既有策略限定在第一同步级/稳定载荷，不例外同域或DDR PHY。启动前287项输入SHA通过，Windows物理/提交余量14.856/11.306 GiB；每个大阶段仍检查各≥6 GiB。当前dev_map已启动，实际线程数和最终setup/hold、Gray skew、PHY/I/O、资源与未布通见完成后的原始报告，当前没有新布线Fmax。
+当前运行`$PDS_WORK_ROOT/work/main-coremark-c6-cdc-20261029/`，31个FIFO、442同步寄存器、16244原生引脚核验通过，93条max_delay和60条max_skew按既有策略限定在第一同步级/稳定载荷，不例外同域或DDR PHY。启动前287项输入SHA通过，Windows物理/提交余量14.856/11.306 GiB；每个大阶段仍检查各≥6 GiB。23:32复查dev_map/place已完成、normal route运行中，实际布线8进程、Timing 4进程，物理/提交余量11.339/8.601 GiB；最终setup/hold、Gray skew、PHY/I/O、资源与未布通见完成后的原始报告，当前没有新布线Fmax。
 
-本次固件是冻结O3/64次TCM performance，输出`sim_console`，未装生产UART loader；不是回车触发的交互位流。真实UART/十秒计时/PC解析、独立RT演示、完整YOLO/HDMI、MiniMind文本仍须补齐。不能承诺只替换HEX即可免SYN/P&R，先核实PDS存储器初始化更新流程。
+本次固件是冻结O3/64次TCM performance，输出`sim_console`，未装生产UART loader。新独立UART CoreMark固件/PC解析与RT终端已双宽编译、软件测试通过，UART TB仅lint，尚未替换物理工程镜像。完整YOLO/HDMI、TF加载及MiniMind板级文本仍须补齐。不能承诺只替换HEX即可免SYN/P&R：本机旧RAMupdate文档将bts_modify_rtl_data限定Logos系列，尚无本器件Logos2的受验证更新流程。
 
 ## 历史停止点：TCM重构后布局布线前
 

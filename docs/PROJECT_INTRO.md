@@ -39,6 +39,16 @@ main 已吸收复核后的共享 TCM/Cache/总线/CDC/时钟基线和统一 PDS 
 本分支应用入口以 `make help` 为准。
 软件默认 O3，用 `SOFTWARE_OPT=O2|O3|Ofast` 覆盖。Ofast 本轮没有稳定额外收益，未设为默认。
 
+交互式裸机固件用`make coremark-board XLEN=32|64`构建，
+`make coremark-board-test`运行固件循环、实际vendor重复调用和PC解析测试，共21 PASS/0 SKIP。
+新端口在`software/coremark-board/`，没有改vendor或旧归一化仿真端口。
+上电READY后回车/P运行performance，V运行validation，结果/DONE后再次READY；
+短校准选择12秒目标迭代，实测至少10秒才发布formal标志。
+PC工具`scripts/coremark/host.py --port COM5 --require-formal`保存UART和JSON；
+也可`--input uart.log`离线解析，无须pyserial。计分使用独立64位roi_cycles，忽略vendor的32位Total ticks。
+四组双宽正式/短测固件编译与双宽UART TB lint通过，RTL UART及正式长测未运行，没有新分数。
+固件为TCM初始化镜像；当前PDS仍是旧自动运行sim_console固件，不能直接把新镜像当DDR loader载荷。
+
 Cache 容量实验共用上述软件入口。`coremark-platforms`、独立 RT 测试和 PDS 暂存均支持
 `--icache-bytes` / `--dcache-bytes`，未指定时各为 4096。实际实例参数、固件和时钟写入测量清单。
 批量容量测试使用 `scripts/verilator/run_cache_sweep.py`，命令见[联合优化](understand/OPTIMIZATION.md)。
@@ -86,10 +96,19 @@ DTCM 保留观测区和机器异常栈。TB 为仿真预装 DDR 镜像，板上�
 O3 双宽实际运行通过：RV32/RV64 为 2,765,395/2,774,072 TB 周期，39 次 trap，
 DDR 退休计数均超过 260 万，I$/D$ 命中和 DMA 热代码搬运均被检查。它们是功能时间，不能换算 CoreMark。
 
+独立常驻UART演示用`make rt-thread-demo XLEN=32|64`构建，默认`make rt-thread`仍为原smoke。
+终端115200 8N1发送回车/STATUS、PING、`ECHO 文本`、DEMO；
+返回时钟/调度计数、PONG、文本或周期线程推进量，再DONE/READY。
+它使用RX中断唤醒接收线程，另一周期线程独立运行，不调用CoreMark。
+双宽demo编译/热代码映像检查及7项C命令测试通过，新demo尚未RTL或上板运行。
+DDR预装和ITCM热代码DMA路径保持，Flash/TF装载未实现。
+证据在`logs/demo-software-20261029/`，软件收据保存命令、源与映像哈希；固定计时测试不计跑分。
+
 ## FPGA 边界
 
 main 的三层 CoreMark 综合关闭 NPU；YOLO 用途分支的应用工程单独打开第五域。分别测资源、域内 Fmax/WNS 和最差路径。
-本轮没有 P&R、bitstream 或板级结果；CDC/PHY/I/O 的原始报告仍需后续处理。
+无NPU C6工程已加载原生绑定CDC约束并进入normal route，尚无最终P&R、bitstream或板级结果；
+CDC/PHY/I/O的最终时序原件待本轮完成后处理。软件开发没有改动这份冻结工程。
 
 ## 本轮 TCM 与 YOLO 实验
 
