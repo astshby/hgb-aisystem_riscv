@@ -60,7 +60,7 @@ def scripts(layer, profile, fill_bytes, rtl, ras_enable=0, overrides=None):
     generated["compile.tcl"] = "\n".join([
         "# Diagnostic external-clock design. Never used to program a board.",
         "set_arch -family Logos2 -device PG2L200H -package FBB676 -speedgrade -6",
-        "set_option max_threads 1",
+        "set_option max_threads 8",
         *(f"add_design {{{name}}}" for name in rtl),
         "add_constraint {measurement.fdc}", compile_command(layer, profile, fill_bytes, ras_enable, overrides), ""])
     generated["synthesize.tcl"] = (

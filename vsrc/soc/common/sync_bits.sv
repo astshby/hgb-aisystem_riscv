@@ -6,10 +6,11 @@ module sync_bits #(
 ) (
     input logic clk, rst,
     input logic [WIDTH-1:0] async_in,
+    (* ASYNC_REG = "TRUE", PAP_ASYNC_REG = 1, syn_allow_retiming = 0 *)
     output logic [WIDTH-1:0] sync_out
 );
     // 仅同步独立电平/慢速 GPIO；不能用于跨时钟域数据总线或短脉冲握手。
-    (* ASYNC_REG = "TRUE" *) logic [WIDTH-1:0] meta_q;
+    (* ASYNC_REG = "TRUE", PAP_ASYNC_REG = 1, syn_allow_retiming = 0 *) logic [WIDTH-1:0] meta_q;
     always_ff @(posedge clk) begin
         if (rst) begin
             meta_q <= RESET_VALUE;

@@ -10,12 +10,22 @@ import os
 ROOT=Path(__file__).resolve().parents[2]
 sys.path[:0]=[str(ROOT/'scripts'),str(ROOT/'scripts/pango'),str(ROOT/'scripts/verilator')]
 from benchmark_config import CONFIG, configuration, score
+from hardware_config import hardware_configuration
 from prepare_benchmark import compile_tcm, constraints
 import run_p2_coremark as p2
 import run_unified_coremark as unified
 
 
 class UnifiedCoreMarkTest(unittest.TestCase):
+    def test_rt_and_benchmark_use_identical_bank_mapping(self):
+        for width in (32,64):
+            for mask in (0,1,2,3):
+                rt=hardware_configuration('none',width,16384,4096,mask)
+                cm=configuration('soc_ddr','target',width,16384,4096,mask)
+                self.assertEqual(rt['memory'],cm['memory'])
+                self.assertEqual(rt['macros'],cm['macros'])
+                self.assertEqual(rt['macros'].get('SOC_DCACHE_BANK_XOR_MASK',0),mask)
+
     def test_optimization_level_cannot_reuse_other_firmware(self):
         with tempfile.TemporaryDirectory() as directory:
             bundle=Path(directory)

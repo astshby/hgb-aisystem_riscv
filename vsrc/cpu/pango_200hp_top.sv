@@ -7,6 +7,8 @@ module pango_200hp_top #(
     parameter int unsigned BOARD_CLOCK_PROFILE = 0,
     parameter bit NPU_ENABLE = 0,
     parameter bit MM3_ENABLE = 0,
+    parameter int unsigned ICACHE_BYTES = 4096,
+    parameter int unsigned DCACHE_BYTES = 4096,
     parameter bit LOCAL_TCM_ENABLE = 1'b0,
     parameter bit DMA_WIDE_ENABLE = 1'b1,
     parameter bit DMA_BLOCK_ENABLE = 1'b1,
@@ -32,10 +34,15 @@ module pango_200hp_top #(
     logic soc_rst;
     wire hot_clk, sys_clk, periph_clk, npu_clk;
     logic ddr_reset_n, ddr_bridge_rst;
-    localparam int unsigned HOT_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 : 100000000;
+    // 频率发现和 UART 分频必须跟随 PLL。C8 的整数 Hz 元数据四舍五入，
+    // 硬件实际 Core 为 900 MHz /11；约束使用精确分数，不以元数据代替 PLL。
+    localparam int unsigned HOT_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :
+        (BOARD_CLOCK_PROFILE == 8 ? 81818182 :
+        ((BOARD_CLOCK_PROFILE == 5 || BOARD_CLOCK_PROFILE == 7) ? 90000000 : 100000000));
     localparam int unsigned SYS_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :
-        (BOARD_CLOCK_PROFILE == 4 ? 100000000 : 80000000);
-    localparam int unsigned PERIPH_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 : 25000000;
+        (BOARD_CLOCK_PROFILE >= 4 ? 100000000 : 80000000);
+    localparam int unsigned PERIPH_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :
+        (BOARD_CLOCK_PROFILE >= 6 ? 60000000 : 25000000);
     logic [1:0] uart_rx, uart_tx;
     logic [31:0] gpio_in [3], gpio_out [3], gpio_oe [3];
     logic ddr_req_valid, ddr_req_ready, ddr_rsp_valid, ddr_rsp_ready;
@@ -73,7 +80,7 @@ module pango_200hp_top #(
 
     GTP_INBUFDS u_refclk_inbuf (.O(ref_clk), .I(ref_clk_p), .IB(ref_clk_n));
 
-    // Profile 0 保留已记录的同钟平台；C1/C4 使用独立 GPLL，并允许 DDR 校准前启动。
+    // Profile 0 保留已记录的同钟平台；独立域档使用系统 GPLL，允许 DDR 校准前启动。
     // DDR IP 端口名 core_clk 仍表示 DDR 用户钟，勿与 Core 热域 hot_clk 混同。
     generate
         if (BOARD_CLOCK_PROFILE == 0) begin : g_common_clock
@@ -100,16 +107,17 @@ module pango_200hp_top #(
             // 与 soc_system 内部 DDR 端口同时异步置位、同域三拍释放，防止只清 FIFO 一侧。
             soc_reset_controller u_bridge_reset (
                 .clk_core(hot_clk), .clk_sys(sys_clk), .clk_ddr(core_clk), .clk_periph(periph_clk),
-                .reset_async(soc_rst), .rst_core(), .rst_sys(), .rst_ddr(ddr_bridge_rst), .rst_periph());
+                .reset_async(soc_rst), .rst_core(), .rst_sys(), .rst_ddr(ddr_bridge_rst), .rst_periph(), .rst_sys_local());
             assign reset_sync_q = '0;
         end
     endgenerate
     initial begin
         assert (!(NPU_ENABLE || MM3_ENABLE)) else $fatal(1,"accelerator unavailable in this branch");
-        assert (BOARD_CLOCK_PROFILE == 0 || BOARD_CLOCK_PROFILE == 1 || BOARD_CLOCK_PROFILE == 4)
+        assert (BOARD_CLOCK_PROFILE == 0 || BOARD_CLOCK_PROFILE == 1 ||
+                (BOARD_CLOCK_PROFILE >= 4 && BOARD_CLOCK_PROFILE <= 8))
             else $fatal(1, "unsupported board clock profile");
         assert (!(NPU_ENABLE || MM3_ENABLE) || BOARD_CLOCK_PROFILE != 0)
-            else $fatal(1, "NPU uses its dedicated 100 MHz C1/C4 output");
+            else $fatal(1, "NPU requires its dedicated system GPLL output");
 `ifndef CORE_SCOREBOARD
         assert (BOARD_CLOCK_PROFILE == 0)
             else $fatal(1, "independent domains require soc_system");
@@ -135,6 +143,7 @@ module pango_200hp_top #(
     end
     // C1/C4 的 PLL/复位 RTL 与仿真不代表板上时序验收；Flash 管脚仍待板级接入。
     soc_system #(.ITCM_INIT_FILE(ITCM_INIT_FILE),.DTCM_INIT_FILE(DTCM_INIT_FILE),
+        .ICACHE_BYTES(ICACHE_BYTES),.DCACHE_BYTES(DCACHE_BYTES),
         .SOC_PROFILE(SOC_PROFILE),.DDR_BYTES(512*1024*1024),.NPU_BYTES((NPU_ENABLE || MM3_ENABLE) ? 65536 : 0),.CLOCK_HZ(125000000),
         .CLOCK_INFO_ENABLE(BOARD_CLOCK_PROFILE != 0), .CORE_CLOCK_HZ(HOT_HZ), .SYS_CLOCK_HZ(SYS_HZ),
         .DDR_CLOCK_HZ(125000000), .PERIPH_CLOCK_HZ(PERIPH_HZ), .UART_DIVISOR((PERIPH_HZ+57600)/115200)) u_soc (

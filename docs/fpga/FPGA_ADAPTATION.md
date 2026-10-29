@@ -1,5 +1,56 @@
 # FPGA 适配与综合
 
+## 当前应用时钟与PDS入口
+
+2026-10-29，main采用C6无NPU完整系统100/100/125/60 MHz；以下C7/C8为YOLO用途分支的配置记录，
+C7 YOLO为90/100/125/60/100 MHz，C8将YOLO Core改为900/11≈81.818182 MHz。
+系统GPLL的900 MHz VCO分别使用/9、/10或/11、/9、/15、/9分频；DDR用户钟125 MHz仍由DDR IP提供。
+C8频率寄存器四舍五入为81818182 Hz，FDC用36/55的精确参考比。C1/C4/C5保留历史对照。
+PLL、板级时钟发现、UART/timer和应用仿真同步改档；仿真使用分数周期累计边沿，避免逐半拍取整漂移。
+
+当前统一入口默认`max_threads=8`，`HGB_PDS_THREADS`可覆盖；综合入口同样使用8线程。
+性能策略timing-v3固定fanout128、retiming开、资源共享关，布局LUT合并关，布线时序权重90；布局/布线均为normal。
+旧timing-v2的64/80报告继续按旧参数核验。当前授权先完成仿真和四组综合，不启动完整布局布线。
+本机`pds_shell`已接受`set_option max_threads 4`；实际各阶段线程数、峰值内存和耗时需从随后运行日志记录，
+尚无同输入1/8线程加速比。使用normal布局/布线和原有内存预检；性能策略生成器已取消本机不支持的performance模式。
+原生帮助的`route`未列旧手册的`number_of_router_thread`，新入口通过全局max_threads控制并行，不传该旧参数。
+对应选项帮助保存在`$PDS_WORK_ROOT/work/final-app60-20261029/option-check/`，仿真证据在`logs/final-app60-20261029/`。
+
+新档尚未综合或布线。此前C5的Core/NPU布线Fmax为85.7036/97.9528 MHz，不能继承为新档结果。
+完整程序仍须完成真实UART的CoreMark命令循环、独立RT-Thread演示、板端完整YOLO及HDMI、MiniMind文本交互。
+仅算子或一次性软件测试不计完整程序交付；增加视频通路后必须对最终YOLO硬件重新物理验收。
+
+## 历史停止点：TCM重构后布局布线前
+
+2026-10-29，实验分支 `integrate/yolo-tcm-boundaries` 已完成 TCM 重构后的 9 组综合、双宽仿真和 CDC 核验。
+本轮按要求停在 dev_map/place/route 前。组合 RTL 为 a7b25c2，YOLO 集成 76139dc，CDC 工具为 5b29642；正式基线未升级。
+当前分层综合数值见[项目介绍](../PROJECT_INTRO.md)，下方日期更早的表保留为历史对照。
+
+SoC+TCM 的 26 个 FIFO/358 个同步寄存器、YOLO 的 36 个 FIFO/502 个同步寄存器已核对原生引脚与时钟。
+PDS 查询使用 128 项精确引脚分组，避开延迟集合句柄及 1000 项打印截断。Gray 指针约束到第一同步级；
+载荷限定源时钟、实际 RAM/FF 数据输出和目标时钟；IRQ/DDR 就绪限定原生时钟树中的源寄存器及第一同步级。
+第二同步级和普通同域路径继续接受 setup/hold 检查，时钟定义未变，没有加入整域 false path。
+前后报告中的同域 Fmax、setup/hold、端点数一致，6/11 组功能跨域 setup 裕量为正，SDC-2040 和无匹配路径告警均为 0。
+证据为 `logs/tcm-bram-20261028/cdc-{soc-tcm,yolo}-effectiveness.json`；146 项工具测试和新增 2 项对照检查通过。
+
+准备好的原生工程在 `$PDS_WORK_ROOT/work/tcm-bram-20261028/yolo/physical-ready/`。
+保留性能策略综合数据库、配对 O3 YOLO 固件、`backend_cdc.scf`、`backend_sync.lcf`、`ready-inputs.json` 和 `READY.json`。
+`implement_ready.tcl` 每次打开工程后显式加载两份约束，再运行物理阶段；PDS CLI 的 `save_project` 仅适用于 GUI，
+此入口不依赖它保存约束。`launch-physical.ps1` 先核对文件哈希和内存，再调用上述入口。
+使用 performance 放置和布线，非 fast；单线程，约 10 分钟打印进度，结束/失败立即返回。
+映射、布局、布线、优化前分别检查物理与提交余量各至少 6 GiB。最终报告启用 max-skew 与 exception 明细。
+
+2026-10-29 00:15 的预检为物理 14.988 GiB、提交余量 8.370 GiB；下次启动时重新查询。
+待审核后，从 Windows PowerShell 执行以下入口，本轮未执行：
+
+```powershell
+& "$env:PDS_WORK_ROOT\work\tcm-bram-20261028\yolo\physical-ready\launch-physical.ps1" -PdsHome $env:PDS_HOME
+```
+
+这份工程仅含已有 128-MAC YOLO，目标 Core/SYS/DDR-user/外设/NPU 为 100/80/125/25/100 MHz。
+Core 综合为 92.9282 MHz、100 MHz 下 WNS −0.761 ns。当前没有布线 Fmax/WNS、零未布通、bitstream 或板级结果；
+物理阶段继续检查 Gray 最大偏斜、同域 setup/hold、DDR PHY 和 I/O，不能据本次 CDC 对照宣称整体时序闭合。
+
 ## 配置与入口
 
 Windows PDS 2025.2 ADS，器件 PG2L200H-6IFBB676，HMIC_S 1.10 DDR3 IP。
@@ -8,9 +59,10 @@ Windows PDS 2025.2 ADS，器件 PG2L200H-6IFBB676，HMIC_S 1.10 DDR3 IP。
 
 Core 为 ROB16/int8/mem4、RAS0、OOO0、Tournament1、forward3、MUL0/DIV1。
 C1 目标 Core/SYS/DDR-user/外设 = 100/80/125/25 MHz。
+C5 目标 Core/SYS/DDR-user/外设/NPU = 90/100/125/25/100 MHz，供 YOLO 布局布线；见下节。
 `pango_soc_pll` 为功能域生成时钟，DDR 用户时钟来自 DDR IP；选定加速器使用额外 100 MHz 输出。
 
-`prepare_project.py --core-backend scoreboard --board-clock-profile 1` 暂存无加速器板级工程；
+`prepare_project.py --core-backend scoreboard --board-clock-profile 6 --icache-bytes 16384 --dcache-bytes 8192 --dcache-bank-xor-mask 2` 暂存当前无加速器板级基线；
 加 `--npu-enable` 或 `--mm3-enable` 选择对应加速器。两标志互斥，分支未保留的设备不能选择。
 加速器专用分支从 `branch_profile.json` 读取默认设备，all 默认无设备。
 默认入口已选择 scoreboard/C1；显式 legacy 使用原共同时钟，仍可显式覆盖时钟档。
@@ -19,6 +71,9 @@ C1 目标 Core/SYS/DDR-user/外设 = 100/80/125/25 MHz。
 含 CoreMark 的分支可用 `prepare_benchmark.py` 对 `core_tcm/soc_tcm/soc_ddr` 暂存与仿真
 同配置、同 bundle 的工程；all 还支持 soc_npu。必须提供 `--bundle`、`--sim-receipt`，
 DDR 组另需 `--ip-dir`。TCM 组使用真实 TCM RTL/BRAM 初值和外部时钟端口。
+Cache 容量通过 `--icache-bytes`、`--dcache-bytes` 指定，默认各 4096 B，可选 4–64 KiB 的 2 次幂。
+容量同时写入板级参数和清单，并核对仿真 build receipt、实际顶层参数转发和编译 Tcl；
+不能只改测量标签而沿用旧硬件。比较容量时冻结同一固件、FDC、DDR IP 和综合选项。
 
 标准综合使用 ADS `synthesize -ads -selected_syn_tool_opt 2`，单线程，增加路径报告深度；
 不启用快速布局布线，本轮不执行 P&R。每个工程保留编译 Tcl、FDC、镜像、源码哈希和原始报告。
@@ -73,6 +128,196 @@ CoreMark 硬件组绑定 edc2349 公共硬件与 O3 TCM CoreMark 镜像。
 域内最差路径的完整端点/逻辑级/扇出，以及原始跨域 setup、hold 和未约束 I/O 均保存在摘要。
 负 WNS 表示对应目标未达到；跨域、DDR PHY 和 I/O 约束仍需逐端点检查，不能据域内 Fmax 宣称整体时序闭合。
 本轮未执行 P&R，布线 Fmax/WNS、未布通数和板级结果均为未测。
+
+## Cache 容量综合对照
+
+实验分支 `soc/cache-capacity-sweep`，起点 main `62e2d0f`，参数贯通 `cf25b9a`，
+两份原生清单均记录 `1d9efff`。243 份 HDL、O3 TCM CoreMark 初值、DDR IP、FDC 与 ADS 参数相同，
+仅 I$ 从 4 增至 16 KiB，D$ 保持 4 KiB。编译参数和实际顶层转发已核对。
+
+| I$/D$ KiB | Core Fmax/WNS | SYS Fmax/WNS | DDR-user Fmax/WNS | 外设 Fmax/WNS |
+|---|---:|---:|---:|---:|
+| 4/4 | 85.1064 / -1.750 | 83.8504 / +0.574 | 144.7178 / +1.090 | 87.5197 / +28.574 |
+| 16/4 | 86.8282 / -1.517 | 83.6960 / +0.552 | 150.4664 / +1.354 | 88.0747 / +28.646 |
+
+Fmax 单位 MHz，WNS 单位 ns。Core 综合估计提高 2.0231%，SYS 降低约 0.1841%，仍达到 80 MHz。
+四域估计值没有全部保持或提高；完整 DDR 系统的 Core 100 MHz 目标仍未达到。
+CoreMark 固定用 100/80/125/25 MHz 做功能仿真，不能将本表各域独立 Fmax 代入原跑分。
+
+| I$/D$ KiB | 总 LUT | 总 FF | 总 DRM36K | APM | I$ LUT/FF/分布式 RAM/DRM |
+|---|---:|---:|---:|---:|---:|
+| 4/4 | 61438 | 54342 | 36 | 4 | 594 / 659 / 42 / 2 |
+| 16/4 | 61775 | 54918 | 38 | 4 | 1430 / 1235 / 152 / 4 |
+
+总增量为 337 LUT（0.5485%）、576 FF（1.0600%）、2 DRM，latch 均为 0。
+I$ 局部 LUT 增量为 836，整 SoC 的增量较小，其他模块的映射也发生了变化。
+Core 最差路径现为 SQ `valid_q[3]` → 前递/请求选择 → `broadcast[8].valid` → IQ `packet_q[225]`，
+18 逻辑级、扇出 49，数据延迟 11.031 ns，其中估计连线 9.127 ns。
+报告的前 100 条 Core 路径均从该 SQ 有效位出发，以 IQ 为终点；原 TCM 系统写路径不再排在这组前列。
+SYS 最差为 reset release → fabric write-route FIFO 的 CE，16 级、扇出 1838。
+本轮只改 Cache 容量，未修改 SQ、TCM 或总线逻辑，频率变化包含综合映射变化。
+
+原生目录为 `$PDS_WORK_ROOT/work/cache-capacity-20261027/baseline-i4-d4` 和 `candidate-i16-d4-v2`。
+基线 Linux launcher 异常退出，Windows 子进程完成了综合；其 run.log、snr、完整网表和全部报告保留，
+恢复摘要另记完成证据及提取脚本哈希，没有补写外层成功日志。候选有正常的外层完成标记。
+候选旧目录在编译前被内存门禁拦截，失败记录保留；新目录外层余量 14.30/7.858 GiB，工具内部检查通过。
+基线/候选综合耗时 51m44s/52m23s，工具报告峰值 3406/3306 MB。
+摘要、报告哈希和输入对照在 `logs/cache-capacity-20261027/` 的 synthesis-*.json、paired-inputs-v2.json、cache-selection.json。
+原始 DDR→SYS、外设→SYS setup WNS 仍为 -6.063/-2.998 ns，SYS→DDR hold 为 -4.770 ns；
+DDR-user 同域 hold -0.006 ns、3 个端点，未指定 I/O delay 35/73。没有布局布线结果，未布通数为未测。
+
+## SYS 控制路径综合对照
+
+分支 `soc/fabric-onehot-control@0f66bf1`，同一I16/D4配置、固定O3初值、DDR IP、FDC与标准ADS选项。
+固定编号的资格与独热授权替换旋转下标宽选择链，保留入口/出口FIFO、反压锁定、AW/W所有权和同ID排序。
+双宽AXI/CDC测试及旧实现逐拍比较通过；六项短CoreMark周期完全相同。
+
+| 配置 | Core Fmax/WNS | SYS Fmax/WNS | DDR-user Fmax/WNS | 外设 Fmax/WNS | LUT/FF/DRM/APM |
+|---|---:|---:|---:|---:|---:|
+| I16/D4原路径 | 86.8282/-1.517 | 83.6960/+0.552 | 150.4664/+1.354 | 88.0747/+28.646 | 61775/54918/38/4 |
+| SYS独热授权 | 90.1307/-1.095 | 104.7449/+2.953 | 144.7387/+1.091 | 86.1104/+28.387 | 52625/54886/38/4 |
+
+Fmax为MHz，WNS为ns。LUT减少9150（14.81%）、FF减少32，DRM/APM不变、latch为0。
+模块资源表中fabric自身LUT14260→5047、FF8285→8278；同输入清单仅fabric RTL及两份来源元数据不同，固件/FDC/IP一致。
+
+SYS最差reset release→fabric `r_next_q[0][0]/CE`为12级、扇出1730，对照16级/1838。
+Core最差SQ valid→前递资格/请求选择→LQ state为17级、扇出50，数据延迟10.609ns。
+Core 100MHz仍未达到；DDR-user和外设估计值下降，但高于125/25MHz目标，不能称四域全部不降。
+DDR→SYS setup -6.064ns、外设→SYS -2.998ns，SYS→DDR hold -4.771ns、DDR同域hold -0.006ns/3端点；未约束I/O35/73。
+没有P&R，布线Fmax/WNS和未布通数量未测。
+
+原生工程 `$PDS_WORK_ROOT/work/path-tuning-20261027/sys-onehot`，摘要 `logs/path-tuning-20261027/sys-onehot-synthesis.json`。
+启动与暂存收尾曾重叠，原清单误含5个运行文件；原清单与异常保留，266项静态输入逐一校验一致后移出运行项，复核通过。
+A独立实验 `f8a72c2` 已在同一I16/D4原路径上完成标准综合；Core92.2594/-0.839、SYS84.0477/+0.602、DDR-user150.3759/+1.350、外设88.2613/+28.670（MHz/ns）。
+资源61834 LUT/54917 FF/38 DRM/4 APM：LUT比原路径增加59、FF减少1；Load Queue自身LUT1234→1249、FF仍440。
+A最差Core路径转为TCM目标r_valid→TCM RAM写使能，20级、扇出50。它改善Core估计频率，未实现提案预期的LUT下降。
+B在SYS底座的对照 `c2a71e0` 为Core88.3470/-1.319、SYS101.9680/+2.693、DDR-user150.3759/+1.350、外设87.9430/+28.629。
+53117 LUT/55041 FF/38 DRM/4 APM，比SYS增加492 LUT、155 FF；Core由90.1307降到88.3470 MHz，且每MHz跑分回退，本轮不采用。
+SYS＋A＋bank及无A控制现已完成，取舍见下节。
+
+## 路径实验的三层结果与取舍
+
+测量代码47aec08，收尾分支integrate/soc-path-selected，保留SYS独热控制和bank参数入口，不含A/B。
+默认仍I4/D4/mask0；DDR D8表项显式使用I16/D8/mask2。固定O3、原两次TCM初值、相同FDC和标准ADS选项，未运行P&R。
+
+| 无A/B配置，测量源码47aec08 | Core MHz / WNS ns | SYS MHz | DDR-user MHz | 外设 MHz | LUT / FF / DRM / APM |
+|---|---:|---:|---:|---:|---:|
+| Core+TCM | 105.0641 / +0.482 | 不适用 | 不适用 | 不适用 | 26130 / 19665 / 32 / 4 |
+| SoC+TCM | 93.6067 / -0.683 | 112.9433 | 不适用 | 98.8045 | 39908 / 39165 / 32 / 4 |
+| 完整DDR，I16/D8/mask2 | 89.3336 / -1.194 | 106.6894 | 150.4664 | 86.3185 | 52571 / 55207 / 38 / 4 |
+
+SYS是本轮主要收益；保留独热控制和可配置bank入口，A/B不进入收尾源码。D8/mask2保留显式候选，默认仍I4/D4/mask0。
+SYS单项I16/D4/mask0的Core为90.1307 MHz，D8联合为89.3336 MHz，低0.8844%；D8六项每MHz几何均值提高0.8207%。不能写成相对SYS单项两项同时提升。
+D4/mask1联合为85.4920 MHz，低于本轮起点86.8282，拒绝该映射。D8相对起点同时改善Core频率与每MHz性能，但外设Fmax下降、仍高于25 MHz目标。
+SoC+TCM的Core由旧95.0299降到93.6067 MHz，下降1.4976%，同时LUT减少6840、FF减少28。**本轮未达到所有层Core主频不退的验收条件，正式baseline不升级。**
+Core+TCM由旧103.8853提高到105.0641 MHz、LUT减少109、FF不变；该层>100 MHz，真实TCM每MHz仍>3。
+
+含A对照8a0d8f7的Core+TCM/SoC+TCM/DDR为104.0042/93.1532/87.0701 MHz，LUT26449/39979/53056。
+去掉A后三层分别少319/71/485 LUT、FF不变，Core均提高；逐文件配对只有Load Queue RTL和来源元数据不同。
+D4/mask1的联合对照为Core85.4920、SYS104.6025、DDR150.4664、外设86.9414 MHz，52013 LUT/54887 FF/38 DRM/4 APM，保留负结果。
+无A三层SYS WNS分别不适用/+3.646/+3.127 ns，外设WNS不适用/+29.879/+28.415 ns，DDR D8 WNS+1.354 ns；全部0 latch。
+
+无A Core+TCM最差ISS packet→ISS packet，21级/扇出33；SoC+TCM最差ISS packet→TCM RAM地址，20级/扇出28。
+DDR D8最差ISS packet→IQ packet，19级/扇出818；SYS最差AW decode→write-route FIFO CE，13级/扇出163。
+Core+TCM无负setup/hold，缺I/O delay3/2；SoC+TCM外设→SYS setup -2.036ns，缺I/O4/2。
+DDR D8跨域setup DDR→SYS -6.064、外设→SYS -2.998；hold SYS→DDR -4.771、DDR→PHY -1.137、DDR同域 -0.006ns/3端点；缺I/O35/73。
+布线Fmax/WNS和未布通数量未测，不能写成0；目标时钟100/80/125/25 MHz与各域独立Fmax分别呈现。
+
+原生工程 `$PDS_WORK_ROOT/work/path-tuning-20261027/{control-core-tcm,control-soc-tcm,control-sys-i16-d8-h2}`。
+摘要、命令、源/镜像/日志哈希见 `logs/path-tuning-20261027/final-summary.json`，原始报告和两种源码对照均保留。
+十组标准综合结束后再次核验静态输入全部通过；启动前物理/提交余量各至少6 GiB，未修改分页或终止无关进程。
+
+## C5 目标时钟
+
+2026-10-29 分支 `clocks/c5-yolo-90-100`，基于 `5966bbb`。首次提交 `864b344` 的目标是
+无加速器的 85/106.25 MHz；按 YOLO 布局布线需要修订为 90/100 MHz 并保留 100 MHz NPU，
+修订见下表和第二次提交。
+
+| 域 | 综合估计 MHz（YOLO 性能） | 向下取 5 | C5 目标 MHz | 相对估计余量 |
+|---|---:|---:|---:|---:|
+| Core | 92.9282 | 90 | 90 | 3.2% |
+| SYS | 113.9212 | 110 | 100 | 12.2% |
+| DDR-user | 146.0494 | 145 | 125（IP 固定） | 不适用 |
+| 外设 | 92.1574 | 90 | 25（保持原值） | 不适用 |
+| NPU | 114.8633 | 110 | 100（保持原值） | 不适用 |
+
+时钟树：125 MHz ref → PFD 25 MHz → VCO 900 MHz（`STATIC_RATIOF=9.0`）→ 整数 ODIV
+10/9/36 得到 Core 90、SYS 100、外设 25 MHz，CLKOUT3 的 /9 给出 NPU 100 MHz，占空比均 50%。
+VCO 800 MHz 的栅格只能给出 100/88.9/80/114.3 MHz，90 和 110 都不在栅格上；
+{90, 110, 25, 110} 无整数 ODIV 解。900 MHz VCO 让四个域同时落在整数分频上，SYS 取 100 MHz
+（900/9），比向下取整的 110 MHz 低一档，代价是 SYS 带宽少 9%。
+
+| 文件 | 改动 |
+|---|---|
+| `vsrc/cpu/pango_soc_pll.sv` | 新增 `CLOCK_PROFILE=5`：`VCO_RATIOF=9.0`、Core ODIV 10、SYS ODIV 9、外设 ODIV 36、NPU ODIV 9；C1/C4 参数保持不变 |
+| `vsrc/cpu/pango_200hp_top.sv` | `HOT_HZ=90 MHz`、`SYS_HZ=100 MHz`；`PERIPH_HZ` 与外设 UART 分频不变 |
+| `scripts/pango/prepare_project.py` | `BOARD_CLOCK_PROFILES[5]`、`BOARD_CLOCK_RATIOS[5]=(18,25)/(4,5)/(1,5)`、`--board-clock-profile` 接受 5、NPU 校验改为 `NPU_DIV` 参数 |
+| `scripts/pango/measurement_constraints.py` | `CLOCKS["C5"]` |
+| `tb/tools/test_pango_handoff.py` | 暂存用例扩展到 1/4/5，同步新的 Hz 公式 |
+| `scripts/hardware_profile.json` | `native_board_profiles` 增加 `yolo: 5`，`target` 仍为 1 |
+| `scripts/hardware_config.py` | 按加速器选板级档：`yolo` 取 `yolo` 项（C5），其余仍取 `target`（C1） |
+
+选择范围：只有 YOLO 应用工程暂存到 C5。`clock_periods_ps` 未改，YOLO 仿真仍按 target 的
+100/80/125/25 MHz 运行，应用验证的周期数与板级 90/100 MHz 无关；CoreMark、RT-Thread 与其余
+测量工程的板级默认仍为 C1。`tb_yolo_system` 只带缓存容量参数，时钟由 `tb_soc_system` 默认值决定，
+因此这次切换不重建仿真时钟。
+
+验证：
+
+- 生成约束核验为 `-multiply_by 18 -divide_by 25`（90 MHz）、`4/5`（100 MHz）、`1/5`（25 MHz）。
+- 用 PDS 自带 `GTP_GPLL.v` 行为模型仿真 C5（`NPU_ENABLE=1`），600 µs 窗口计数
+  Core 54000、SYS 59999、外设 15000、NPU 59999 个上升沿，`locked=1`，输出
+  `PASS pll C5 core=90.000 sys=100.000 periph=25.000 npu=100.000`。
+  SYS/NPU 少 1 个沿是窗口边界（300 µs 与 900 µs 各有一沿落在判据之外），折算频率 99.998 MHz。
+- `make test XLEN=32` 与 `XLEN=64` 各 84 PASS、2 SKIP（RAS 关闭、RV32 下的 RV64 用例）、0 FAIL；
+  `make soc-lint` 无 `%Error`；`test_pango_handoff`/`test_soc_clock_plan`/`test_measurement_constraints`
+  共 67 项通过。
+- 日志 `logs/c5-clock-20261029/{test-rv32.log,test-rv64.log,soc-lint.log}`。
+
+边界：C1/C4 参数与约束未变；本轮没有用 C5 运行综合和 P&R，90 MHz 是目标值。
+YOLO 标准策略（Core 93.1532、SYS 101.8537、NPU 107.9680 MHz）也满足 C5 的 SYS 与 NPU 目标。
+波形与板上测量均未做。
+
+实现阶段的调用方式：`pds_shell -work_dir <工程> -file <tcl>`，工程由 `HGB_PDS_PROJECT` 打开。
+2026-10-29 实测，多传 `-project_name` 会新建空工程并覆盖已有 `.pds`（147 KB 变 19 KB），
+随后 `dev_map` 报 `Flow-0001: There are no design files`。实现脚本因此只传 `-work_dir` 与 `-file`。
+
+PDS 2025.2 的 `place -mode` 与 `route -route_mode` 只接受 `fast`/`normal`；`performance` 会报
+`Flow-0119`。`$PDS_WORK_ROOT/work/tcm-bram-20261028/yolo/physical-ready/strategy.json` 里的
+`place -mode performance ... -refineplacement_cluster`、`route ... -number_of_router_thread`
+都不是该版本的合法选项，那份“性能策略”没有执行过。实际可用的时序优先选项是
+`place -optimize_gp_recovery / -logic_optimize_lut6d FALSE` 与
+`route -slack_weight / -optimize_routing_recovery`；`place -dc_duplication` 只接受
+`Global Disable`（默认已启用复制，该选项仅用于全局关闭），`-logic_optimize_lut_cascade`
+本器件不支持（`Flow-0182`）。
+
+### C5 首次布线实测（2026-10-29）
+
+工程 `$PDS_WORK_ROOT/work/clocks-c5-yolo-perf2-20261029/yolo`，C5 目标
+90/100/125/25/100 MHz，性能策略综合后执行 `place -mode normal -optimize_gp_recovery TRUE
+-logic_optimize_lut6d FALSE`、`route -route_mode normal -slack_weight 80
+-optimize_routing_recovery TRUE`、`route_optimize`，25 min 41 s 完成，布线收敛，未布通网络 0。
+
+| 域 | 布线 Fmax | 目标 | Slack | 同域失败端点 |
+|---|---:|---:|---:|---:|
+| clk_core | 80.5794 | 90 | −1.299 | 6353 / 122429 |
+| clk_sys | 93.1966 | 100 | −0.730 | 未列 |
+| clk_npu | 91.4829 | 100 | −0.931 | 未列 |
+| ddrphy_sysclk | 109.6011 | 125 | −1.124 | 1280 / 30478 |
+| clk_periph | 55.6855 | 25 | +22.042 | 0 |
+
+资源占用：CLMA 20256/30075（68%）、CLMS 6360/9875（65%）、DRM 165/415（40%）、
+APM 43/370（12%）、GPLL 3/10。检查项只报 1 个 virtual_clock，没有缺失 I/O 约束。
+
+跨域（本工程未加载 CDC 例外，按同步检查判负）：外设→core −2.674、sys→DDR −2.485、
+DDR→sys −2.178、core→sys −2.079、sys→core −2.053、core→外设 −1.383。
+
+Core 最差路径仍是 IQ 写口：TCM bank CLKA → 整数 IQ `packet_q`（8 级、扇出 34、
+逻辑 2.874 / 布线 8.724），`u_memory/tag_q` → IQ `packet_q`（7 级、扇出 60、布线 85.9%）。
+
+结论：C5 的 90 MHz 布线后不成立，Core 实际约 80.6 MHz；85 MHz 同样不成立。
+要在布线上闭合，Core 目标需降到 80 MHz 或更低，SYS/NPU 需降到 90 MHz 或更低。
+DDR 域在 125 MHz 下 −1.124 ns 与 C5 无关，需单独处理。
 
 ## 结果解释
 

@@ -40,7 +40,8 @@ module tb_scoreboard_request_cancel;
         tagged_request_queue u_queue (
             .clk, .rst, .in_valid(mem_req_valid[p] && request_accept_enable[p]), .in_ready(queue_input_ready[p]),
             .in_request(mem_request[p]), .out_valid(external_valid[p]),
-            .out_ready(external_ready[p]), .out_request(external_request[p])
+            .out_ready(external_ready[p]), .out_request(external_request[p]),
+            .in_metadata('0), .out_metadata()
         );
     end
     function automatic retire_id_t tag(input int slot, generation = 1);

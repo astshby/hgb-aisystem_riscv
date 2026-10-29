@@ -70,10 +70,39 @@
       "ddr": 8000,
       "periph": 40000,
       "npu": 8000
+    },
+    "main60": {
+      "core": 10000,
+      "sys": 10000,
+      "ddr": 8000,
+      "periph": 16666.666666666668
+    },
+    "yolo60": {
+      "core": 11111.111111111111,
+      "sys": 10000,
+      "ddr": 8000,
+      "periph": 16666.666666666668,
+      "npu": 10000
+    },
+    "yolo60_core81": {
+      "core": 12222.222222222223,
+      "sys": 10000,
+      "ddr": 8000,
+      "periph": 16666.666666666668,
+      "npu": 10000
     }
   },
   "native_board_profiles": {
     "target": 1,
-    "sys100": 4
+    "sys100": 4,
+    "yolo": 5,
+    "main60": 6,
+    "yolo60": 7,
+    "yolo60_core81": 8
+  },
+  "application_clocks": {
+    "none": "main60",
+    "yolo": "yolo60",
+    "minimind": "target"
   }
 }

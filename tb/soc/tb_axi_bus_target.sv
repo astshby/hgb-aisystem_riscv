@@ -108,7 +108,7 @@ module tb_axi_bus_target #(
             @(negedge clk); axi_req.aw_valid = 0;
         end
         for (int beat = 0; beat < beats; beat++) begin
-            strobe = (32'hffffffff >> (32-(1 << size))) << address[4:0];
+            strobe = (32'hffffffff >> (32-(1 << size))) << ((int'(address[4:0]) + (beat << size)) % 32);
             unique case (strobe_mode)
                 1: strobe &= 32'h55aa0f00 >> (beat%4);
                 2: strobe = beat%2 == 0 ? 0 : strobe;

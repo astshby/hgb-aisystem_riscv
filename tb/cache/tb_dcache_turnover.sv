@@ -1,6 +1,6 @@
 // Module: tb_dcache_turnover
 // Description: Checks bank ownership, held responses, maintenance, and optional cached response/request turnover.
-module tb_dcache_turnover_case #(parameter bit BLOCK = 0) (output logic done);
+module tb_dcache_turnover_case #(parameter bit BLOCK = 0, parameter int CACHE_BYTES = 256) (output logic done);
     timeunit 1ns;
     timeprecision 1ps;
     import core_config_pkg::*;
@@ -36,7 +36,9 @@ module tb_dcache_turnover_case #(parameter bit BLOCK = 0) (output logic done);
     int stream_last_owner, stream_last_cycle, stream_accepts, stream_max_gap;
     bit stream_check = 0, bypass_turnover_seen = 0, bypass_pair_turnover_seen = 0;
 
-    dcache_banked #(.DDR_BYTES(8192), .CACHE_BYTES(256), .BLOCK_ENABLE(BLOCK)) dut (.*);
+    localparam int OTHER_BANK_ADDR = CACHE_BYTES/4;
+    localparam int SAME_BANK_ADDR = 32 + ((`SOC_DCACHE_BANK_XOR_MASK & 1) ? OTHER_BANK_ADDR : 0);
+    dcache_banked #(.DDR_BYTES(8192), .CACHE_BYTES(CACHE_BYTES), .BLOCK_ENABLE(BLOCK)) dut (.*);
     always #5 clk = ~clk;
 
     function automatic xlen_t ram_word(input int address);
@@ -170,8 +172,8 @@ module tb_dcache_turnover_case #(parameter bit BLOCK = 0) (output logic done);
     endtask
     task automatic warm;
         transact(0,load(0),ram_word(0));
-        transact(1,load(32),ram_word(32));
-        transact(0,load(64),ram_word(64));
+        transact(1,load(SAME_BANK_ADDR),ram_word(SAME_BANK_ADDR));
+        transact(0,load(OTHER_BANK_ADDR),ram_word(OTHER_BANK_ADDR));
     endtask
     task automatic queued_store_load(input bus_req_t item, input xlen_t data);
         request[0] = item;
@@ -223,9 +225,9 @@ module tb_dcache_turnover_case #(parameter bit BLOCK = 0) (output logic done);
         stream_accepts = 0;
         stream_max_gap = 0;
         request[0] = load(0);
-        request[1] = load(32);
+        request[1] = load(SAME_BANK_ADDR);
         expected[0] = '{rdata:ram_word(0),error:BUS_OK};
-        expected[1] = '{rdata:ram_word(32),error:BUS_OK};
+        expected[1] = '{rdata:ram_word(SAME_BANK_ADDR),error:BUS_OK};
         req_valid = 3;
         stream_check = 1;
         while (stream_accepts < 16) tick();
@@ -249,8 +251,8 @@ module tb_dcache_turnover_case #(parameter bit BLOCK = 0) (output logic done);
         req_valid = 0;
         while (!rsp_valid[0]) tick();
         before_replies = replies[1];
-        request[1] = load(64);
-        expected[1] = '{rdata:ram_word(64),error:BUS_OK};
+        request[1] = load(OTHER_BANK_ADDR);
+        expected[1] = '{rdata:ram_word(OTHER_BANK_ADDR),error:BUS_OK};
         req_valid[1] = 1;
         do tick(); while (!accepted[1]);
         req_valid[1] = 0;
@@ -272,8 +274,8 @@ module tb_dcache_turnover_case #(parameter bit BLOCK = 0) (output logic done);
         do tick(); while (!accepted[0]);
         req_valid = 0;
         while (!rsp_valid[0]) tick();
-        request[1] = load(32);
-        expected[1] = '{rdata:ram_word(32),error:BUS_OK};
+        request[1] = load(SAME_BANK_ADDR);
+        expected[1] = '{rdata:ram_word(SAME_BANK_ADDR),error:BUS_OK};
         req_valid[1] = 1;
         maint_op = CACHE_INVALIDATE;
         maint_req_valid = 1;
@@ -392,6 +394,37 @@ module tb_dcache_turnover_case #(parameter bit BLOCK = 0) (output logic done);
         groups++;
     endtask
 
+    task automatic bank_distribution;
+        int start_cycle, before_accesses, offset;
+        // 每种步长先填热两行，再测双口同时请求；输出同 bank 与跨 bank 的实际代价。
+        for (int stride = 32; stride <= 4096; stride *= 2) begin
+            transact(0,load(0),ram_word(0));
+            transact(1,load(stride),ram_word(stride));
+            start_cycle = cycles; before_accesses = accesses;
+            for (int repeat_no = 0; repeat_no < 16; repeat_no++) begin
+                request[0] = load(0); request[1] = load(stride);
+                expected[0] = '{rdata:ram_word(0),error:BUS_OK};
+                expected[1] = '{rdata:ram_word(stride),error:BUS_OK};
+                req_valid = 3;
+                do begin tick(); req_valid &= ~accepted; end while (|req_valid);
+                drain();
+            end
+            assert (accesses == before_accesses) else $fatal(1,"warm stride caused unexpected refill");
+            $display("BANK_STRIDE block=%0d capacity=%0d mask=%0d stride=%0d same_bank=%0d cycles=%0d pairs=16",
+                BLOCK,CACHE_BYTES,dut.BANK_XOR_MASK,stride,dut.bank_of(xlen_t'(0))==dut.bank_of(xlen_t'(stride)),cycles-start_cycle);
+        end
+        // 带非零行索引的部分写跨两个 bank；flush 后核对真实 RAM 地址和字节。
+        for (int n = 1; n <= 4; n++) begin
+            offset = 32*n;
+            transact(0,store(offset,xlen_t'(8'hc0+n),DBUS_BYTES'(1)),0);
+        end
+        maintain(CACHE_FLUSH,CACHE_OK);
+        for (int n = 1; n <= 4; n++) begin
+            assert (ram[32*n] == 8'(8'hc0+n)) else $fatal(1,"bank hash writeback address/byte mismatch");
+            transact(1,load(32*n),ram_word(32*n));
+        end
+    endtask
+
     task automatic cached_turnover_probe;
         bit same_edge;
         warm();
@@ -402,8 +435,8 @@ module tb_dcache_turnover_case #(parameter bit BLOCK = 0) (output logic done);
         do tick(); while (!accepted[0]);
         req_valid = 0;
         while (!rsp_valid[0]) tick();
-        request[1] = load(32);
-        expected[1] = '{rdata:ram_word(32),error:BUS_OK};
+        request[1] = load(SAME_BANK_ADDR);
+        expected[1] = '{rdata:ram_word(SAME_BANK_ADDR),error:BUS_OK};
         req_valid[1] = 1;
         repeat (4) begin
             tick();
@@ -485,16 +518,17 @@ module tb_dcache_turnover_case #(parameter bit BLOCK = 0) (output logic done);
             else $fatal(1,"turnover coverage/accounting incomplete");
         $display("PASS tb_dcache_turnover_case XLEN=%0d block=%0d groups=%0d requests=%0d responses=%0d expect_turnover=%0d",
                  XLEN,BLOCK,groups,requests[0]+requests[1],replies[0]+replies[1],expect_turnover);
+        bank_distribution();
         done = 1;
     end
 endmodule
 
-module tb_dcache_turnover;
+module tb_dcache_turnover #(parameter int CACHE_BYTES = 256);
     timeunit 1ns;
     timeprecision 1ps;
     logic [1:0] done;
     for (genvar b = 0; b < 2; b++) begin : g_mode
-        tb_dcache_turnover_case #(.BLOCK(b != 0)) u_case (.done(done[b]));
+        tb_dcache_turnover_case #(.BLOCK(b != 0), .CACHE_BYTES(CACHE_BYTES)) u_case (.done(done[b]));
     end
     initial begin
         wait (&done);

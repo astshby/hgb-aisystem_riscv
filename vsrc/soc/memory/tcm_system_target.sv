@@ -1,5 +1,5 @@
 // Module: tcm_system_target
-// Description: System AXI access to the same core-domain TCM banks through an independent fourth local port.
+// Description: System AXI access to the same core-domain TCM banks through an independent fourth local port and once-per-beat write precheck.
 module tcm_system_target (
     input logic clk, rst,
     input axi_types_pkg::axi_req_t axi_req,
@@ -18,7 +18,7 @@ module tcm_system_target (
     bus_target_e target;
     bus_error_e access_error;
     logic bank, legal;
-    axi_bus_target u_target (.clk,.rst,.axi_req,.axi_rsp,.req_valid(v),.req_ready(ready),.request(r),
+    axi_bus_target #(.REGISTER_WRITE_CHECK(1)) u_target (.clk,.rst,.axi_req,.axi_rsp,.req_valid(v),.req_ready(ready),.request(r),
         .rsp_valid(rv),.rsp_ready(rr),.response(p));
     address_decode u_decode (.request(r),.target,.error(access_error));
     assign bank = target == TARGET_DTCM;
