@@ -175,6 +175,34 @@ def verify_npu_board_clocks(root):
         raise ValueError('NPU clock or target wiring differs from the paired 100 MHz profile')
 
 
+def video_board_constraints():
+    """Pin and clock facts from the same-board HDMI reference; no I/O delay or CDC exception."""
+    return Path(__file__).with_name('mes2l676_200hp_video.fdc').read_text(encoding='utf-8')
+
+
+def verify_video_board(root, manifest):
+    if type(manifest.get('video_enable')) is not bool:
+        raise ValueError('invalid video enable metadata')
+    if not manifest['video_enable']:
+        return
+    required = ('vsrc/cpu/pango_video_pll.sv','vsrc/soc/video/yolo_video.sv','board_video.fdc')
+    if any(name not in manifest['files'] for name in required):
+        raise ValueError('video source/constraints not covered by manifest')
+    if (root/'board_video.fdc').read_text(encoding='utf-8') != video_board_constraints():
+        raise ValueError('video pin/clock constraints differ from the board reference')
+    wrapper = (root/'vsrc/cpu/pango_200hp_top.sv').read_text()
+    pll = (root/'vsrc/cpu/pango_video_pll.sv').read_text()
+    checks = ((wrapper,r'\.VIDEO_ENABLE\(VIDEO_ENABLE\)'),
+              (wrapper,r'pango_video_pll\s+u_video_pll\s*\(\.ref_clk\(video_ref_clk\),\s*\.reset_n\(board_reset_n\)'),
+              (wrapper,r'\.soc_pll_locked\(soc_pll_locked\s*&&\s*video_pll_locked\)'),
+              (wrapper,r'\.memory_req\(external_req\),\.memory_rsp\(external_rsp\)'),
+              (wrapper,r'assign\s+hdmi_sda\s*=\s*sda_drive_low\s*\?\s*1\'b0\s*:\s*1\'bz'),
+              (pll,r'\.CLKIN_FREQ\(27\.0\)'),(pll,r'\.STATIC_RATIOI\(1\)'),
+              (pll,r'\.STATIC_RATIOM\(2\)'),(pll,r'\.STATIC_RATIOF\(33\)'),(pll,r'\.STATIC_RATIO0\(12\)'))
+    if any(not re.search(pattern,text,re.S) for text,pattern in checks):
+        raise ValueError('video PLL/reset/DMA wiring differs from the board configuration')
+
+
 def staged_soc_system(root, manifest):
     """Identify the hashed scoreboard wrapper branch, without claiming elaboration."""
     wrapper = "vsrc/cpu/pango_200hp_top.sv"
@@ -194,7 +222,7 @@ def core_profile(configuration):
 def compile_command(xlen, profile_id, local_tcm, dma_wide=1,
                     cache_block=None, dma_block=None, core_issue_width=None, scoreboard=False,
                     scoreboard_config=None, soc_system=False, board_clock_profile=0, npu_enable=False, mm3_enable=False,
-                    icache_bytes=4096, dcache_bytes=4096, dcache_bank_xor_mask=0):
+                    icache_bytes=4096, dcache_bytes=4096, dcache_bank_xor_mask=0, video_enable=None):
     if soc_system and not scoreboard:
         raise ValueError("soc_system requires scoreboard")
     # schema 1--7 保持历史 Tcl；schema 8 的 AXI 系统没有这些 legacy 开关。
@@ -240,6 +268,10 @@ def compile_command(xlen, profile_id, local_tcm, dma_wide=1,
         if not soc_system or not board_clock_profile:
             raise ValueError("NPU requires independent scoreboard SoC clocks")
         board_directive += " MM3_ENABLE 1" if mm3_enable else " NPU_ENABLE 1"
+    if video_enable is not None:
+        if video_enable and (not soc_system or not board_clock_profile):
+            raise ValueError('video requires independent scoreboard SoC clocks')
+        board_directive += f' VIDEO_ENABLE {int(video_enable)}'
     return ("compile -top_module pango_200hp_top -verilog_standard SystemVerilog "
             f"-compiler_directives {{CORE_XLEN={xlen} CORE_MUL_IMPL=0 CORE_DIV_IMPL=1{issue_directive}}} "
             '-defined_parameters {ITCM_INIT_FILE "firmware/imem.hex" '
@@ -335,6 +367,10 @@ def verify_staged_manifest(root, manifest):
             if manifest.get("npu_enable") or manifest.get("mm3_enable"):
                 verify_npu_board_clocks(root)
                 expected_domains["npu"] = 100000000
+            if 'video_enable' in manifest:
+                verify_video_board(root,manifest)
+                if manifest['video_enable']:
+                    expected_domains['video'] = 148500000
             if (manifest.get("clock_profile") != BOARD_CLOCK_PROFILES[profile]["name"] or
                     manifest.get("board_clock_domains_hz") != expected_domains or
                     manifest.get("clock_relationship") != f"independent_gpll_{900 if profile >= 5 else 800}mhz_vco" or
@@ -384,7 +420,8 @@ def verify_staged_manifest(root, manifest):
                                        mm3_enable=manifest.get("mm3_enable", False),
                                        icache_bytes=manifest.get('icache_bytes', 4096),
                                        dcache_bytes=manifest.get('dcache_bytes', 4096),
-                                       dcache_bank_xor_mask=manifest.get('dcache_bank_xor_mask', 0))
+                                       dcache_bank_xor_mask=manifest.get('dcache_bank_xor_mask', 0),
+                                       video_enable=manifest.get('video_enable'))
     accepted_commands = [[expected_compile]]
     # P2 在合入 P1 前使用 schema 4。仅其已覆盖哈希的 AXI wrapper 可省略旧参数。
     if schema == 4 and staged_soc_system(root, manifest):
@@ -459,6 +496,8 @@ def main():
                         help="0=common; C1/C4/C5 historical; C6=100/100/60, C7=90/100/60, C8=(900/11)/100/60 MHz; DDR125/NPU100")
     parser.add_argument("--npu-enable", action="store_true", help="attach pinned 128-MAC NPU on dedicated 100 MHz clock")
     parser.add_argument("--mm3-enable", action="store_true", help="attach MiniMind on dedicated 100 MHz clock")
+    parser.add_argument('--video-enable',type=int,choices=(0,1),default=None,
+                        help='default enables HDMI with YOLO; explicit 0 preserves a headless accelerator candidate')
     args = parser.parse_args()
     if args.npu_enable and args.mm3_enable:
         parser.error("select one accelerator")
@@ -468,6 +507,8 @@ def main():
         args.npu_enable = branch["default_accelerator"] == "yolo"
         args.mm3_enable = branch["default_accelerator"] == "minimind"
     selected = "yolo" if args.npu_enable else "minimind" if args.mm3_enable else "none"
+    video_override = args.video_enable
+    args.video_enable = bool(args.npu_enable) if args.video_enable is None else bool(args.video_enable)
     if selected != "none" and selected not in branch["accelerators"]:
         parser.error("accelerator source is absent from this branch: " + selected)
     scoreboard = args.core_backend == "scoreboard"
@@ -479,6 +520,8 @@ def main():
         parser.error("NPU requires scoreboard C1/C4/C5")
     if args.board_clock_profile and not scoreboard:
         parser.error("C1/C4/C5 board clock profiles require --core-backend scoreboard")
+    if args.video_enable and (not scoreboard or not args.board_clock_profile):
+        parser.error('HDMI requires independent scoreboard SoC clocks')
     if args.local_tcm is None:
         args.local_tcm = int(scoreboard)
     if scoreboard and args.local_tcm != 1:
@@ -603,6 +646,12 @@ def main():
     if args.npu_enable or args.mm3_enable:
         manifest["mm3_enable" if args.mm3_enable else "npu_enable"] = True
         manifest["board_clock_domains_hz"]["npu"] = 100000000
+    if args.video_enable or video_override is not None:
+        manifest['video_enable'] = args.video_enable
+        if args.video_enable:
+            manifest['board_clock_domains_hz']['video'] = 148500000
+            manifest['video_format'] = {'width':1920,'height':1080,'refresh_hz':60,'pixel_format':'XRGB8888',
+                                        'frame_a':'0x83000000','frame_b':'0x83800000','stride_bytes':7680}
     try:
         manifest["source_commit"] = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True,
                                                             stderr=subprocess.DEVNULL).strip()
@@ -634,6 +683,9 @@ def main():
             board_clock_constraints(args.board_clock_profile, args.npu_enable or args.mm3_enable), encoding="utf-8")
         manifest["files"]["board_clocks.fdc"] = hashlib.sha256(
             (root / "board_clocks.fdc").read_bytes()).hexdigest()
+    if args.video_enable:
+        (root/'board_video.fdc').write_text(video_board_constraints(),encoding='utf-8')
+        manifest['files']['board_video.fdc'] = hashlib.sha256((root/'board_video.fdc').read_bytes()).hexdigest()
     rtl = [relative for _, relative in staged if relative.suffix in (".sv", ".v", ".vp")]
     commands = ["# Offline ADS candidate flow; no JTAG/configuration commands.",
                 "set_arch -family Logos2 -device PG2L200H -package FBB676 -speedgrade -6"]
@@ -641,13 +693,16 @@ def main():
     commands += ["add_constraint {board_ddr.fdc}"]
     if args.board_clock_profile:
         commands += ["add_constraint {board_clocks.fdc}"]
+    if args.video_enable:
+        commands += ['add_constraint {board_video.fdc}']
     commands += [compile_command(args.xlen, profile_id, args.local_tcm,
                                  dma_wide=1, cache_block=1, dma_block=1,
                                  core_issue_width=2 if scoreboard else 1, scoreboard=scoreboard,
                                  scoreboard_config=manifest if scoreboard else None,
                                  soc_system=scoreboard,
                                  board_clock_profile=args.board_clock_profile,npu_enable=args.npu_enable,mm3_enable=args.mm3_enable,
-                                 icache_bytes=args.icache_bytes,dcache_bytes=args.dcache_bytes, dcache_bank_xor_mask=args.dcache_bank_xor_mask)]
+                                 icache_bytes=args.icache_bytes,dcache_bytes=args.dcache_bytes, dcache_bank_xor_mask=args.dcache_bank_xor_mask,
+                                 video_enable=manifest.get('video_enable'))]
     (root / "compile.tcl").write_text("\n".join(commands) + "\n", encoding="utf-8")
     (root / "synthesize.tcl").write_text(SYNTHESIZE_COMMANDS, encoding="utf-8")
     shutil.copyfile(repo / "scripts/pango/implement.tcl", root / "implement.tcl")

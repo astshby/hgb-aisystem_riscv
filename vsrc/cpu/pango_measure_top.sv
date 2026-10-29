@@ -211,6 +211,7 @@ module pango_measure_top #(
             .flash_mosi(sys_observe.flash_mosi), .flash_miso(sys_drive.flash_miso),
             .ddr_req(ddr_observe), .ddr_rsp(ddr_drive.response),
             .external_req(sys_drive.external_request), .external_rsp(sys_observe.external_response),
+            .video_req(), .video_rsp('0),
             .npu_req(sys_observe.npu_request), .npu_rsp(sys_drive.npu_response),
             .commit_valid(arch.commit_valid), .commit_pc(arch.commit_pc), .commit_inst(arch.commit_inst),
             .commit_rd(arch.commit_rd), .commit_rd_we(arch.commit_rd_we), .commit_rd_data(arch.commit_rd_data),

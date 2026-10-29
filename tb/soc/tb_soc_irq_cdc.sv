@@ -32,7 +32,7 @@ module tb_soc_irq_cdc;
         .ddr_ready(1'b0), .uart_rx(2'b11), .uart_tx(),
         .gpio_in, .gpio_out(), .gpio_oe(), .flash_cs_n(), .flash_sck(),
         .flash_mosi(), .flash_miso(1'b0), .ddr_req(), .ddr_rsp('0),
-        .external_req('0), .external_rsp(), .npu_req(), .npu_rsp('0),
+        .external_req('0), .external_rsp(), .video_req(), .video_rsp('0), .npu_req(), .npu_rsp('0),
         .commit_valid(), .commit_pc(), .commit_inst(), .commit_rd(), .commit_rd_we(),
         .commit_rd_data(), .commit_exception(), .commit_trace(), .dmem_store_fire(),
         .dmem_store_addr(), .dmem_store_data(), .dmem_store_strb()

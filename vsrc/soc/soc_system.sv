@@ -6,6 +6,7 @@ module soc_system #(
     parameter int DDR_BYTES = 0,
     parameter int FLASH_BYTES = 0,
     parameter int NPU_BYTES = 0,
+    parameter bit VIDEO_ENABLE = 1'b0,
     parameter int SOC_PROFILE = soc_config_pkg::SOC_PROFILE_FULL,
     parameter bit ICACHE_ENABLE = 1,
     parameter int ICACHE_BYTES = 4096,
@@ -33,6 +34,8 @@ module soc_system #(
     input axi_types_pkg::axi_rsp_t ddr_rsp,
     input axi_types_pkg::axi_req_t external_req,
     output axi_types_pkg::axi_rsp_t external_rsp,
+    output axi_types_pkg::axil_req_t video_req,
+    input axi_types_pkg::axil_rsp_t video_rsp,
     output axi_types_pkg::axi_req_t npu_req,
     input axi_types_pkg::axi_rsp_t npu_rsp,
     output logic commit_valid,
@@ -152,7 +155,7 @@ module soc_system #(
     assign external_rsp = master_responses[3];
     assign npu_req = targets[6];
     assign target_responses[6] = npu_rsp;
-    axi_system_fabric #(.DDR_BYTES(DDR_BYTES),.FLASH_BYTES(FLASH_BYTES),.NPU_BYTES(NPU_BYTES)) u_fabric (
+    axi_system_fabric #(.DDR_BYTES(DDR_BYTES),.FLASH_BYTES(FLASH_BYTES),.NPU_BYTES(NPU_BYTES),.VIDEO_ENABLE(VIDEO_ENABLE)) u_fabric (
         .clk(clk_sys),.rst(rst_sys_local[0]),.m_req(masters),.m_rsp(master_responses),.s_req(targets),.s_rsp(target_responses));
     axi_error_target u_error (.clk(clk_sys),.rst(rst_sys_local[0]),.req(targets[0]),.rsp(target_responses[0]));
     logic rom_req_valid, rom_req_ready, rom_rsp_valid, rom_rsp_ready;
@@ -204,12 +207,22 @@ module soc_system #(
         axi_error_target u_error (.clk(clk_sys),.rst(rst_sys_local[4]),.req(targets[3]),.rsp(target_responses[3]));
     end
 
-    axil_req_t system_mmio_req, periph_mmio_req;
-    axil_rsp_t system_mmio_rsp, periph_mmio_rsp;
+    axil_req_t system_mmio_req, peripheral_control_req, periph_mmio_req;
+    axil_rsp_t system_mmio_rsp, peripheral_control_rsp, periph_mmio_rsp;
     axi_to_axil u_control_bridge (.clk(clk_sys),.rst(rst_sys_local[6]),.s_req(targets[4]),.s_rsp(target_responses[4]),
         .m_req(system_mmio_req),.m_rsp(system_mmio_rsp));
+    // 显示控制在 SYS 域独立接收；无显示配置完全旁路，保持原 MMIO 延迟。
+    if (VIDEO_ENABLE) begin : g_video_control
+        axil_video_split u_video_control (.clk(clk_sys),.rst(rst_sys_local[6]),
+            .s_req(system_mmio_req),.s_rsp(system_mmio_rsp),.video_req,.video_rsp,
+            .periph_req(peripheral_control_req),.periph_rsp(peripheral_control_rsp));
+    end else begin : g_no_video_control
+        assign peripheral_control_req = system_mmio_req;
+        assign system_mmio_rsp = peripheral_control_rsp;
+        assign video_req = '0;
+    end
     axil_clock_bridge u_periph_cdc (.s_clk(clk_sys),.s_rst(rst_sys_local[6]),.m_clk(clk_periph),.m_rst(rst_periph),
-        .s_req(system_mmio_req),.s_rsp(system_mmio_rsp),.m_req(periph_mmio_req),.m_rsp(periph_mmio_rsp));
+        .s_req(peripheral_control_req),.s_rsp(peripheral_control_rsp),.m_req(periph_mmio_req),.m_rsp(periph_mmio_rsp));
     logic dma_req_valid, dma_req_ready, dma_rsp_valid, dma_rsp_ready, dma_irq;
     bus_req_t dma_request;
     bus_rsp_t dma_response;

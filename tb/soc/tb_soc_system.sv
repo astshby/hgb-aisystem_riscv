@@ -532,7 +532,7 @@ module tb_soc_system #(
         .CLOCK_INFO_ENABLE(1),.CORE_CLOCK_HZ(frequency_hz(0)),.SYS_CLOCK_HZ(frequency_hz(1)),
         .DDR_CLOCK_HZ(DDR_BYTES!=0 ? frequency_hz(2) : 0),.PERIPH_CLOCK_HZ(frequency_hz(3)),
         .SOC_PROFILE(SOC_PROFILE),.ICACHE_ENABLE(ICACHE_ENABLE),.DCACHE_ENABLE(DCACHE_ENABLE),
-        .ICACHE_BYTES(ICACHE_BYTES),.DCACHE_BYTES(DCACHE_BYTES),.CLOCK_HZ(CLOCK_HZ)) dut(.*);
+        .ICACHE_BYTES(ICACHE_BYTES),.DCACHE_BYTES(DCACHE_BYTES),.CLOCK_HZ(CLOCK_HZ)) dut(.video_req(),.video_rsp('0),.*);
     axi_system_memory_model #(.BYTES(DDR_MODEL_BYTES == 0 ? 32 : DDR_MODEL_BYTES), .WORD_BYTES(XLEN/8)) u_ddr (.clk(clk_ddr),.rst(dut.rst_ddr),.stall(1'b0),
         .req(ddr_req),.rsp(ddr_rsp),.fault_read_addr,.fault_write_addr);
     spi_flash_model u_flash (.cs_n(flash_cs_n),.sck(flash_sck),.mosi(flash_mosi),.miso(flash_miso));

@@ -4,6 +4,7 @@ module axi_system_fabric #(
     parameter int MASTERS = 4,
     parameter int DDR_BYTES = 0,
     parameter int FLASH_BYTES = 0,
+    parameter bit VIDEO_ENABLE = 1'b0,
     parameter int NPU_BYTES = 0,
     parameter int TARGETS = 7
 ) (
@@ -64,7 +65,7 @@ module axi_system_fabric #(
         if (!a.prot[2] && a.len == 0 && a.size <= 3 &&
             (fits(a.addr, limit, MTIME_BASE, 65536) ||
              fits(a.addr, limit, IRQ_BASE, 4194304) ||
-             fits(a.addr, limit, UART0_BASE, 32'h00070000))) return 4;
+             fits(a.addr, limit, UART0_BASE, VIDEO_ENABLE ? 32'h00080000 : 32'h00070000))) return 4;
         if (!writing && !a.prot[2] && fits(a.addr, limit, FLASH_BASE, FLASH_BYTES)) return 5;
         if (!a.prot[2] && fits(a.addr, limit, NPU_SRAM_BASE, NPU_BYTES)) return 6;
         return 0;

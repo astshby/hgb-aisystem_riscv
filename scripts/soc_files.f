@@ -61,6 +61,7 @@ vsrc/soc/dma/dma_axi_master.sv
 vsrc/soc/dma/dma_command_cdc.sv
 vsrc/soc/flash/spi_flash_reader.sv
 vsrc/soc/flash/flash_axi_target.sv
+-f scripts/video_files.f
 vsrc/soc/soc_system.sv
 vsrc/soc/soc_top.sv
 -f scripts/npu_files.f
