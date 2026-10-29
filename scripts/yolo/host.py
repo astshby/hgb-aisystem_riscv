@@ -11,6 +11,7 @@ import argparse
 import dataclasses
 import hashlib
 import json
+import math
 from pathlib import Path
 import struct
 import time
@@ -22,9 +23,11 @@ CHUNK = 1024
 MAX_WIDTH, MAX_HEIGHT = 1920, 1080
 READY = 0x9000
 STATUS, BEGIN, DATA, END, DETECT, READ, SELFTEST, CANCEL = range(1, 9)
-CAP_DETECT, CAP_HDMI = 8, 16
+MODEL_BEGIN, MODEL_DATA, MODEL_END = range(9, 12)
+MAX_MODEL_BYTES = 16 * 1024 * 1024
+CAP_DETECT, CAP_HDMI, CAP_MODEL = 8, 16, 32
 ERRORS = {0: "OK", 1: "HEADER", 2: "CRC", 3: "LENGTH", 4: "STATE",
-          5: "RANGE", 6: "NOT_READY", 7: "MEMORY", 8: "OPERATOR", 9: "UNKNOWN"}
+          5: "RANGE", 6: "NOT_READY", 7: "MEMORY", 8: "OPERATOR", 9: "UNKNOWN", 10: "MODEL"}
 
 
 class ProtocolError(RuntimeError):
@@ -183,8 +186,38 @@ class Client:
         current = self.status()
         if not current.capabilities & CAP_DETECT:
             raise ProtocolError("NOT_READY: complete YOLOX model backend is not installed")
-        self.request(DETECT)
-        return self.ready()
+        payload = self.request(DETECT)
+        if len(payload) < 8:
+            raise ProtocolError("missing detection count")
+        count = struct.unpack_from("<I", payload, 4)[0]
+        if count > 32 or len(payload) != 8 + count * 24:
+            raise ProtocolError("invalid detection record length")
+        detections = []
+        for index in range(count):
+            category, score, x1, y1, x2, y2 = struct.unpack_from("<I5f", payload, 8 + index * 24)
+            if (category >= 80 or not all(math.isfinite(v) for v in (score, x1, y1, x2, y2)) or
+                    not 0 <= score <= 1 or x2 < x1 or y2 < y1):
+                raise ProtocolError("invalid detection values")
+            detections.append(dict(class_id=category, score=score, xyxy=[x1, y1, x2, y2]))
+        return dict(detections=detections, status=dataclasses.asdict(self.ready()))
+
+    def upload_model(self, model):
+        if not 0 < len(model) <= MAX_MODEL_BYTES:
+            raise ValueError("model must fit the 16 MiB reserved DDR region")
+        crc = zlib.crc32(model)
+        self.request(MODEL_BEGIN, struct.pack("<2I", len(model), crc))
+        for offset in range(0, len(model), CHUNK):
+            data = model[offset:offset + CHUNK]
+            reply = self.request(MODEL_DATA, struct.pack("<I", offset) + data)
+            if len(reply) != 8 or struct.unpack_from("<I", reply, 4)[0] != offset + len(data):
+                raise ProtocolError("unexpected model offset ACK")
+        reply = self.request(MODEL_END)
+        if len(reply) != 8 or struct.unpack_from("<I", reply, 4)[0] != crc:
+            raise ProtocolError("unexpected whole-model CRC ACK")
+        status = self.ready()
+        if not status.capabilities & CAP_DETECT:
+            raise ProtocolError("model was not published to detector")
+        return status
 
     def cancel(self):
         self.request(CANCEL)
@@ -195,7 +228,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", required=True)
     parser.add_argument("--baud", type=int, default=115200)
-    parser.add_argument("--timeout", type=float, default=5.0)
+    parser.add_argument("--timeout", type=float, default=1800.0,
+                        help="response timeout in seconds; full software-float graph execution can be slow")
     parser.add_argument("--report", type=Path)
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("status", "selftest", "detect", "cancel"):
@@ -204,6 +238,8 @@ def main():
     upload.add_argument("rgb", type=Path)
     upload.add_argument("--width", type=int, required=True)
     upload.add_argument("--height", type=int, required=True)
+    model = sub.add_parser("model")
+    model.add_argument("model", type=Path)
     read = sub.add_parser("read")
     read.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -216,14 +252,23 @@ def main():
         if args.command == "upload":
             image = args.rgb.read_bytes()
             result = client.upload(image, args.width, args.height)
+        elif args.command == "model":
+            model = args.model.read_bytes()
+            result = client.upload_model(model)
         elif args.command == "read":
             image, result = client.read_frame()
             args.output.write_bytes(image)
         else:
             result = getattr(client, args.command)()
-        report = dict(command=args.command, status=dataclasses.asdict(result),
-                      hdmi_available=bool(result.capabilities & CAP_HDMI),
-                      detector_available=bool(result.capabilities & CAP_DETECT))
+        status = result['status'] if isinstance(result, dict) else dataclasses.asdict(result)
+        report = dict(command=args.command, status=status,
+                      hdmi_available=bool(status['capabilities'] & CAP_HDMI),
+                      model_loader_available=bool(status['capabilities'] & CAP_MODEL),
+                      detector_available=bool(status['capabilities'] & CAP_DETECT))
+        if args.command == 'detect':
+            report['detections'] = result['detections']
+        if args.command == 'model':
+            report['model_sha256'] = hashlib.sha256(model).hexdigest()
         if args.command in ("upload", "read"):
             report["rgb_sha256"] = hashlib.sha256(image).hexdigest()
         text = json.dumps(report, indent=2)

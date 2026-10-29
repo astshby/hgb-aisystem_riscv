@@ -24,6 +24,11 @@ PUT = C.CFUNCTYPE(None, C.c_void_p, C.c_uint8)
 STORE = C.CFUNCTYPE(None, C.c_void_p, C.c_uint32, C.c_uint8)
 LOAD = C.CFUNCTYPE(C.c_uint8, C.c_void_p, C.c_uint32)
 ACTION = C.CFUNCTYPE(C.c_int, C.c_void_p)
+INVALIDATE = C.CFUNCTYPE(None, C.c_void_p)
+PUBLISH = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_uint32)
+DETECTOR = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_uint32, C.c_uint32,
+                      C.POINTER(C.c_uint8), C.POINTER(C.c_uint32))
+CAPABILITIES = C.CFUNCTYPE(C.c_uint32, C.c_void_p)
 NREAD = C.CFUNCTYPE(C.c_uint32, C.c_void_p, C.c_uint32)
 NWRITE = C.CFUNCTYPE(None, C.c_void_p, C.c_uint32, C.c_uint32)
 
@@ -252,7 +257,14 @@ class IO(C.Structure):
 class Demo(C.Structure):
     _fields_ = [("io", IO)] + [(name, C.c_uint32) for name in
                 ("width", "height", "bytes", "received", "expected_crc", "running_crc",
-                 "valid", "receiving", "frame_id")] + [("payload", C.c_uint8 * 1028)]
+                 "valid", "receiving", "frame_id")] + [("payload", C.c_uint8 * 1028),
+                 ("network", C.c_void_p)] + [(name, C.c_uint32) for name in
+                 ("model_receiving", "model_bytes", "model_received", "model_crc", "model_running_crc")]
+
+
+class Network(C.Structure):
+    _fields_ = [("invalidate", INVALIDATE), ("store", STORE), ("publish", PUBLISH),
+                ("ready", ACTION), ("detect", DETECTOR), ("context", C.c_void_p), ("capabilities", CAPABILITIES)]
 
 
 class FirmwareSerial:
@@ -295,6 +307,36 @@ class FirmwareSerial:
         library.ydm_init(C.byref(self.demo), self.io)
         library.ydm_ready(C.byref(self.demo))
 
+    def attach_network(self):
+        self.model = bytearray(4096)
+        self.model_valid = False
+        self.detect_calls = 0
+
+        def invalidate(_):
+            self.model_valid = False
+
+        def store(_, offset, byte):
+            assert offset < len(self.model)
+            self.model[offset] = byte
+
+        def publish(_, count):
+            self.model_valid = bytes(self.model[:4]) == b'TEST' and count > 4
+            return 0 if self.model_valid else 1
+
+        def ready(_): return int(self.model_valid)
+
+        def detect(_, width, height, output, count):
+            self.detect_calls += 1
+            data = struct.pack('<II5f', 1, 3, .75, 0, 0, width, height)
+            if len(data) > count[0]: return 1
+            C.memmove(output, data, len(data))
+            count[0] = len(data)
+            return 0
+
+        self.network = Network(INVALIDATE(invalidate), STORE(store), PUBLISH(publish),
+                               ACTION(ready), DETECTOR(detect), None)
+        self.library.ydm_set_network(C.byref(self.demo), C.byref(self.network))
+
     def write(self, data):
         self.incoming.extend(data)
         self.library.ydm_receive_one(C.byref(self.demo))
@@ -335,6 +377,72 @@ class YoloDemoTests(unittest.TestCase):
         self.assertEqual(initial.capabilities, 7)
         self.assertEqual(initial.detector_status, 6)
         self.assertEqual(self.client.status(), initial)
+
+    def test_model_upload_then_detection_and_ready(self):
+        self.serial.attach_network()
+        model = b'TEST' + bytes(i & 255 for i in range(2500))
+        status = self.client.upload_model(model)
+        self.assertTrue(status.capabilities & host.CAP_DETECT)
+        self.assertTrue(status.capabilities & host.CAP_MODEL)
+        self.assertEqual(bytes(self.serial.model[:len(model)]), model)
+        rgb, _ = self.upload(2, 2)
+        result = self.client.detect()
+        self.assertEqual(result['detections'], [dict(class_id=3, score=.75, xyxy=[0., 0., 2., 2.])])
+        self.assertEqual(result['status']['valid'], 1)
+        self.assertEqual(self.serial.detect_calls, 1)
+        self.assertEqual(self.client.read_frame()[0], rgb)
+        self.client.detect()
+        self.assertEqual(self.serial.detect_calls, 2)
+
+    def test_model_crc_failure_not_published_then_retry(self):
+        self.serial.attach_network()
+        model = b'TESTbad-crc'
+        self.client.request(host.MODEL_BEGIN, struct.pack('<2I', len(model), 1))
+        self.client.request(host.MODEL_DATA, struct.pack('<I', 0) + model)
+        with self.assertRaisesRegex(host.ProtocolError, 'CRC'):
+            self.client.request(host.MODEL_END)
+        self.assertFalse(self.client.ready().capabilities & host.CAP_DETECT)
+        self.client.upload_model(model)
+        self.assertTrue(self.client.status().capabilities & host.CAP_DETECT)
+
+    def test_model_layout_failure_and_upload_exclusion(self):
+        self.serial.attach_network()
+        with self.assertRaisesRegex(host.ProtocolError, 'MODEL'):
+            self.client.upload_model(b'wrong-layout')
+        self.assertFalse(self.client.ready().capabilities & host.CAP_DETECT)
+        self.client.request(host.MODEL_BEGIN, struct.pack('<2I', 10, 0))
+        with self.assertRaisesRegex(host.ProtocolError, 'STATE'):
+            self.upload(2, 2)
+        with self.assertRaisesRegex(host.ProtocolError, 'STATE'):
+            self.client.selftest()
+        self.assertFalse(self.client.cancel().capabilities & host.CAP_DETECT)
+        self.upload(2, 2)
+        self.client.request(host.BEGIN, struct.pack('<4I', 2, 2, 1, 0))
+        with self.assertRaisesRegex(host.ProtocolError, 'STATE'):
+            self.client.request(host.MODEL_BEGIN, struct.pack('<2I', 10, 0))
+
+    def test_model_bounds_offset_and_no_backend(self):
+        with self.assertRaisesRegex(host.ProtocolError, 'NOT_READY'):
+            self.client.upload_model(b'TESTtest')
+        self.serial.attach_network()
+        for count in (0, host.MAX_MODEL_BYTES + 1):
+            with self.assertRaisesRegex(host.ProtocolError, 'RANGE'):
+                self.client.request(host.MODEL_BEGIN, struct.pack('<2I', count, 0))
+        self.client.request(host.MODEL_BEGIN, struct.pack('<2I', 10, 0))
+        for offset, data in ((1, b'a'), (0, b'01234567890')):
+            with self.assertRaisesRegex(host.ProtocolError, 'RANGE'):
+                self.client.request(host.MODEL_DATA, struct.pack('<I', offset) + data)
+        self.assertEqual(self.serial.demo.model_received, 0)
+
+    def test_link_abort_invalidates_partial_model(self):
+        self.serial.attach_network()
+        self.client.upload_model(b'TESTprevious')
+        self.client.request(host.MODEL_BEGIN, struct.pack('<2I', 12, 0))
+        self.client.request(host.MODEL_DATA, struct.pack('<I', 0) + b'TEST')
+        self.lib.ydm_abort(C.byref(self.serial.demo))
+        self.assertFalse(self.client.status().capabilities & host.CAP_DETECT)
+        with self.assertRaisesRegex(host.ProtocolError, 'STATE'):
+            self.client.request(host.MODEL_END)
 
     def test_chunked_upload_readback(self):
         rgb, result = self.upload()

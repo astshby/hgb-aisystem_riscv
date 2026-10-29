@@ -1,6 +1,7 @@
 // Module: yolo_uart_demo
 // Description: Persistent bare-metal RGB upload/readback and existing operator-test service.
 #include "demo_protocol.h"
+#include "network_service.h"
 #include "../common/soc_clocks.h"
 #define REG(a) (*(volatile uint32_t *)(uintptr_t)(a))
 #define UART 0x10000000u
@@ -10,6 +11,7 @@
 #endif
 extern int yolo_operator_selftest(void);
 static struct ydm_demo demo;
+static struct yolo_network_service network;
 static uint32_t peripheral_hz;
 
 static uint64_t now(void)
@@ -36,7 +38,11 @@ static void put(void *context, uint8_t byte)
     REG(UART)=byte;
 }
 static void store(void *context, uint32_t offset, uint8_t byte)
-{ (void)context; *(volatile uint8_t *)(uintptr_t)(YDM_FRAME_ADDRESS+offset)=byte; }
+{
+    (void)context;
+    if (!offset) yolo_network_service_frame_changed(&network);
+    *(volatile uint8_t *)(uintptr_t)(YDM_FRAME_ADDRESS+offset)=byte;
+}
 static uint8_t load(void *context, uint32_t offset)
 { (void)context; return *(volatile uint8_t *)(uintptr_t)(YDM_FRAME_ADDRESS+offset); }
 static int flush(void *context)
@@ -76,12 +82,15 @@ int main(void)
         return 61;
     struct ydm_io io={get,put,store,load,flush,selftest,0};
     ydm_init(&demo,io);
+    yolo_network_service_init(&network);
+    // Flash/外部启动装载者可预装DDR资产；没有有效包时保留UART模型装载入口。
+    (void)yolo_network_service_try_preloaded(&network);
+    ydm_set_network(&demo,yolo_network_service_endpoint(&network));
     ydm_ready(&demo);
     for (;;) {
         if (!ydm_receive_one(&demo)) {
             /* 超时/串口错误取消半帧，下一次 BEGIN 可重新上传；不复用不完整图像。 */
-            if (demo.receiving) demo.valid=0;
-            demo.receiving=0;
+            ydm_abort(&demo);
             drain();
         }
     }

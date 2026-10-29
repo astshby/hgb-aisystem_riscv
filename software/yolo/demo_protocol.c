@@ -34,11 +34,14 @@ static void reply(struct ydm_demo *d, uint32_t type, uint32_t sequence,
 }
 static void status(struct ydm_demo *d, uint32_t type, uint32_t sequence)
 {
-    /* DETECT/HDMI 位保持 0，直到真实整图后端/显示通路接入并验证。 */
+    /* 模型完整发布后才允许整图执行；HDMI 仍由独立硬件能力决定。 */
+    int model_ready=d->network && d->network->ready(d->network->context);
     uint8_t p[44];
-    uint32_t values[]={YDM_OK,YDM_CAP_RGB|YDM_CAP_READ|YDM_CAP_SELFTEST,
+    uint32_t values[]={YDM_OK,YDM_CAP_RGB|YDM_CAP_READ|YDM_CAP_SELFTEST|
+        (d->network?YDM_CAP_MODEL:0)|(model_ready?YDM_CAP_DETECT:0)|
+        (d->network && d->network->capabilities ? d->network->capabilities(d->network->context) : 0),
         d->valid,d->width,d->height,d->bytes,d->frame_id,YDM_FRAME_ADDRESS,
-        d->valid ? d->expected_crc : 0,YDM_CHUNK_BYTES,YDM_NOT_READY};
+        d->valid ? d->expected_crc : 0,YDM_CHUNK_BYTES,model_ready?YDM_OK:YDM_NOT_READY};
     for (unsigned i=0; i<11; ++i) set32(p+4*i,values[i]);
     send(d,type,sequence,p,sizeof p);
 }
@@ -48,6 +51,17 @@ void ydm_init(struct ydm_demo *d, struct ydm_io io)
     d->width=d->height=d->bytes=d->received=d->expected_crc=0;
     d->running_crc=~0u;
     d->valid=d->receiving=d->frame_id=0;
+    d->network=0;
+    d->model_receiving=d->model_bytes=d->model_received=d->model_crc=0;
+    d->model_running_crc=~0u;
+}
+void ydm_set_network(struct ydm_demo *d,const struct ydm_network *network)
+{ d->network=network; }
+void ydm_abort(struct ydm_demo *d)
+{
+    if (d->receiving) d->valid=0;
+    if (d->model_receiving && d->network) d->network->invalidate(d->network->context);
+    d->receiving=d->model_receiving=0;
 }
 void ydm_ready(struct ydm_demo *d) { status(d,YDM_READY,0); }
 
@@ -60,6 +74,7 @@ static void dispatch(struct ydm_demo *d, uint32_t type, uint32_t seq, uint32_t n
         status(d,0x8000u|type,seq); break;
     case YDM_BEGIN: {
         if (n!=16) { reply(d,type,seq,YDM_LENGTH,16); break; }
+        if (d->model_receiving) { reply(d,type,seq,YDM_STATE,0); break; }
         uint32_t w=u32(p), h=u32(p+4), format=u32(p+8);
         if (!w || !h || w>YDM_MAX_WIDTH || h>YDM_MAX_HEIGHT || format!=YDM_RGB888) {
             reply(d,type,seq,YDM_RANGE,0); break;
@@ -91,8 +106,25 @@ static void dispatch(struct ydm_demo *d, uint32_t type, uint32_t seq, uint32_t n
         reply(d,type,seq,YDM_OK,d->expected_crc); break;
     case YDM_DETECT:
         if (n) { reply(d,type,seq,YDM_LENGTH,0); break; }
-        /* 当前 SoC NPU1 的两组卷积验证不能替代完整 YOLOX-Tiny 图与权重。 */
-        reply(d,type,seq,d->valid ? YDM_NOT_READY : YDM_STATE,0);
+        if (!d->valid || d->receiving || d->model_receiving) reply(d,type,seq,YDM_STATE,0);
+        else if (!d->network || !d->network->ready(d->network->context)) reply(d,type,seq,YDM_NOT_READY,0);
+        else {
+            uint32_t bytes=YDM_MAX_PAYLOAD-4u;
+            int error=d->network->detect(d->network->context,d->width,d->height,p+4,&bytes);
+            if (error || bytes>YDM_MAX_PAYLOAD-4u)
+                reply(d,type,seq,error?YDM_OPERATOR:YDM_LENGTH,error?(uint32_t)error:bytes);
+            else if (d->io.flush(d->io.context)) reply(d,type,seq,YDM_MEMORY,0);
+            else {
+                /* 后端可在原帧画框，读回 CRC 随本次已完成帧更新。 */
+                uint32_t crc=~0u;
+                for (uint32_t i=0;i<d->bytes;++i) {
+                    uint8_t byte=d->io.load(d->io.context,i);
+                    crc=ydm_crc_update(crc,&byte,1);
+                }
+                d->expected_crc=crc^~0u;
+                set32(p,YDM_OK); send(d,0x8000u|type,seq,p,bytes+4u);
+            }
+        }
         ydm_ready(d); break;
     case YDM_READ: {
         if (n!=8) { reply(d,type,seq,YDM_LENGTH,8); break; }
@@ -107,15 +139,52 @@ static void dispatch(struct ydm_demo *d, uint32_t type, uint32_t seq, uint32_t n
     }
     case YDM_SELFTEST: {
         if (n) { reply(d,type,seq,YDM_LENGTH,0); break; }
-        if (d->receiving) { reply(d,type,seq,YDM_STATE,0); break; }
+        if (d->receiving || d->model_receiving) { reply(d,type,seq,YDM_STATE,0); break; }
         int result=d->io.selftest(d->io.context);
         reply(d,type,seq,result ? YDM_OPERATOR : YDM_OK,(uint32_t)result);
         ydm_ready(d); break;
     }
     case YDM_CANCEL:
         if (n) { reply(d,type,seq,YDM_LENGTH,0); break; }
-        d->receiving=d->valid=0;
+        ydm_abort(d); d->valid=0;
         reply(d,type,seq,YDM_OK,0); ydm_ready(d); break;
+    case YDM_MODEL_BEGIN: {
+        if (n!=8) { reply(d,type,seq,YDM_LENGTH,8); break; }
+        if (!d->network) { reply(d,type,seq,YDM_NOT_READY,0); break; }
+        if (d->receiving || d->model_receiving) { reply(d,type,seq,YDM_STATE,0); break; }
+        uint32_t bytes=u32(p);
+        if (!bytes || bytes>YDM_MODEL_BYTES) { reply(d,type,seq,YDM_RANGE,YDM_MODEL_BYTES); break; }
+        d->network->invalidate(d->network->context);
+        d->model_bytes=bytes; d->model_crc=u32(p+4); d->model_received=0;
+        d->model_running_crc=~0u; d->model_receiving=1;
+        reply(d,type,seq,YDM_OK,bytes); break;
+    }
+    case YDM_MODEL_CHUNK: {
+        if (n<=4) { reply(d,type,seq,YDM_LENGTH,0); break; }
+        if (!d->model_receiving || !d->network) { reply(d,type,seq,YDM_STATE,0); break; }
+        uint32_t offset=u32(p),count=n-4;
+        if (offset!=d->model_received || count>d->model_bytes-d->model_received) {
+            reply(d,type,seq,YDM_RANGE,d->model_received); break;
+        }
+        for (uint32_t i=0;i<count;++i) d->network->store(d->network->context,offset+i,p[4+i]);
+        d->model_running_crc=ydm_crc_update(d->model_running_crc,p+4,count);
+        d->model_received+=count;
+        reply(d,type,seq,YDM_OK,d->model_received); break;
+    }
+    case YDM_MODEL_END:
+        if (n) { reply(d,type,seq,YDM_LENGTH,0); break; }
+        if (!d->model_receiving || !d->network || d->model_received!=d->model_bytes) {
+            reply(d,type,seq,YDM_STATE,d->model_received); break;
+        }
+        d->model_receiving=0;
+        if ((d->model_running_crc^~0u)!=d->model_crc) reply(d,type,seq,YDM_CRC,0);
+        else if (d->io.flush(d->io.context)) reply(d,type,seq,YDM_MEMORY,0);
+        else {
+            int error=d->network->publish(d->network->context,d->model_bytes);
+            if (error) reply(d,type,seq,YDM_MODEL_ERROR,(uint32_t)error);
+            else reply(d,type,seq,YDM_OK,d->model_crc);
+        }
+        ydm_ready(d); break;
     default: reply(d,type,seq,YDM_UNKNOWN,0); break;
     }
 }
