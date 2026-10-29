@@ -1,7 +1,8 @@
 // Module: tb_tcm_bram
 // Description: Independent byte memory and response ownership checking for dedicated-port TCM.
 module tb_tcm_bram #(
-    parameter bit INSTRUCTION = 1
+    parameter bit INSTRUCTION = 1,
+    parameter bit COMPARE_REFERENCE = 0
 );
     timeunit 1ns;
     timeprecision 1ps;
@@ -25,6 +26,26 @@ module tb_tcm_bram #(
     string image_path;
     always #5 clk = ~clk;
     tcm_bram #(.BYTES(BYTES), .INSTRUCTION(INSTRUCTION)) dut (.*);
+    if (COMPARE_REFERENCE) begin : g_reference
+        logic [3:0] reference_ready, reference_valid;
+        logic [63:0] reference_data [4];
+        tcm_bram_reference #(.BYTES(BYTES), .INSTRUCTION(INSTRUCTION)) reference_bram (
+            .clk, .rst, .req_valid, .req_ready(reference_ready), .request,
+            .rsp_valid(reference_valid), .rsp_ready, .rsp_data(reference_data)
+        );
+        initial begin
+            string path;
+            if (!$value$plusargs("IMAGE=%s",path)) $fatal(1, "missing reference init image");
+            reference_bram.load_image(path);
+        end
+        always @(posedge clk) if (!rst) begin
+            assert (req_ready == reference_ready && rsp_valid == reference_valid)
+                else $fatal(1, "BRAM reference handshake mismatch cycle=%0d",cycles);
+            for (int c = 0; c < 4; c++)
+                if (rsp_valid[c]) assert (rsp_data[c] == reference_data[c])
+                    else $fatal(1, "BRAM reference data mismatch cycle=%0d client=%0d",cycles,c);
+        end
+    end
 
     function automatic int unsigned next_random;
         random_q ^= random_q << 13;

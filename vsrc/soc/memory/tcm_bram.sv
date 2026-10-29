@@ -25,6 +25,7 @@ module tcm_bram #(
     logic [XLEN-1:0] a_data [2], b_data [2];
     logic [1:0] b_owner_q [2], next_q [2], selected [2];
     logic [3:0] candidates [2], grant [2], preceding [2][4];
+    logic [3:0] same_word_write [2];
     logic [1:0] rank [2][4], collision;
     logic primary_grant, auxiliary_turn_q;
     bus_types_pkg::bus_req_t auxiliary [2];
@@ -60,6 +61,10 @@ module tcm_bram #(
                 assign preceding[b][c][other] = rank[b][other] < rank[b][c];
             end
             assign grant[b][c] = candidates[b][c] && !(|(candidates[b] & preceding[b][c]));
+            // 先逐客户端比较地址，再用独热grant选一位冲突，避免宽载荷选择后串接比较器。
+            assign same_word_write[b][c] =
+                request[PRIMARY].addr[BYTE_W+1 +: INDEX_W] == request[c].addr[BYTE_W+1 +: INDEX_W] &&
+                (request[PRIMARY].write || request[c].write);
         end
         always_comb begin
             auxiliary[b] = '0;
@@ -70,9 +75,8 @@ module tcm_bram #(
             end
         end
         // 两读可并行，同字且至少一写时串行，避免依赖器件跨口read-during-write模式。
-        assign collision[b] = eligible[PRIMARY] && needed[PRIMARY][b] && (|grant[b]) &&
-            request[PRIMARY].addr[BYTE_W+1 +: INDEX_W] == auxiliary[b].addr[BYTE_W+1 +: INDEX_W] &&
-            (request[PRIMARY].write || auxiliary[b].write);
+        assign collision[b] = eligible[PRIMARY] && needed[PRIMARY][b] &&
+                              (|(grant[b] & same_word_write[b]));
         assign a_fire[b] = primary_grant && needed[PRIMARY][b];
         assign b_fire[b] = (|grant[b]) && !(primary_grant && collision[b]);
         always_ff @(posedge clk) begin

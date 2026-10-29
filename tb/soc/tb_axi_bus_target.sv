@@ -2,6 +2,7 @@
 // Description: Cycle comparison of AXI scalar addressing under burst, overlap, errors and backpressure.
 module tb_axi_bus_target #(
     parameter bit READ_ONLY = 0,
+    parameter bit REGISTER_LOCAL_ADDR = 0,
     parameter int LOCAL_BYTES = core_config_pkg::DBUS_BYTES
 );
     timeunit 1ns;
@@ -21,7 +22,7 @@ module tb_axi_bus_target #(
     int local_reads = 0, local_writes = 0, stalls = 0, overlaps = 0;
 
     always #5 clk = ~clk;
-    axi_bus_target #(.READ_ONLY(READ_ONLY), .LOCAL_BYTES(LOCAL_BYTES)) dut (.*);
+    axi_bus_target #(.READ_ONLY(READ_ONLY), .REGISTER_LOCAL_ADDR(REGISTER_LOCAL_ADDR), .LOCAL_BYTES(LOCAL_BYTES)) dut (.*);
     axi_bus_target_reference #(.READ_ONLY(READ_ONLY), .LOCAL_BYTES(LOCAL_BYTES)) reference_target (
         .clk, .rst, .axi_req, .axi_rsp(reference_rsp), .request(reference_request),
         .req_valid(reference_valid), .req_ready, .rsp_valid,

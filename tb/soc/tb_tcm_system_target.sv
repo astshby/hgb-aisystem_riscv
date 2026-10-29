@@ -1,6 +1,8 @@
 // Module: tb_tcm_system_target
 // Description: AXI TCM permissions, registered write ownership, burst routing and response backpressure.
-module tb_tcm_system_target;
+module tb_tcm_system_target #(
+    parameter bit COMPARE_REFERENCE = 0
+);
     timeunit 1ns;
     timeprecision 1ps;
     import core_config_pkg::*;
@@ -22,6 +24,42 @@ module tb_tcm_system_target;
 
     always #5 clk = ~clk;
     tcm_system_target dut (.*);
+    if (COMPARE_REFERENCE) begin : g_reference
+        axi_rsp_t reference_rsp;
+        logic [1:0] reference_valid, reference_rsp_ready;
+        bus_req_t reference_request [2];
+        tcm_system_target_reference reference_target (
+            .clk, .rst, .axi_req, .axi_rsp(reference_rsp), .req_valid(reference_valid), .req_ready,
+            .request(reference_request), .rsp_valid, .rsp_ready(reference_rsp_ready), .rsp_data
+        );
+        always @(posedge clk) if (!rst) begin
+            assert ({axi_rsp.ar_ready, axi_rsp.aw_ready, axi_rsp.w_ready, axi_rsp.r_valid, axi_rsp.b_valid} ==
+                    {reference_rsp.ar_ready, reference_rsp.aw_ready, reference_rsp.w_ready, reference_rsp.r_valid, reference_rsp.b_valid} &&
+                    req_valid == reference_valid && rsp_ready == reference_rsp_ready)
+                else $fatal(1, "TCM reference handshake mismatch cycle=%0d", cycles);
+            for (int b = 0; b < 2; b++)
+                if (req_valid[b]) begin
+                    assert ({request[b].addr, request[b].size, request[b].write, request[b].execute} ==
+                            {reference_request[b].addr, reference_request[b].size, reference_request[b].write, reference_request[b].execute})
+                        else $fatal(1, "TCM reference local address mismatch cycle=%0d bank=%0d candidate=%h baseline=%h",
+                                    cycles,b,request[b],reference_request[b]);
+                    if (request[b].write)
+                        assert ({request[b].wdata, request[b].wstrb} ==
+                                {reference_request[b].wdata, reference_request[b].wstrb})
+                            else $fatal(1, "TCM reference local write mismatch cycle=%0d bank=%0d",cycles,b);
+                end
+            if (axi_rsp.r_valid) begin
+                assert ({axi_rsp.r.id, axi_rsp.r.resp, axi_rsp.r.last} ==
+                        {reference_rsp.r.id, reference_rsp.r.resp, reference_rsp.r.last})
+                    else $fatal(1, "TCM reference R mismatch cycle=%0d", cycles);
+                // AXI错误应答的数据无效；正常读回逐字比较。
+                if (axi_rsp.r.resp == AXI_OKAY) assert (axi_rsp.r.data == reference_rsp.r.data)
+                    else $fatal(1, "TCM reference read data mismatch cycle=%0d", cycles);
+            end
+            if (axi_rsp.b_valid) assert (axi_rsp.b == reference_rsp.b)
+                else $fatal(1, "TCM reference B mismatch cycle=%0d", cycles);
+        end
+    end
     // 两块独立本地响应模型插入不同反压；不使用 DUT 的地址译码来决定许可。
     for (genvar b = 0; b < 2; b++) begin : g_response
         assign req_ready[b] = !rst && !pending_q[b] && cycles % (23+b) > 11;
