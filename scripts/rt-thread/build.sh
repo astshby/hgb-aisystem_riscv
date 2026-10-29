@@ -13,7 +13,10 @@ revision=ddf52e2cdd977f14fc04035c88672ac204aec713
 [[ -z "$(git -C "$rt" status --porcelain --untracked-files=no)" ]] || { echo 'RT-Thread dependency is modified'; exit 1; }
 prefix="${CROSS_COMPILE:-${RISCV_TOOL_ROOT:?set RISCV_TOOL_ROOT to the toolchain bin directory}/riscv64-unknown-elf-}"
 bsp=software/rt-thread
-out="${RTTHREAD_BUILD_DIR:-build/rt-thread/system-rv${xlen}-${opt}}"
+app="${RTTHREAD_APP:-smoke}"
+case "$app" in smoke|demo) ;; *) echo 'RTTHREAD_APP must be smoke or demo' >&2; exit 2;; esac
+suffix=""; [[ "$app" == smoke ]] || suffix="-demo"
+out="${RTTHREAD_BUILD_DIR:-build/rt-thread/system-rv${xlen}-${opt}${suffix}}"
 mkdir -p "$out" logs
 flags=(-march="rv${xlen}im_zicsr_zifencei" -mabi="$abi" -mcmodel=medany -mno-relax
     -std=gnu99 "-$opt" -g -ffreestanding -fno-builtin -fno-common -fno-pie
@@ -22,7 +25,8 @@ flags=(-march="rv${xlen}im_zicsr_zifencei" -mabi="$abi" -mcmodel=medany -mno-rel
     -D__RTTHREAD__ -D__RT_KERNEL_SOURCE__ -I"$bsp" -I"$rt/include"
     -I"$rt/components/drivers/include" -I"$rt/libcpu/risc-v/common")
 sources=("$bsp/bootstrap_ddr.S" "$bsp/startup.S" "$bsp/trap.S" "$bsp/board.c" "$bsp/drv_uart.c" "$bsp/drv_gpio.c"
-    "$rt/libcpu/risc-v/common/cpuport.c" "$rt/libcpu/risc-v/common/context_gcc.S" "$bsp/smoke.c" "$bsp/context_probe.S")
+    "$rt/libcpu/risc-v/common/cpuport.c" "$rt/libcpu/risc-v/common/context_gcc.S" "$bsp/$app.c" "$bsp/context_probe.S")
+[[ "$app" != demo ]] || sources+=("$bsp/demo_command.c")
 for f in clock cpu_up defunct idle ipc irq kservice mem object scheduler_comm scheduler_up thread timer; do
     sources+=("$rt/src/$f.c")
 done
@@ -54,3 +58,22 @@ done
 "${prefix}nm" -n "$out/program.elf" > "$out/program.nm"
 "${prefix}size" "$out/program.elf"
 python3 scripts/rt-thread/check_image.py "$out" "$xlen"
+python3 - "$out" "$xlen" "$opt" "$app" "$rt" "${prefix}gcc" "${sources[@]}" <<'PY'
+import hashlib,json,subprocess,sys
+from pathlib import Path
+out=Path(sys.argv[1]); width,opt,app,rt,compiler=sys.argv[2:7]
+sources=sys.argv[7:]+['software/rt-thread/board.h','software/rt-thread/rtconfig.h',
+    'software/rt-thread/link.ld','scripts/rt-thread/build.sh',
+    'software/common/soc_clocks.h','software/common/soc_capabilities.h']
+if app=='demo': sources+=['software/rt-thread/demo_command.h']
+receipt=dict(app=app,xlen=int(width),optimization=opt,coremark=False,
+    compiler=subprocess.check_output([compiler,'--version'],text=True).splitlines()[0],
+    source_branch=subprocess.check_output(['git','branch','--show-current'],text=True).strip(),
+    source_commit=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
+    rt_revision=subprocess.check_output(['git','-C',rt,'rev-parse','HEAD'],text=True).strip(),
+    source_sha256={p:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in sources},
+    image_sha256={p:hashlib.sha256((out/p).read_bytes()).hexdigest()
+                  for p in ('program.elf','imem.hex','dmem.hex','ddr.hex')},
+    loading='DDR preload required; this build does not implement Flash/TF loading')
+(out/'manifest.json').write_text(json.dumps(receipt,indent=2)+'\n')
+PY
