@@ -41,7 +41,46 @@ MiniMind 迁入同一五域系统，100 MHz 域中的算子通过独立 AXI 主�
 CPU 控制窗口为 `0x20000000`。双宽单层 38 命令与参考字节一致，
 RV32/RV64 为 4,680,438/4,678,859 TB 周期，各 59,857 次外部主口读命令。
 完整运行库每宽 4 次正常及 4 次预期错误通过，包含 CPU/加速器对照与 32 KiB DMA 并发。
-本轮未运行完整八层、多 Token 或语言质量测试。
+RTL 未运行完整八层、多 Token 或语言质量测试。
+
+## MiniMind 常驻交互软件
+
+`software/minimind3/demo/` 提供初始化一次、READY、UTF-8 输入、逐 Token 回传、DONE、
+再次 READY 的独立入口，原作者 `baremetal/main.c` 和 `c_runtime/integer_main.inc` 保持原样。
+模型与 tokenizer 只装载一次；每轮清零八层 KV、pos 和统计量，并回收本轮临时内存。
+
+原生 C 测试使用真实八层整数运行库，12 PASS / 0 SKIP，包括中文模板、重复请求、
+原作者入口输出对照、长度/UTF-8/context 错误恢复和资产 CRC 校验。
+两次短请求各输入 2 Token、生成 1 Token，pos 均为 2，完整 KV 哈希均为 3763136066；
+常驻分配 66,298,944 B，峰值 RSS 66,048 KiB。单 Token 检查没有语言质量结论。
+RV32/RV64 固件编译通过，使用真实 UART MMIO 与原加速器驱动，尚未运行这套固件的 RTL 或板级验证。
+
+设置 `MM3_DEMO_ASSETS` 为已有 `model_w8a16_int.bin`、`tokenizer.bin` 的已校验资产目录，
+设置 `RISCV_TOOL_ROOT` 为交叉编译器 bin，再执行：
+
+```bash
+: "${MM3_DEMO_ASSETS:?设置已校验资产目录}"
+export MM3_DEMO_ASSETS
+export MM3_DEMO_OUT="${MM3_DEMO_OUT:-$PWD/build/minimind-demo}"
+make minimind-demo-native
+printf 'Hi\r\nHi\r\n' | "$MM3_DEMO_OUT/minimind-interactive" \
+    --model "$MM3_DEMO_ASSETS/model_w8a16_int.bin" \
+    --tokenizer "$MM3_DEMO_ASSETS/tokenizer.bin" --raw --max-new-tokens 1
+make minimind-demo-test
+make minimind-demo-build XLEN=32
+make minimind-demo-build XLEN=64
+python3 scripts/demo/minimind_uart.py asset-header \
+    --model "$MM3_DEMO_ASSETS/model_w8a16_int.bin" \
+    --tokenizer "$MM3_DEMO_ASSETS/tokenizer.bin" \
+    --output "$MM3_DEMO_OUT/asset-header.bin"
+```
+
+板级程序要求 ITCM 固件与 DDR 数据预装，生成目录的 `board-build.json` 列出地址、长度与哈希。
+资产头在 `0x80400000`，模型在 `0x81000000`，tokenizer 在 `0x85000000`；启动时校验头及资产 CRC。
+现有 HGB1 下载器只接受 `0x80000000–0x80020000` 的 DDR 窗口，无法装载约 64 MB 模型。
+TF 驱动及大资产 UART 传输尚未实现；资产头生成不包含数据搬运。
+电脑工具 `scripts/demo/minimind_uart.py` 支持 `decode --input ... --output ...` 解析保存的回传，
+也提供 `chat --port ... --prompt ... --output ... --raw-log ...`，待板侧数据装载和固件运行通过后使用。
 
 标准综合按五种实际硬件分别测资源和域内 Fmax，不将核级最高值用作完整系统频率。
 本轮没有 P&R、bitstream 或板级结果。原生综合与内存检查位于 `$PDS_WORK_ROOT/work/four-branches-20261027/`。

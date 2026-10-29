@@ -37,5 +37,8 @@ ifneq ($(wildcard scripts/make/yolo.mk),)
 endif
 ifneq ($(wildcard scripts/make/minimind.mk),)
 	@printf '%s\n' 'make minimind (five domains, runtime + 38-command layer)'
+	@printf '%s\n' 'make minimind-demo-native (persistent native eight-layer integer software)'
+	@printf '%s\n' 'make minimind-demo-build XLEN=32|64 (UART firmware compilation only)'
+	@printf '%s\n' 'make minimind-demo-test (set MM3_DEMO_ASSETS; software tests only)'
 endif
 check: test scoreboard-test riscv-tests soc-test soc-riscv-tests soc-system-test soc-axi-test benchmark-smoke

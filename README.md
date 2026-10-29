@@ -20,7 +20,15 @@ make minimind XLEN=64
 
 CPU 经 0x20000000 配置算子；NPU 独立 AXI 主口读写共享 DDR，系统 DMA 可并行运行。
 双宽 38 命令单层与参考一致，运行库 CPU/加速器对照及 32 KiB DMA 并发通过。
-本轮尚未完成全八层、多 Token 和语言质量测试；先按软件 README 恢复锁定模型。
+RTL 尚未完成全八层、多 Token 和语言质量测试；先按软件 README 恢复锁定模型。
+
+常驻交互软件位于 `software/minimind3/demo/`，保留原作者 C 入口。
+原生整数程序完成真实八层推理、连续两轮请求及原作者输出对照，软件测试 12 PASS / 0 SKIP；
+RV32/RV64 的真实 UART 与原加速器驱动固件编译通过。每轮重置 pos/KV，结束后返回 READY。
+这部分没有运行 RTL、上板或语言质量测试。TF 驱动和大模型 UART 装载尚未实现；
+现有 HGB1 的 DDR 窗口只有 `0x80000000–0x80020000`，不能装载约 64 MB 模型。
+新资产头用于校验预装 DDR 数据，模型、tokenizer 与固件数据仍需后续装载通路。
+软件命令见[项目介绍](docs/PROJECT_INTRO.md#minimind-常驻交互软件)。
 
 说明见[项目介绍](docs/PROJECT_INTRO.md)、[系统结构](docs/understand/SOC_SYSTEM.md)、
 [FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。全部源码与可选应用集中保存在 baseline-all；
