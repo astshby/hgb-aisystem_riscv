@@ -40,6 +40,17 @@ module rename_table (
         return value;
     endfunction
 
+    // 先从寄存映射选中一个条目，再检查退休；同组 RAW 只旁路第一槽的新分配。
+    // mapped 清零仍保留原 ID，与状态表的 prune 语义相同。
+    function automatic gpr_dependency_t query_source(input gpr_addr_t rs, input logic second_lane);
+        rename_entry_t value;
+        value = prune(map_q[rs]);
+        if (second_lane && alloc_fire[0] && alloc_meta[0].gpr_write &&
+            alloc_meta[0].rd != '0 && alloc_meta[0].rd == rs)
+            value = '{mapped:1'b1, id:alloc_id[0]};
+        return '{pending:value.mapped, id:value.id};
+    endfunction
+
     always_comb begin
         free_checkpoint = '0;
         free_first = -1;
@@ -68,7 +79,21 @@ module rename_table (
         checkpoint_ready = free_count >= branch_count;
     end
 
-    // 查询和更新按程序年龄展开，同组第二条可绑定第一条刚分配的标签。
+    // 查询不经过下一状态宽数组；使用前仍保留 valid、异常、used 与 x0 门控。
+    always_comb begin
+        for (int lane = 0; lane < 2; lane++) begin
+            source[lane][0] = '0;
+            source[lane][1] = '0;
+            if (decode[lane].valid && !decode[lane].exc.valid) begin
+                if (decode[lane].uop.rs1_used && decode[lane].rs1 != '0)
+                    source[lane][0] = query_source(decode[lane].rs1, lane == 1);
+                if (decode[lane].uop.rs2_used && decode[lane].rs2 != '0)
+                    source[lane][1] = query_source(decode[lane].rs2, lane == 1);
+            end
+        end
+    end
+
+    // 映射更新按程序年龄展开；checkpoint 继续保留两槽各自写入后的视图。
     always_comb begin
         for (int regno = 0; regno < GPR_NUM; regno++) begin
             map_d[regno] = prune(map_q[regno]);
@@ -76,16 +101,6 @@ module rename_table (
             after_second[regno] = prune(map_q[regno]);
         end
         for (int lane = 0; lane < 2; lane++) begin
-            source[lane][0] = '0;
-            source[lane][1] = '0;
-            if (decode[lane].valid && !decode[lane].exc.valid) begin
-                if (decode[lane].uop.rs1_used && decode[lane].rs1 != '0)
-                    source[lane][0] = '{pending:map_d[decode[lane].rs1].mapped,
-                                        id:map_d[decode[lane].rs1].id};
-                if (decode[lane].uop.rs2_used && decode[lane].rs2 != '0)
-                    source[lane][1] = '{pending:map_d[decode[lane].rs2].mapped,
-                                        id:map_d[decode[lane].rs2].id};
-            end
             if (alloc_fire[lane] && alloc_meta[lane].gpr_write && alloc_meta[lane].rd != '0)
                 map_d[alloc_meta[lane].rd] = '{mapped:1'b1, id:alloc_id[lane]};
             for (int regno = 0; regno < GPR_NUM; regno++) begin
