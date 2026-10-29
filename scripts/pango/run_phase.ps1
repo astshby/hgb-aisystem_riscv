@@ -4,7 +4,9 @@ param(
     [Parameter(Mandatory=$true)][string]$Project,
     [Parameter(Mandatory=$true)][string]$LogDirectory,
     [Parameter(Mandatory=$true)][ValidateSet('synthesis', 'implementation')][string]$Phase,
-    [string]$PdsHome = $env:PDS_HOME
+    [string]$PdsHome = $env:PDS_HOME,
+    [ValidateSet('implement_cdc.tcl', 'implement.tcl')]
+    [string]$ImplementationScript = 'implement_cdc.tcl'
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'wsl_helpers.ps1')
@@ -25,7 +27,7 @@ if (Get-Process pds_shell -ErrorAction SilentlyContinue) { throw 'Another PDS pr
 $null = New-Item -ItemType Directory -Force -Path $LogDirectory
 $log = Join-Path $LogDirectory "$Phase-$name.log"
 if (Test-Path -LiteralPath $log) { throw 'Preserve the existing run log; use a fresh directory.' }
-$scriptName = if ($Phase -eq 'synthesis') { 'synthesize.tcl' } else { 'implement.tcl' }
+$scriptName = if ($Phase -eq 'synthesis') { 'synthesize.tcl' } else { $ImplementationScript }
 $scriptPath = Join-Path $projectRoot $scriptName
 if (-not (Test-Path -LiteralPath $scriptPath)) { throw "Missing $scriptName" }
 & (Join-Path $PSScriptRoot 'memory_gate.ps1') -LogDirectory $LogDirectory -Phase $Phase

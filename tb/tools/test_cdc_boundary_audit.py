@@ -78,6 +78,12 @@ def native_log(spec, names):
 
 
 class CdcAuditTests(unittest.TestCase):
+    def test_deferred_query_handles_are_not_native_binding_evidence(self):
+        names = {'dut/write_gray_q[0]/Q'}
+        text = native_log({}, names) + '::tcicmd::deferred_get_pins_1\n'
+        with self.assertRaisesRegex(ValueError, 'deferred'):
+            parse_native_queries(text, {}, names)
+
     def specs(self):
         for platform in ('soc_tcm', 'soc_ddr', 'soc_ddr_yolo'):
             config = configuration('soc_ddr' if platform.endswith('yolo') else platform)
@@ -161,6 +167,39 @@ endmodule
                                        'GTP_LUT2 gate (.I0(a),.Z(buffered));'), 'top', clocks, spec)
         with self.assertRaises(ValueError):
             gated.domain('u_child/q[0]/CLK')
+
+    def test_c6_fractional_period_matches_native_display_precision(self):
+        spec = specification(configuration('soc_ddr', clock='main60'))
+        vm, clocks, names, crossings = fixture(spec)
+        periph = next(row for row in clocks if row['Clock Name'] == spec['clocks']['periph'])
+        periph.update(Period='16.6667', Frequency='60.0000MHz')
+        netlist = ClockNetlist(vm, 'top', clocks, spec)
+        result, _ = audit_objects(spec, names, netlist, crossings)
+        self.assertEqual(len(result['passed_fifos']) + len(result['pruned_fifos']), len(spec['fifos']))
+        for period in ('16.6666', '16.6668', '16.6670'):
+            with self.subTest(period=period), self.assertRaisesRegex(ValueError, 'clock period differs'):
+                periph['Period'] = period
+                ClockNetlist(vm, 'top', clocks, spec)
+
+    def test_period_rounding_obeys_half_last_digit_and_reported_precision(self):
+        vm = '''module top(input clk);
+ GTP_DFF q (.CLK(clk),.D(1'b0),.Q());
+endmodule
+'''
+        clocks = [{'Clock Name': 'clk_periph', 'Period': '16.6667', 'Targets': '{ clk }'}]
+        for expected, accepted in (('16.66665', True), ('16.666749999', True),
+                                   ('16.666649999', False), ('16.66675', False)):
+            spec = dict(clocks={'periph': 'clk_periph'}, periods_ns={'periph': expected})
+            with self.subTest(expected=expected):
+                if accepted:
+                    self.assertEqual(ClockNetlist(vm, 'top', clocks, spec).domain('q/CLK')[0], 'periph')
+                else:
+                    with self.assertRaisesRegex(ValueError, 'clock period differs'):
+                        ClockNetlist(vm, 'top', clocks, spec)
+        clocks[0]['Period'] = '16.666700'
+        spec['periods_ns']['periph'] = '16.666666666666668'
+        with self.assertRaisesRegex(ValueError, 'clock period differs'):
+            ClockNetlist(vm, 'top', clocks, spec)
 
     def test_native_vm_name_collision_requires_matching_output(self):
         spec = dict(clocks={'core': 'clk_core'}, periods_ns={'core': '10'})

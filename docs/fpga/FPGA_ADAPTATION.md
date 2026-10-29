@@ -8,17 +8,15 @@ C7 YOLO为90/100/125/60/100 MHz，C8将YOLO Core改为900/11≈81.818182 MHz。
 C8频率寄存器四舍五入为81818182 Hz，FDC用36/55的精确参考比。C1/C4/C5保留历史对照。
 PLL、板级时钟发现、UART/timer和应用仿真同步改档；仿真使用分数周期累计边沿，避免逐半拍取整漂移。
 
-当前统一入口默认`max_threads=8`，`HGB_PDS_THREADS`可覆盖；综合入口同样使用8线程。
-性能策略timing-v3固定fanout128、retiming开、资源共享关，布局LUT合并关，布线时序权重90；布局/布线均为normal。
-旧timing-v2的64/80报告继续按旧参数核验。当前授权先完成仿真和四组综合，不启动完整布局布线。
-本机`pds_shell`已接受`set_option max_threads 4`；实际各阶段线程数、峰值内存和耗时需从随后运行日志记录，
-尚无同输入1/8线程加速比。使用normal布局/布线和原有内存预检；性能策略生成器已取消本机不支持的performance模式。
-原生帮助的`route`未列旧手册的`number_of_router_thread`，新入口通过全局max_threads控制并行，不传该旧参数。
-对应选项帮助保存在`$PDS_WORK_ROOT/work/final-app60-20261029/option-check/`，仿真证据在`logs/final-app60-20261029/`。
+当前统一入口默认`max_threads=8`，`HGB_PDS_THREADS`可覆盖。timing-v3综合为fanout128、retiming开、资源共享关；物理采用normal、布局LUT合并关、route时序权重90。四组综合已完成，Core复位/NPU选择组合候选因Core频率下降未升级；本轮物理复用原baseline-main的已验收SYN，源80576b9与main@e3bcf17共享Core/SoC一致。
 
-新档尚未综合或布线。此前C5的Core/NPU布线Fmax为85.7036/97.9528 MHz，不能继承为新档结果。
-完整程序仍须完成真实UART的CoreMark命令循环、独立RT-Thread演示、板端完整YOLO及HDMI、MiniMind文本交互。
-仅算子或一次性软件测试不计完整程序交付；增加视频通路后必须对最终YOLO硬件重新物理验收。
+完整多域工程的持久入口为`scripts/pango/implement_cdc.tcl`；`run_phase.ps1`的implementation默认选择它。入口要求项目目录已有原生核验发布的`backend_sync.lcf`和`backend_cdc.scf`，在dev_map前显式加载，再执行place、route、route_optimize及双角完整时序报告。缺任一约束文件时不进入映射。仅单时钟裁剪诊断可显式选择`-ImplementationScript implement.tcl`，不能用该选择跳过完整SoC的CDC。
+
+新建工程由prepare_project/prepare_benchmark复制CDC入口并写入输入哈希；旧清单仍按旧字段核验，不回写历史输入。对已完成SYN的工程在新物理目录追加CDC约束和新入口，保留原RTL/IP/固件/SYN文件哈希，不重新compile/synthesize。原生查询必须在`open_design`的synthesize动作内执行；仅open_project返回的`::tcicmd::`延迟句柄不计绑定证据。C6的60 MHz报告周期16.6667 ns按报告小数位与真实分数周期核对，不能因显示舍入改FDC周期。
+
+当前运行`$PDS_WORK_ROOT/work/main-coremark-c6-cdc-20261029/`，31个FIFO、442同步寄存器、16244原生引脚核验通过，93条max_delay和60条max_skew按既有策略限定在第一同步级/稳定载荷，不例外同域或DDR PHY。启动前287项输入SHA通过，Windows物理/提交余量14.856/11.306 GiB；每个大阶段仍检查各≥6 GiB。当前dev_map已启动，实际线程数和最终setup/hold、Gray skew、PHY/I/O、资源与未布通见完成后的原始报告，当前没有新布线Fmax。
+
+本次固件是冻结O3/64次TCM performance，输出`sim_console`，未装生产UART loader；不是回车触发的交互位流。真实UART/十秒计时/PC解析、独立RT演示、完整YOLO/HDMI、MiniMind文本仍须补齐。不能承诺只替换HEX即可免SYN/P&R，先核实PDS存储器初始化更新流程。
 
 ## 历史停止点：TCM重构后布局布线前
 

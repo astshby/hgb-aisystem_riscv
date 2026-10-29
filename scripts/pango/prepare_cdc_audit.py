@@ -71,6 +71,8 @@ def generate(spec, names):
 def parse_native_queries(text, spec, names):
     if not re.search(r'^CDC_QUERY_COMPLETE\s*$', text, re.M):
         raise ValueError('native CDC query did not complete')
+    if '::tcicmd::' in text:
+        raise ValueError('native CDC pins were deferred; query inside open_design')
     if re.search(r'^(?:E:|ERROR:)|(?:Timing-4003|CommandTiming-0057):', text, re.M):
         raise ValueError('native CDC query contains unresolved objects or errors')
     expected = generate(spec, names)[1]

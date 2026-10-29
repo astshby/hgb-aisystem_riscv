@@ -12,6 +12,7 @@ import xml.etree.ElementTree as ET
 
 
 GENERATED_SCRIPTS = ("compile.tcl", "synthesize.tcl", "implement.tcl")
+CDC_IMPLEMENTATION_SCRIPTS = ("implement_cdc.tcl",)
 MEMORY_SCRIPTS = ("memory_guard.ps1", "memory_gate.ps1")
 SYNTHESIZE_COMMANDS = "source compile.tcl\nsynthesize -ads -selected_syn_tool_opt 2\n"
 SCOREBOARD_CONFIGURATION = {
@@ -366,6 +367,10 @@ def verify_staged_manifest(root, manifest):
     for name in GENERATED_SCRIPTS:
         if name not in manifest["files"]:
             raise ValueError(f"generated script not covered by manifest: {name}")
+    if manifest.get("cdc_implementation_version") == 1:
+        for name in CDC_IMPLEMENTATION_SCRIPTS:
+            if name not in manifest["files"]:
+                raise ValueError(f"CDC implementation entry not covered by manifest: {name}")
     if manifest.get("memory_guard_version") == 1:
         for name in MEMORY_SCRIPTS:
             if name not in manifest["files"]:
@@ -651,10 +656,13 @@ def main():
     (root / "compile.tcl").write_text("\n".join(commands) + "\n", encoding="utf-8")
     (root / "synthesize.tcl").write_text(SYNTHESIZE_COMMANDS, encoding="utf-8")
     shutil.copyfile(repo / "scripts/pango/implement.tcl", root / "implement.tcl")
+    for name in CDC_IMPLEMENTATION_SCRIPTS:
+        shutil.copyfile(repo / "scripts/pango" / name, root / name)
     for name in MEMORY_SCRIPTS:
         shutil.copyfile(repo / "scripts/pango" / name, root / name)
     manifest["memory_guard_version"] = 1
-    for name in GENERATED_SCRIPTS + MEMORY_SCRIPTS:
+    manifest["cdc_implementation_version"] = 1
+    for name in GENERATED_SCRIPTS + MEMORY_SCRIPTS + CDC_IMPLEMENTATION_SCRIPTS:
         manifest["files"][name] = hashlib.sha256((root / name).read_bytes()).hexdigest()
     verify_staged_manifest(root, manifest)
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
