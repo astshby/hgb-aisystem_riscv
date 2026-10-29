@@ -29,8 +29,10 @@ make rt-thread-demo-test
 电脑用`scripts/coremark/host.py`接收计算。独立RT终端支持STATUS/PING/ECHO/DEMO，
 不参加裸机CoreMark。CoreMark双宽真实SoC串口闭环已通过：P/V、CRLF单触发、64位回传、DONE/READY及PC解析。
 2次迭代的短测formal=0，尚无正式十秒或板上成绩；新RT终端仍只有构建/软件测试。
-C6布局布线已完成，Core/SYS/DDR-user/外设Fmax为87.3057/98.2415/122.5490/72.2201 MHz，
-0未布通，Core未达100 MHz。该工程使用冻结的自动运行CoreMark固件，新交互镜像尚未布线。
+正式交互固件的C6条件候选`b94580c`已完成唯一一次追加布局布线，
+Core/SYS/DDR-user/外设Fmax为90.6208/100.9082/124.1619/73.0004 MHz，0未布通。
+Core100与DDR125 MHz尚未收敛，本轮停止迭代、不自动升级baseline；旧自动固件的物理记录保留。
+双宽回归368 PASS/8 SKIP，固定64轮三层与双宽UART的周期均不变。
 
 软件默认 `SOFTWARE_OPT=O3`，可选 O2/Ofast。公共配置见
 `scripts/hardware_profile.json`，当前应用范围见 `scripts/branch_profile.json`。
@@ -44,6 +46,8 @@ RT-Thread 为独立应用，不参加这组 CoreMark 测量；程序主体在 DD
 
 YOLO 保存在 `baseline-yolo`，MiniMind 保存在 `baseline-minimind`；
 `baseline-all` 保存两套加速器和全部软件，仅用于联合仿真。
+完整YOLO演示的本地交付为`demo/yolo-full-network@8a8f484`：同C程序与真实NPU/总线/UART/显示RTL联合仿真通过，
+另有真实RV32/RV64驱动短测；尚未推送合并到上述发布分支，没有板测结果。
 本分支不保留加速器实体源码、专属软件或专属执行入口。
 
 详细配置、数据和待办见[项目介绍](docs/PROJECT_INTRO.md)、

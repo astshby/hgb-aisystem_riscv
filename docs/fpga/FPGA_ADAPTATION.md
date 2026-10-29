@@ -14,13 +14,41 @@ PLL、板级时钟发现、UART/timer和应用仿真同步改档；仿真使用�
 
 正式交互固件使用`prepare_project.py --firmware-dir build/coremark-board/rv32-O3-i0-b115200 --firmware-role coremark-interactive --synthesis-strategy timing-v3`，并显式选择上述C6与I16/D8/hash2参数。入口保留`program.elf`、20项软件源、生产`test_iterations=0`、ELF ISA/地址、HEX及bank哈希；不要求把交互程序改名为loader。当前生产ID为`ea1773fca42aa7c6`，启动后由实际硬件频率寄存器取得计时/UART参数。默认旧loader与自动分层CoreMark入口继续保留。
 
-2026-10-30的条件候选采用旧RTL `d273172`、新RTL `b94580c`配对，工程位于`$PDS_WORK_ROOT/work/c6-interactive-20261030/{baseline,candidate}`，两套使用相同交互ELF/HEX/DDR IP/时钟/综合策略。原物理87.3057 MHz使用旧自动O3/64固件，不能将其与新交互镜像直接当作纯RTL配对收益。当前先做SYN与双宽回归；下一次P&R前重新查询新SYN的CDC对象/时钟根，绑定发布93/60类约束及scope收据，不能沿用旧对象名。入口工具163项Python与14项原生PowerShell检查通过。
+2026-10-30的条件候选采用旧RTL `d273172`、新RTL `b94580c`配对，工程位于`$PDS_WORK_ROOT/work/c6-interactive-20261030/{baseline,candidate}`，两套使用相同交互ELF/HEX/DDR IP/时钟/综合策略。原物理87.3057 MHz使用旧自动O3/64固件，不能将其与新交互镜像直接当作纯RTL配对收益。配对SYN、双宽回归与唯一追加P&R均已完成；本次从新SYN查询CDC对象/时钟根，绑定发布93 delay/60 skew及scope收据。入口工具163项Python与14项原生PowerShell检查通过。
 
 新交互程序的实际四域UART仿真已通过RV32/RV64启动、P/V、计数/CRC回传、DONE和READY，使用2次迭代与500000 baud、`formal=0`；生产115200 baud、自动校准且至少十秒的正式板上成绩尚未测量。短流程与最终固件镜像身份分别记录，不将短流程数值作为正式CoreMark成绩。
 
 新建工程由prepare_project/prepare_benchmark复制CDC入口并写入输入哈希；旧清单仍按旧字段核验，不回写历史输入。对已完成SYN的工程在新物理目录追加CDC约束和新入口，保留原RTL/IP/固件/SYN文件哈希，不重新compile/synthesize。原生查询必须在`open_design`的synthesize动作内执行；仅open_project返回的`::tcicmd::`延迟句柄不计绑定证据。C6的60 MHz报告周期16.6667 ns按报告小数位与真实分数周期核对，不能因显示舍入改FDC周期。
 
-### C6最终布局布线（2026-10-30）
+### 正式交互候选最终布局布线（2026-10-30）
+
+`b94580c`、生产固件ID `ea1773fca42aa7c6`、C6、I16/D8/hash2于07:25:43完成唯一追加P&R。
+本轮没有第二个物理候选、不升级baseline；原生工程为`$PDS_WORK_ROOT/work/c6-interactive-20261030/candidate/`。
+
+| 域 | 目标MHz | 最终Fmax MHz | setup WNS ns |
+|---|---:|---:|---:|
+| Core | 100 | 90.6208 | −1.035 |
+| SYS | 100 | 100.9082 | +0.090 |
+| DDR user | 125 | 124.1619 | −0.054 |
+| 外设 | 60 | 73.0004 | +2.968 |
+
+0未布通；LUT75543（含常量/旁路）、FF64053、DRM36K38、APM4。
+slow/fast hold最小+0.062/+0.039 ns，recovery+1.890/+4.115、removal+0.244/+0.163、MPW均+0.035，均0失败。
+CDC max_delay最小+2.781/+4.820，Gray skew最小+4.395/+5.625，无受保护路径误例外。
+DDR PHY setup/hold均通过，最小slow setup+0.089、fast hold+0.042；DDR用户域自身3端点−0.054，Core3222端点−1.035。
+35输入/73输出delay仍缺，1个virtual clock，no_clock/loop/latch为0；没有bitstream或板测。
+
+耗时1:19:45：devmap9:37、place8:52、route57:30、opt2:35、report1:11；工具池峰place12088 MB、route4860 MB。
+请求8线程，STA实际最多4进程；所有阶段使用原memory gate，启动前Windows物理/提交余量9.268/6.671 GiB，
+退出后13.491/13.225 GiB，无运行PDS。没有调整分页、停止无关进程或放宽约束。
+
+实际Core最差是ISS操作数→分支方向→ROB取消→完成选择/广播→memory IQ→ISS，
+14级、data10.326 ns=logic2.875+net7.451（72.16%），最大扇出63；两段net1.578/1.491 ns。
+它与SYN的JALR路径不同，后续按实际弧段处理。物理收据和完整路径在
+`logs/closing-c6-20261030/physical/{physical-receipt.json,actual-worst-paths.txt}`。
+旧物理使用自动固件，不能将旧/新物理差值全部归到单项RTL；严格同固件SYN对照与性能周期另见优化文档。
+
+### 原RTL C6布局布线（2026-10-30）
 
 工程`$PDS_WORK_ROOT/work/main-coremark-c6-cdc-20261029/`于01:27:37完成。复用80576b9的baseline-main SYN，硬件与main@e3bcf17等价；RV32、I16/D8/hash2、TCM各64 KiB。31个FIFO、442同步寄存器、16244原生引脚已绑定，93条max_delay及60条max_skew在映射前加载。
 

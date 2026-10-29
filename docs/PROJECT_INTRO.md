@@ -1,5 +1,20 @@
 # 项目配置与测量
 
+## 当前条件候选验收（2026-10-30）
+
+性能RTL固定为`b94580c`，唯一追加物理实现使用正式O3交互固件`ea1773fca42aa7c6`。
+Core/SYS/DDR-user/外设布线Fmax为90.6208/100.9082/124.1619/73.0004 MHz，
+WNS分别−1.035/+0.090/−0.054/+2.968 ns，0未布通。Core100与DDR125目标未通过，停止本轮优化，不升baseline。
+LUT75543（含常量/旁路）、FF64053、DRM36K38、APM4；hold/恢复/MPW/CDC/PHY均通过，
+I/O仍缺35输入/73输出delay，没有bitstream或板测。完整数据见[FPGA结果](fpga/FPGA_ADAPTATION.md)。
+
+双宽公共回归368 PASS/8 SKIP，784项源SHA起终相同；另有44项定向对照。
+RV32 O3/64轮M0 P/V3.590617/3.570731、真实TCM3.095736/3.081770、完整DDR warm2.538337/2.521957，
+全部固定镜像周期/CRC与旧版相同。双宽真实UART演示四项ROI也相同，2轮短测formal=0。
+YOLO的同C程序＋真实NPU/总线/串口/显示RTL完整联合演示及真实RV32驱动短测已通过；
+用户确认采用此层次，完整代码在`demo/yolo-full-network@8a8f484`，没有声称完整RV32整网执行或上板。
+MiniMind按要求未新增整机仿真，独立RT终端仍只有构建/软件命令检查。
+
 ## 目录与公共配置
 
 `vsrc/core` 保存共享 Core，`vsrc/soc` 保存 TCM/Cache、AXI、DMA、MMIO 和跨域接口，

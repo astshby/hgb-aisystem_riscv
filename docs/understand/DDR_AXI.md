@@ -27,6 +27,7 @@ legacy 仍使用 `ddr_block_fabric`、`ddr_port_arbiter`、`block_arbiter` 和�
 TCM系统入口直接用本地窗口/权限译码，BRAM先逐客户端比较同字写冲突，再由独热grant选冲突位，
 CPU专口、辅助轮询、双读与写碰撞串行语义不变。SYS控制桥沿原AW接纳预存合法WSTRB mask，
 W阶段继续逐拍检查WLAST和错误并排空突发。双宽TCM26项、SYS2项对照通过，未删除CDC/FIFO边界。
+比较范围为有效握手与合法载荷；末W之后的无效游标和错误响应未定义RDATA可能不同，错误码及禁止BRAM访问保持一致。
 
 ## 2. 标准 AXI 合同和延迟
 
