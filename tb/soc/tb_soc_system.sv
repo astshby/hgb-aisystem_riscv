@@ -81,24 +81,44 @@ module tb_soc_system #(
             dut.CORE_CLOCK_HZ,dut.SYS_CLOCK_HZ,dut.DDR_CLOCK_HZ,dut.PERIPH_CLOCK_HZ,dut.PERIPH_CLOCK_HZ);
     end
     initial begin
-        realtime edge_time;
-        #1ps; edge_time=$realtime;
-        forever begin edge_time+=core_half; #(edge_time-$realtime); clk_core=!clk_core; end
+        realtime origin, edge_time;
+        longint unsigned edge_count;
+        #1ps; origin=$realtime; edge_count=0;
+        forever begin
+            edge_count++;
+            edge_time=origin+real'(edge_count)*core_half;
+            #(edge_time-$realtime); clk_core=!clk_core;
+        end
     end
     initial begin
-        realtime edge_time;
-        #1ps; if(clock_config!=0) #1700ps; edge_time=$realtime;
-        forever begin edge_time+=sys_half; #(edge_time-$realtime); clk_sys=!clk_sys; end
+        realtime origin, edge_time;
+        longint unsigned edge_count;
+        #1ps; if(clock_config!=0) #1700ps; origin=$realtime; edge_count=0;
+        forever begin
+            edge_count++;
+            edge_time=origin+real'(edge_count)*sys_half;
+            #(edge_time-$realtime); clk_sys=!clk_sys;
+        end
     end
     initial begin
-        realtime edge_time;
-        #1ps; if(clock_config!=0) #2300ps; edge_time=$realtime;
-        forever begin edge_time+=ddr_half; #(edge_time-$realtime); clk_ddr=!clk_ddr; end
+        realtime origin, edge_time;
+        longint unsigned edge_count;
+        #1ps; if(clock_config!=0) #2300ps; origin=$realtime; edge_count=0;
+        forever begin
+            edge_count++;
+            edge_time=origin+real'(edge_count)*ddr_half;
+            #(edge_time-$realtime); clk_ddr=!clk_ddr;
+        end
     end
     initial begin
-        realtime edge_time;
-        #1ps; if(clock_config!=0) #3100ps; edge_time=$realtime;
-        forever begin edge_time+=periph_half; #(edge_time-$realtime); clk_periph=!clk_periph; end
+        realtime origin, edge_time;
+        longint unsigned edge_count;
+        #1ps; if(clock_config!=0) #3100ps; origin=$realtime; edge_count=0;
+        forever begin
+            edge_count++;
+            edge_time=origin+real'(edge_count)*periph_half;
+            #(edge_time-$realtime); clk_periph=!clk_periph;
+        end
     end
     logic [1:0] uart_rx, uart_tx;
     logic [31:0] gpio_in[3], gpio_out[3], gpio_oe[3];
@@ -208,22 +228,30 @@ module tb_soc_system #(
     logic p2_metrics_enable=0, p2_platform_enable=0;
     logic [31:0] p2_periph_period_ps=0, p2_measured_periph_period_ps=0;
     logic p2_period_seen=0;
-    realtime p2_last_periph_edge=0;
+    realtime p2_first_periph_edge=0;
     longint unsigned p2_period_checks=0;
-    // 注入值与实际相邻上升沿核对；不改变时钟发生器或复位释放时刻。
+    // 分数周期的单拍会在相邻整数 ps 间变化；累计边沿误差仍必须在1ps内。
+    // 统计区间的平均周期四舍五入，与整数ps的软件平台ABI核对。
     always @(posedge clk_periph) if(p2_platform_enable) begin
         if(p2_period_seen) begin
-            p2_measured_periph_period_ps=soc_metrics_pkg::clock_period_ps(($realtime-p2_last_periph_edge)/2.0);
-            assert(p2_measured_periph_period_ps==p2_periph_period_ps)
-                else $fatal(1,"peripheral period mismatch injected=%0d measured=%0d",p2_periph_period_ps,p2_measured_periph_period_ps);
             p2_period_checks++;
+            assert ($realtime-p2_first_periph_edge >= p2_period_checks*periph_half*2.0-1ps &&
+                    $realtime-p2_first_periph_edge <= p2_period_checks*periph_half*2.0+1ps)
+                else $fatal(1,"peripheral clock accumulated phase drift");
+            p2_measured_periph_period_ps=soc_metrics_pkg::clock_period_ps(
+                ($realtime-p2_first_periph_edge)/(2.0*real'(p2_period_checks)));
+            if (p2_period_checks>=16)
+                assert(p2_measured_periph_period_ps==p2_periph_period_ps)
+                    else $fatal(1,"peripheral period mismatch injected=%0d measured=%0d",p2_periph_period_ps,p2_measured_periph_period_ps);
+        end else begin
+            p2_first_periph_edge=$realtime;
         end
-        p2_last_periph_edge=$realtime; p2_period_seen=1;
+        p2_period_seen=1;
     end
     // 专用时基测试在 CPU 解除复位前结束，仅检查配置写入和真实时钟周期。
     initial if($test$plusargs("P2_PLATFORM_CLOCK_ONLY")) begin
         assert($test$plusargs("P2_PLATFORM")) else $fatal(1,"clock-only check requires P2_PLATFORM");
-        wait(p2_period_checks!=0);
+        wait(p2_period_checks>=16);
         @(negedge clk_periph);
         $display("PASS soc-platform-clock RV%0d clock=C%0d injected_period_ps=%0d measured_period_ps=%0d",
             XLEN,clock_config,p2_periph_period_ps,p2_measured_periph_period_ps);
@@ -566,7 +594,7 @@ module tb_soc_system #(
             $display("P2_PLATFORM magic=50324346 version=1 periph_period_ps=%0d clock=%0d",p2_periph_period_ps,clock_config);
         end
         repeat(10) @(negedge clk_core);
-        reset_async=0;
+        if (!$test$plusargs("P2_PLATFORM_CLOCK_ONLY")) reset_async=0;
         while(cycles<max_cycles) begin
             @(negedge clk_core);
             if($test$plusargs("EXPECT_CACHE_FATAL") && dut.cache_fatal) begin

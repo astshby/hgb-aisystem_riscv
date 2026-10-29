@@ -94,8 +94,8 @@ def clock_profiles(testbench):
     """Read exact ps-rounded C0-C4 clocks from the existing simulator driver."""
     profiles = {}
     for domain, offset in (("sys", 1700), ("ddr", 2300), ("periph", 3100)):
-        require(testbench, rf"if\(clock_config!=0\)\s*#{offset}ps;\s*edge_time=\$realtime;\s*"
-                rf"forever\s+begin\s+edge_time\+={domain}_half;\s*#\(edge_time-\$realtime\)",
+        require(testbench, rf"if\(clock_config!=0\)\s*#{offset}ps;\s*origin=\$realtime;\s*edge_count=0;\s*"
+                rf"forever\s+begin\s+edge_count\+\+;\s*edge_time=origin\+real'\(edge_count\)\*{domain}_half;\s*#\(edge_time-\$realtime\)",
                 f"testbench {domain} phase offset")
     body = re.search(r"case\(CLOCK_PROFILE\)(.*?)endfunction", testbench, re.S)
     if body is None:

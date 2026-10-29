@@ -101,6 +101,18 @@ class P2ResultTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'clock'):
             p2.parse_result(text, 'performance', 2, 'cold')
 
+    def test_fractional_peripheral_period_matches_six_decimal_report(self):
+        text = (result_log().replace('clocks=C1', 'clocks=C6').replace('clock=1', 'clock=6')
+                .replace('sys_half_ns=6.250000', 'sys_half_ns=5.000000')
+                .replace('periph_half_ns=20.000000', 'periph_half_ns=8.333333')
+                .replace('period_ps=40000', 'period_ps=16667')
+                .replace('interval_ticks=2500 actual_ps=100000000 quantum_ps=0',
+                         'interval_ticks=6000 actual_ps=100002000 quantum_ps=2000'))
+        p2.parse_result(text, 'performance', 2, 'cold', expected_periods_ps=[10000,10000,8000,1e12/60e6])
+        with self.assertRaisesRegex(ValueError, 'periods differ'):
+            p2.parse_result(text.replace('8.333333','8.333334'), 'performance', 2, 'cold',
+                            expected_periods_ps=[10000,10000,8000,1e12/60e6])
+
     def test_background_needs_roi_irq_not_only_total(self):
         text = result_log(irq=3, completed=2).replace('warm=0 background=0 cold_prepared=1', 'warm=1 background=1 cold_prepared=0')
         text = text.replace('P2_IRQ start=0 stop=3 roi=3', 'P2_IRQ start=3 stop=3 roi=0')

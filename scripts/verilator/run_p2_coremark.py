@@ -380,7 +380,8 @@ def parse_result(text, mode, iterations, layer, expected_core=None, expected_soc
     clock_config = int(clock[1])
     half_periods = [float(value) for value in clock.groups()[1:]]
     expected_halves = CLOCKS[clock_config] if expected_periods_ps is None else [p / 2000 for p in expected_periods_ps]
-    if half_periods != expected_halves:
+    # TB按六位小数输出ns；按相同精度比较，保留分数周期的完整配置用于计分。
+    if half_periods != [round(value, 6) for value in expected_halves]:
         raise ValueError('simulator periods differ from the named clock configuration')
     irq_roi = re.search(r'^P2_IRQ start=(\d+) stop=(\d+) roi=(\d+)', text, re.M)
     if irq_roi is None:
