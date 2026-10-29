@@ -1,7 +1,9 @@
 // Module: d1_stage
 // Description: Decodes instructions, creates early exceptions, and resolves operand-free JAL control flow.
 // 主要包含：获取指令后的初级解码
-module d1_stage (
+module d1_stage #(
+    parameter bit PC_REL_TARGET_IN_IMM = 1'b0
+) (
     input  pipeline_pkg::if_d1_t     in_packet,
     output pipeline_pkg::d1_d2_t     out_packet,
     output pipeline_pkg::redirect_t  redirect,
@@ -19,6 +21,8 @@ module d1_stage (
     xlen_t imm;
     xlen_t jal_target, jal_imm;
     logic jal_opcode, jal_aligned;
+    xlen_t branch_imm, branch_target;
+    logic branch_opcode;
     exception_t decoded_exc;
 
     decoder u_decoder (
@@ -42,6 +46,14 @@ module d1_stage (
     assign jal_target = in_packet.pc + jal_imm;
     // PC 已四字节对齐时，JAL 目标 bit1 直接等于 inst[21]，无需等待地址加法器。
     assign jal_aligned = in_packet.pc[1:0] == 2'b00 && !in_packet.inst[21];
+
+    // scoreboard 可复用 imm 保存 B/JAL 绝对目标；其他指令仍传原始立即数。
+    // B 位移从指令位直接展开，不把通用解码链接到现有 JAL 提前重定向通路。
+    assign branch_opcode = in_packet.inst[6:0] == 7'b1100011 &&
+        (in_packet.inst[14:12] inside {3'b000, 3'b001, 3'b100, 3'b101, 3'b110, 3'b111});
+    assign branch_imm = {{(XLEN-13){in_packet.inst[31]}}, in_packet.inst[31],
+                        in_packet.inst[7], in_packet.inst[30:25], in_packet.inst[11:8], 1'b0};
+    assign branch_target = in_packet.pc + branch_imm;
 
     // D1 异常在控制流处理之前完成，异常指令不会产生提前重定向。
     d1_exception_check u_d1_exception_check (
@@ -83,6 +95,10 @@ module d1_stage (
         out_packet.rs2 = rs2;
         out_packet.rd = rd;
         out_packet.imm = imm;
+        if (PC_REL_TARGET_IN_IMM) begin
+            if (jal_opcode) out_packet.imm = jal_target;
+            else if (branch_opcode) out_packet.imm = branch_target;
+        end
         out_packet.csr_addr = csr_addr;
         out_packet.uop = uop;
         out_packet.pred = in_packet.pred;

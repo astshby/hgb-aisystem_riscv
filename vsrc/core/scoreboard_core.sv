@@ -193,7 +193,7 @@ module scoreboard_core (
         assign iq_push_memory[lane] = !decode_q[lane].exc.valid && !decode_q[lane].uop.csr_valid &&
             decode_q[lane].uop.sys_op == SYS_NONE && decode_q[lane].uop.branch_op == BR_NONE &&
             decode_q[lane].uop.fu != FU_MULDIV && (decode_q[lane].uop.mem_read || decode_q[lane].uop.mem_write);
-        d1_stage u_decode (.in_packet(fetched[lane]), .out_packet(decoded[lane]),
+        d1_stage #(.PC_REL_TARGET_IN_IMM(1'b1)) u_decode (.in_packet(fetched[lane]), .out_packet(decoded[lane]),
                            .redirect(d1_redirect[lane]), .serialize_req());
         d2_stage u_rename_packet (
             .in_packet(decode_q[lane]), .rs1_data(rf_rs1[lane]), .rs2_data(rf_rs2[lane]),
@@ -305,7 +305,7 @@ module scoreboard_core (
     // 分支判定使用已寄存的 ISS 包；接纳拍只做年龄选择和宽包搬运。
     // 两个 ISS 槽各有一个判定器，避免已上报分支占住共享判定资源。
     for (genvar lane = 0; lane < 2; lane++) begin : g_issue_branch
-        branch_unit u_branch (
+        branch_unit #(.PC_REL_TARGET_IN_IMM(1'b1)) u_branch (
             .branch_op(raw_scheduled[lane].uop.branch_op), .pc(raw_scheduled[lane].pc),
             .seq_pc(raw_scheduled[lane].seq_pc),
             .operand_a(raw_scheduled[lane].rs1_data), .operand_b(raw_scheduled[lane].rs2_data),
