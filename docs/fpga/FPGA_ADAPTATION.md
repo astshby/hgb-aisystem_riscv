@@ -50,7 +50,8 @@ SYS AXI-Lite 控制在 `0x10070000`，UART/MMIO 仍经 60 MHz 外设 CDC；SDA �
 320 完整应用联合仿真已通过真实 UART 收图、83 Conv、框/画框图回传和 1080p 扫描后回 READY，
 共核对 5,775,300 个 INT32 输出，11,638.68 秒、峰值 RSS 78,476 KiB，全部错误计数为 0。
 C 在电脑执行，没有 RISC-V Core、CPU Cache 或 Flash，DDR 为行为模型；没有完整 RV32 整网或板上 HDMI 结果。
-冻结来源 `6008bc5`、命令与哈希见 `logs/demo-software-20261029/yolo-full/app320-full-rtl-v2/result.json`。
+构建记录的提交为 `6008bc5`；实际源文件已保存于 `a91c795`，逐文件 SHA256 与运行快照一致。
+命令和哈希见 `logs/demo-software-20261029/yolo-full/app320-full-rtl-v2/result.json` 及同目录 `sourceidentity.json`。
 证据与入口见[项目介绍](../PROJECT_INTRO.md#环境与命令)。预载模型 CRC 检查不代表 Flash 冷启动已接通，
 模型 UART 命令已有软件测试，尚无板上约 5 MB 模型全传验收。
 

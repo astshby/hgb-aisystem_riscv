@@ -43,7 +43,7 @@ PC 工具为 `scripts/yolo/host.py --port COM5 status|model|upload|detect|read|s
 模型 UART 命令已有软件测试，尚无板上约 5 MB 模型全传结果。
 完整应用使用 192×144 RGB 输入，C 预处理到 320；83 层共 5,775,300 个 INT32 输出逐项核对，返回 3 框。
 执行时没有 RISC-V Core、CPU Cache 或 Flash，DDR 使用共享行为模型；完整 RV32 整网仍未运行。
-本次冻结来源为 `6008bc5`，结果和源码/库哈希见
+构建记录的提交为 `6008bc5`；实际源文件已保存于 `a91c795`，逐文件 SHA256 与运行快照一致。结果和源码/库哈希见
 `logs/demo-software-20261029/yolo-full/app320-full-rtl-v2/result.json`。
 
 历史裸机数据：M0 O3 64 次为 3.590617/3.570731 CoreMark/MHz，真实 TCM 为
