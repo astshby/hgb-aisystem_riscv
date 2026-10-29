@@ -22,6 +22,12 @@ DMA 双缓冲与头尾访问 ─────────── dma_axi_master �
 legacy 仍使用 `ddr_block_fabric`、`ddr_port_arbiter`、`block_arbiter` 和旧桥，
 不能把 legacy 的单事务限制套到新互连，也不能把新互连能力套到 DDR 后端。
 
+2026-10-30条件候选保持AXI请求/响应和TCM访问拍数：仅系统TCM开启`REGISTER_LOCAL_ADDR`，
+在原AR/AW接纳、局部响应和beat完成边沿更新读写游标；其他AXI标量目标默认保留原行为。
+TCM系统入口直接用本地窗口/权限译码，BRAM先逐客户端比较同字写冲突，再由独热grant选冲突位，
+CPU专口、辅助轮询、双读与写碰撞串行语义不变。SYS控制桥沿原AW接纳预存合法WSTRB mask，
+W阶段继续逐拍检查WLAST和错误并排空突发。双宽TCM26项、SYS2项对照通过，未删除CDC/FIFO边界。
+
 ## 2. 标准 AXI 合同和延迟
 
 地址 32 位、数据 256 位、ID 4 位（主端 2 位、本地 2 位）。支持对齐 INCR、
