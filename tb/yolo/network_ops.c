@@ -66,8 +66,10 @@ static void graph(void) {
 }
 static void detections(void) {
     float head0[85*16]={0},head1[85*4]={0},head2[85]={0};const float *heads[3]={head0,head1,head2};
-    unsigned i=5;head0[i]=0;head0[16+i]=0;head0[32+i]=logf(2);head0[48+i]=logf(2);head0[64+i]=.9f;head0[(5+2)*16+i]=.8f;
-    i=6;head0[i]=-1;head0[16+i]=0;head0[32+i]=logf(2);head0[48+i]=logf(2);head0[64+i]=.7f;head0[(5+3)*16+i]=1;
+    /* 固定头部测试向量，log(2)的最近单精度值；生产解码仍调用真实expf。 */
+    const float log_two=0x1.62e43p-1f;
+    unsigned i=5;head0[i]=0;head0[16+i]=0;head0[32+i]=log_two;head0[48+i]=log_two;head0[64+i]=.9f;head0[(5+2)*16+i]=.8f;
+    i=6;head0[i]=-1;head0[16+i]=0;head0[32+i]=log_two;head0[48+i]=log_two;head0[64+i]=.7f;head0[(5+3)*16+i]=1;
     i=15;head0[i]=0;head0[16+i]=0;head0[32+i]=0;head0[48+i]=0;head0[64+i]=.6f;head0[(5+5)*16+i]=1;
     struct yolo_detection output[4];struct yolo_network_stats stats={0};struct yolo_network_allocator memory={allocate,release,NULL};
     assert(!yolo_network_decode(heads,32,32,.25f,.45f,output,4,memory,&stats));assert(!allocations);
