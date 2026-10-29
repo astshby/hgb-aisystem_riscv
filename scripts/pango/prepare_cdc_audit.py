@@ -20,8 +20,8 @@ def specification(config):
     domains = config['domains']
     if config['platform'] == 'core_tcm':
         raise ValueError('Core+TCM has no asynchronous FIFO boundary')
-    if config.get('native_board_profile') not in (1, 4):
-        raise ValueError('audit supports the documented C1/C4 clock profiles')
+    if config.get('native_board_profile') not in (1, 4, 5, 6, 7, 8):
+        raise ValueError('audit requires a supported independent clock profile')
     periods = {d: Decimal(config['periods_ps'][d]) / 1000 for d in domains}
     root = 'u_soc' if 'ddr' in domains else 'g_soc.u_soc'
     all_periods = dict(periods, ddr=Decimal(config['periods_ps']['ddr']) / 1000)

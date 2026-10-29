@@ -337,7 +337,7 @@ def verify_staged_manifest(root, manifest):
                 expected_domains["npu"] = 100000000
             if (manifest.get("clock_profile") != BOARD_CLOCK_PROFILES[profile]["name"] or
                     manifest.get("board_clock_domains_hz") != expected_domains or
-                    manifest.get("clock_relationship") != "independent_gpll_800mhz_vco" or
+                    manifest.get("clock_relationship") != f"independent_gpll_{900 if profile >= 5 else 800}mhz_vco" or
                     manifest.get("mtime_clock_domain") != "periph"):
                 raise ValueError("unexpected independent board clock configuration")
             if "board_clocks.fdc" not in manifest["files"]:
@@ -594,7 +594,7 @@ def main():
                             clock_profile=profile["name"],
                             board_clock_domains_hz={domain: profile[domain]
                                                     for domain in ("core", "sys", "ddr", "periph")},
-                            clock_relationship="independent_gpll_800mhz_vco",
+                            clock_relationship=f"independent_gpll_{900 if args.board_clock_profile >= 5 else 800}mhz_vco",
                             mtime_clock_domain="periph")
         else:
             manifest.update(soc_topology="soc_system", core_profile=core_profile(manifest),
