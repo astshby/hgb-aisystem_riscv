@@ -74,7 +74,7 @@ def stage(application, output, ip):
         'set app_root [file dirname [info script]]\n'
         'puts [exec powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass '
         '-File [file join $app_root memory_gate.ps1] -LogDirectory [file join $app_root memory] -Phase synthesis]\n'
-        'source [file join $app_root compile.tcl]\nset_option max_threads 1\n'
+        'source [file join $app_root compile.tcl]\nset_option max_threads 8\n'
         'synthesize -ads -selected_syn_tool_opt 2 -max_path 100 -nworst 3 -report_logic_level_distribution -report_exception TRUE\n')
     shutil.copyfile(application/'result.json', output/'simulation-result.json')
     shutil.copyfile(Path(run['model_receipt']), output/'simulation-build.json')

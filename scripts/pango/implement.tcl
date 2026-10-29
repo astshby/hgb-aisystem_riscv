@@ -5,7 +5,7 @@ if {![info exists ::env(HGB_PDS_PROJECT)] || ![file isfile $::env(HGB_PDS_PROJEC
     error "HGB_PDS_PROJECT must name the compiled/synthesized candidate .pds"
 }
 open_project $::env(HGB_PDS_PROJECT)
-set hgb_threads 4
+set hgb_threads 8
 if {[info exists ::env(HGB_PDS_THREADS)]} { set hgb_threads $::env(HGB_PDS_THREADS) }
 if {![string is integer -strict $hgb_threads] || $hgb_threads < 0} {
     error "HGB_PDS_THREADS must be a nonnegative integer (0 means automatic)"
@@ -22,9 +22,9 @@ proc hgb_check_memory {phase} {
 hgb_check_memory dev_map
 dev_map -force_to_run
 hgb_check_memory place
-place
+place -mode normal -optimize_gp_recovery TRUE -logic_optimize_lut6d FALSE
 hgb_check_memory route
-route -route_mode normal
+route -route_mode normal -slack_weight 90 -optimize_routing_recovery TRUE
 hgb_check_memory route_optimize
 route_optimize
 report_timing

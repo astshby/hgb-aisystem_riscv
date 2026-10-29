@@ -8,9 +8,11 @@ C7 YOLO为90/100/125/60/100 MHz，C8将YOLO Core改为900/11≈81.818182 MHz。
 C8频率寄存器四舍五入为81818182 Hz，FDC用36/55的精确参考比。C1/C4/C5保留历史对照。
 PLL、板级时钟发现、UART/timer和应用仿真同步改档；仿真使用分数周期累计边沿，避免逐半拍取整漂移。
 
-物理入口`implement.tcl`默认`max_threads=4`，`HGB_PDS_THREADS`可覆盖。
+当前统一入口默认`max_threads=8`，`HGB_PDS_THREADS`可覆盖；综合入口同样使用8线程。
+性能策略timing-v3固定fanout128、retiming开、资源共享关，布局LUT合并关，布线时序权重90；布局/布线均为normal。
+旧timing-v2的64/80报告继续按旧参数核验。当前授权先完成仿真和四组综合，不启动完整布局布线。
 本机`pds_shell`已接受`set_option max_threads 4`；实际各阶段线程数、峰值内存和耗时需从随后运行日志记录，
-尚无四线程加速比。使用normal布局/布线和原有内存预检；性能策略生成器已取消本机不支持的performance模式。
+尚无同输入1/8线程加速比。使用normal布局/布线和原有内存预检；性能策略生成器已取消本机不支持的performance模式。
 原生帮助的`route`未列旧手册的`number_of_router_thread`，新入口通过全局max_threads控制并行，不传该旧参数。
 对应选项帮助保存在`$PDS_WORK_ROOT/work/final-app60-20261029/option-check/`，仿真证据在`logs/final-app60-20261029/`。
 

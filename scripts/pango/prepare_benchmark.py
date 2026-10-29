@@ -92,7 +92,7 @@ def stage(output, config, bundle, sim_receipt, ip_dir=None):
             shutil.copyfile(ROOT/p,output/p)
         (output/'benchmark.fdc').write_text(constraints(config))
         commands=['set_arch -family Logos2 -device PG2L200H -package FBB676 -speedgrade -6',
-                  'set_option max_threads 1',*[f'add_design {{{p.as_posix()}}}' for p in rtl],
+                  'set_option max_threads 8',*[f'add_design {{{p.as_posix()}}}' for p in rtl],
                   'add_constraint {benchmark.fdc}',compile_tcm(config)]
         (output/'compile.tcl').write_text('\n'.join(commands)+'\n')
         for name in ('implement.tcl','memory_gate.ps1','memory_guard.ps1'):
@@ -115,7 +115,7 @@ def stage(output, config, bundle, sim_receipt, ip_dir=None):
         'set bench_root [file dirname [info script]]\n'
         'puts [exec powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass '
         '-File [file join $bench_root memory_gate.ps1] -LogDirectory [file join $bench_root memory] -Phase synthesis]\n'
-        'source [file join $bench_root compile.tcl]\nset_option max_threads 1\n'
+        'source [file join $bench_root compile.tcl]\nset_option max_threads 8\n'
         'synthesize -ads -selected_syn_tool_opt 2 -max_path 100 -nworst 3 -report_logic_level_distribution -report_exception TRUE\n')
     for name in ('benchmark_config.py','benchmark_platforms.json','hardware_config.py','hardware_profile.json'):
         shutil.copyfile(ROOT/'scripts'/name,output/name)
