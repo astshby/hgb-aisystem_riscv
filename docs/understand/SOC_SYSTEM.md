@@ -3,14 +3,17 @@
 ## 结构
 
 ```text
-Core 域：双发射 Core ── cpu_memory_adapter 请求队列 ── ITCM / DTCM BRAM
-                         └─ I$ / D$ ── AXI CDC ─┐
-SYS 域：系统 DMA ───────────────────────────────┼─ AXI fabric
-                                               │   ├─ AXI CDC ── Core 域 TCM 辅助端口
-                                               │   ├─ ROM / Flash 读取引擎
-                                               │   ├─ AXI-Lite CDC ── 外设域 UART/Timer/GPIO/IRQ
-                                               │   ├─ AXI CDC ── NPU 域 YOLO 目标接口
-                                               │   └─ AXI CDC ── DDR 域桥/控制器/PHY ── DDR3
+Core：双发射 Core → cpu_memory_adapter → ITCM / DTCM BRAM
+                              └→ I$ / D$ → AXI CDC ─────────┐
+SYS：系统 DMA（主端2）─────────────────────────────────────┼→ AXI fabric
+     视频读 DMA（主端3，4个ID）─────────────────────────────┘     ├→ ROM / TCM / Flash
+                                                              ├→ AXI CDC → DDR用户域 → DDR3
+                                                              ├→ AXI CDC → NPU域
+                                                              └→ AXI-Lite分流
+                                                                   ├→ SYS视频控制
+                                                                   └→ CDC → 外设UART/Timer/GPIO/IRQ
+DDR像素 → SYS读回重排 → 2048字双像素异步FIFO → 148.5MHz扫描 → RGB/HS/VS/DE
+外设域 → 400kHz I2C → MS7210；板级视频PPLL另由27MHz参考产生像素钟
 ```
 
 当前生产顶层是 `soc_system.sv`：`cpu_memory_adapter` 保存 CPU 请求队列、存储路由、Cache 和响应归属，
@@ -18,18 +21,23 @@ SYS 域：系统 DMA ───────────────────�
 不作为本轮生产总线。统一系统总线是 `axi_system_fabric`。Core 的本地命中无需经过 SYS 总线，
 Cache miss、DMA、设备控制和外部主设备通过该总线。TCM 与 Cache 当前仍和 Core 同域。
 
-| 时钟域 | 实际包含的逻辑 | 当前配置 |
-|---|---|---:|
-| Core | 取指/预测/译码、寄存器堆、IQ/scoreboard、执行/LSU、完成/退休；CPU 存储适配、ITCM/DTCM、I$/D$；CDC 的 Core 侧 | 100 MHz |
-| SYS | AXI 仲裁与返回路由、DMA 搬运引擎、Boot ROM、Flash SPI 读取引擎；各桥的 SYS 侧 | 80 MHz |
-| DDR-user | DDR AXI 桥和控制器用户接口；DDR PHY 内部还有其他时钟 | 125 MHz |
-| 外设 | UART、Timer、GPIO、IRQ，以及 DMA/Flash 的控制寄存器 | 25 MHz |
-| NPU（可选） | YOLO 计算、本地存储和目标接口；CDC 的 NPU 侧 | 100 MHz |
+| 时钟域 | 实际包含的逻辑 | C6 无 NPU目标 | C7 YOLO目标 |
+|---|---|---:|---:|
+| Core | 取指、双发射/执行/退休、存储适配、ITCM/DTCM、I$/D$、CDC 的 Core 侧 | 100 MHz | 90 MHz |
+| SYS | AXI 仲裁/返回、系统 DMA、ROM、Flash 读取、视频读 DMA/控制、桥的 SYS 侧 | 100 MHz | 100 MHz |
+| DDR-user | DDR AXI 桥和控制器用户接口；PHY 内部还有其它时钟 | 125 MHz | 125 MHz |
+| 外设 | UART、Timer、GPIO、IRQ、DMA/Flash 控制寄存器、HDMI I2C | 60 MHz | 60 MHz |
+| NPU | YOLO 计算、本地存储、目标接口及其 CDC 侧 | 无 | 100 MHz |
+| 视频 | 双像素 FIFO 读端、1080p 扫描和输出寄存器 | 无 | 148.5 MHz |
 
-SYS 是与 Core 并行工作的系统总线域，不包含整个 Core。综合按各域最差寄存器路径分别估计 Fmax，
-因此 SYS 的估计值可以高于 Core。YOLO 性能策略综合为 Core 92.9282、SYS 113.9212 MHz，
-配置仍为 100/80 MHz；Core 在 100 MHz 下的 WNS 为 −0.761 ns，尚未收敛。
-增加 SYS 频率可能减少 DMA、Cache miss 的等待，但不会提高 Core 域自身的时序上限。
+系统 `pango_soc_pll` 使用一颗 GPLL 为 Core/SYS/外设/NPU 分频；DDR 保留控制器自己的 PLL。
+视频另用 `pango_video_pll` 的 PPLL：27/1×2×33/12=148.5 MHz，不从外设钟直接分频。
+视频失锁并入整机协调复位，SYS/外设/像素侧一起异步置位、各自同步释放；PPLL 自身只受板级复位控制。
+
+SYS 与 Core 并行，SYS 不包含 Core、TCM 或 Cache。每域 Fmax 取本域最差路径，SYS 可以高于 Core。
+2026-10-30 无 NPU C6 最终布线 Fmax 为 Core 87.3057、SYS 98.2415、DDR-user 122.5490、
+外设 72.2201 MHz，0 未布通；配置目标仍为 100/100/125/60，Core/SYS/DDR 存在负 setup 裕量。
+新增视频和交互固件未布线。提高 SYS 频率会改变 miss/DMA 等待拍数，不直接提高 Core 时序上限。
 
 CoreMark 的三个硬件层次是 Core+TCM、SoC+TCM、SoC+Cache+DDR；它们表示接入哪些组件。
 时钟域表示哪些寄存器由哪个时钟驱动，两种分类不能互换。CoreMark/MHz 均按 Core 计时区周期计算，
@@ -55,6 +63,7 @@ CPU 数据队列在已有入队边界保存静态 TCM/DDR 路由资格，运行�
 | DMA 控制 | 0x10030000 | 源/目的/长度/状态 |
 | SoC 信息/Cache 维护 | 0x10040000 | 容量、时钟发现、DMA 所有权维护 |
 | Flash 控制 | 0x10050000 | Flash 命令和数据访问 |
+| 视频控制 | 0x10070000，4 KiB | SYS 域配置、COMMIT、FRONT/FRAMECOUNT/错误 |
 | 可选加速器 | 0x20000000 | YOLO 或 MiniMind 控制窗口 |
 | DDR | 0x80000000 起 | 大程序、模型、输入、输出 |
 
@@ -66,13 +75,15 @@ bitstream 可以包含 Boot ROM 与 TCM 初值。CPU 复位后从 ROM 跳到 ITC
 DDR 需先完成控制器/PHY 初始化；程序检查就绪、基本读写和镜像校验后才使用 DDR。
 
 大程序与权重可保存在另一 Flash 分区，由 CPU 配置 Flash 控制器和 DMA 搬到 DDR。
+当前 YOLO 固件检查预载 DDR 模型的 CRC、完整图和 NPU 后才发布；模型 UART 分块命令也可加载。
+这条预载检查不代表 Flash→DDR 冷启动已实现，尚无板上约 5 MB 模型全传结果。
 仿真也可直接预装 ITCM/DTCM/DDR，必须在结果中注明。Cache 初始有效位清零，
 CPU 第一次访问 DDR 代码/数据时自动取行；无需“把整个程序写入 Cache”的指令。
 程序主体始终有 DDR 后备存储，Cache 只保留最近使用的副本。
 
 ## DMA 的控制和结束
 
-CPU 写源地址、目的地址、长度、方向，再发启动。DMA 独立发 AXI 读写，数据经内部
+CPU 写源地址、目的地址、长度，再发启动；搬运方向由源/目的地址决定。DMA 独立发 AXI 读写，数据经内部
 双槽缓冲，可边读下一块边写上一块。它可访问获准的 TCM、DDR 和设备数据窗口；
 地址许可由总线目标和设备适配器核对，不自动获得所有 MMIO 控制权限。
 DMA 用状态/错误寄存器和既有 IRQ 通知 CPU；软件确认最后响应、检查错误，再交还缓冲区。
@@ -94,6 +105,25 @@ M0 64 次 O3 为 3.590617/3.570731 CoreMark/MHz；本轮真实 TCM 64 次为 3.0
 两者的存储路径不同，分别记录。RT-Thread 不参加 CoreMark，程序主体在 DDR，热 trap 驻 ITCM。
 短 CoreMark 仿真未满足正式十秒要求。
 
-YOLO 使用已有 128-MAC 核，控制和数据请求通过 SYS/NPU FIFO 跨域，NPU 目标 100 MHz。
-它在本轮是 AXI 从设备，CPU 配置计算和系统 DMA，DMA 负责读写其数据窗口。
-O3 裸机程序已在双宽系统验证卷积、结果核对和 DMA 重叠；这组测试没有运行完整 YOLO 网络。
+YOLO 使用已有 128-MAC 核，NPU 目标 100 MHz，控制/数据请求通过 SYS/NPU FIFO 跨域。
+CPU 决定层次和分块；当前完整驱动逐寄存器装载权重/激活，再取回 INT32 结果，非卷积层由 C 执行。
+系统 DMA 可访问受许可的数据窗口，不能代替 CPU 写 START 或调度整张网络。
+
+截至 2026-10-30，真实 RV32/RV64 Core 各执行 3 个生产驱动小卷积、核对 171 输出和 5 个量化值。
+完整 416 模型的 83 Conv/266 节点已由电脑 C + 真实 AXI/CDC/NPU RTL 执行，耗时 33 分 28.7 秒；
+共同 I/O 平台进一步接真实 UART、DMA、DDR 行为模型和视频，两轮上传/回读及 A/B 完整帧 CRC 通过。
+共同平台没有 RISC-V Core 或 CPU Cache，Core 90 MHz 只作为软件发现元数据，不产生 CoreMark 或 CPU 性能成绩。
+320 模型完整应用联合长测已启动，尚无 PASS；没有完整 RV32 整网或板上 HDMI 结果。
+
+| 演示 DDR 分区 | 容量/格式 | 所有权 |
+|---|---|---|
+| 图 `0x81000000` | 最大 1920×1080 RGB888 | 收图期间不可计算，整帧 CRC 成功后发布 |
+| 模型 `0x82000000` | 16 MiB | 预载或 MODEL 命令写入，校验后只读 |
+| 显示 A/B `0x83000000` / `0x83800000` | 各 8 MiB；1920×1080 XRGB8888，stride 7680 | CPU 只写 inactive，vblank 原子切换 |
+| arena `0x84000000..0x88000000` | 64 MiB | 按 tensor last_use 释放并合并复用 |
+
+共同 I/O 平台的 DDR 后台为 `0x80000000..0x88000000` 共 128 MiB，所有分区使用同一块内存。
+扫描经真实 AXI/CDC 从 DDR 读回，最多 4 拍/128 B、不过 4 KiB，4 个 ID 回读后按发出顺序送像素 FIFO。
+遇到欠载，本帧余下像素输出黑色并记录错误；换帧先排空旧 AXI owner，再重用 ID，不单侧复位 FIFO。
+软件等待 COMMIT 完成、FRONT_BASE 确认且下一帧完成后才返回 READY。
+证据位置见[项目介绍](../PROJECT_INTRO.md#环境与命令)。
