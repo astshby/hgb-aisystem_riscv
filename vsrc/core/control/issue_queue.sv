@@ -1,6 +1,8 @@
 // Module: issue_queue
 // Description: Registers two selected ready instructions and retains their admission order under backpressure.
-module issue_queue (
+module issue_queue #(
+    parameter bit STATIC_SELECT = 1'b0
+) (
     input logic clk, rst, flush,
     input scoreboard_pkg::branch_recovery_t recovery,
     input logic [core_config_pkg::RETIRE_IDX_W-1:0] head_slot,
@@ -25,17 +27,22 @@ module issue_queue (
     d2_ex_t packet_q [2], packet_d [2], marked_q [2];
     branch_result_t branch_q [2], branch_d [2];
     logic [1:0] count_q, count_d;
-    logic [1:0] killed;
+    logic [1:0] killed, keep;
 
     for (genvar slot = 0; slot < 2; slot++) begin : g_cancel
         assign killed[slot] = recovery.valid && younger_than(packet_q[slot].retire_id, recovery.id, head_slot);
     end
     assign occupancy = count_q;
     assign busy = count_q != 0;
-    for (genvar slot = 0; slot < 2; slot++) assign raw_packet[slot] = packet_q[slot];
+    for (genvar slot = 0; slot < 2; slot++) begin : g_raw_view
+        assign raw_packet[slot] = packet_q[slot];
+    end
     // 包存在性与 flush/recovery 无关；分支判定读取寄存包，不受当拍取消门控。
-    for (genvar slot = 0; slot < 2; slot++)
+    for (genvar slot = 0; slot < 2; slot++) begin : g_presence
         assign present[slot] = !rst && slot < int'(count_q);
+    end
+    assign keep[0] = count_q != 0 && pop_count == 0 && !killed[0];
+    assign keep[1] = count_q == 2 && pop_count < 2 && !killed[1];
     // 输出从寄存包取得；允许双出双入和仅消费第一条，保持每拍最多两条的稳态吞吐。
     always_comb begin
         push_capacity = 0;
@@ -52,19 +59,42 @@ module issue_queue (
         end
         packet_d = marked_q;
         branch_d = branch_q;
-        count_d = 0;
-        for (int slot = 0; slot < 2; slot++) begin
-            if (slot < int'(count_q) && slot >= int'(pop_count) && !killed[slot]) begin
-                packet_d[count_d[0]] = marked_q[slot];
-                branch_d[count_d[0]] = branch_q[slot];
-                count_d = count_d + 1'b1;
+        if (STATIC_SELECT) begin
+            // 两个固定槽只需保留/压缩选择；宽包选择不再经过 count_d 可变索引。
+            // 未写槽仍保留原载荷及 mark_reported，和原实现逐位一致。
+            count_d = {1'b0, keep[0]} + {1'b0, keep[1]} + push_count;
+            if (!keep[0] && keep[1]) begin
+                packet_d[0] = marked_q[1];
+                branch_d[0] = branch_q[1];
             end
-        end
-        for (int lane = 0; lane < 2; lane++) begin
-            if (lane < int'(push_count)) begin
-                packet_d[count_d[0]] = push_packet[lane];
-                branch_d[count_d[0]] = push_branch[lane];
-                count_d = count_d + 1'b1;
+            if (push_count != 0) begin
+                if (keep == 0) begin
+                    packet_d[0] = push_packet[0];
+                    branch_d[0] = push_branch[0];
+                end else begin
+                    packet_d[1] = push_packet[0];
+                    branch_d[1] = push_branch[0];
+                end
+            end
+            if (push_count == 2) begin
+                packet_d[1] = push_packet[1];
+                branch_d[1] = push_branch[1];
+            end
+        end else begin
+            count_d = 0;
+            for (int slot = 0; slot < 2; slot++) begin
+                if (slot < int'(count_q) && slot >= int'(pop_count) && !killed[slot]) begin
+                    packet_d[count_d[0]] = marked_q[slot];
+                    branch_d[count_d[0]] = branch_q[slot];
+                    count_d = count_d + 1'b1;
+                end
+            end
+            for (int lane = 0; lane < 2; lane++) begin
+                if (lane < int'(push_count)) begin
+                    packet_d[count_d[0]] = push_packet[lane];
+                    branch_d[count_d[0]] = push_branch[lane];
+                    count_d = count_d + 1'b1;
+                end
             end
         end
     end

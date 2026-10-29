@@ -294,7 +294,7 @@ module scoreboard_core (
                 issue_enqueue_count = 2;
         end
     end
-    issue_queue u_issue (
+    issue_queue #(.STATIC_SELECT(1'b1)) u_issue (
         .clk, .rst, .flush(wb_redirect.valid), .recovery, .head_slot,
         .push_count(issue_enqueue_count), .push_packet(queued), .push_branch(queued_branch), .push_capacity(issue_capacity),
         .pop_count(issue_count), .issue_packet(scheduled), .raw_packet(raw_scheduled),
