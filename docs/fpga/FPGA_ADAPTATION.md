@@ -15,6 +15,40 @@ VCO921.875 MHz，输出以11/9/14/10分频生成Core/SYS/外设/NPU；旧C1–C8
 视频 PLL 只由板复位控制；它的 lock 并入整机复位监督，视频 SYS/外设/像素 FIFO 共同复位。
 这些配置与模型周期不是板上工作频率测量。
 
+### 本轮完整YOLO＋HDMI布局布线
+
+物理输入源45de647，生产程序ID6aff928ff969d57d、O3/115200/HDMI1、I16/D8/hash2。
+唯一一次完整P&R于2026-10-30 16:00正常退出，原生1h52m50s，外层6823.16s；原工程未加载RCF。
+
+| 域 | 配置MHz | 布线Fmax MHz | setup WNS ns |
+|---|---:|---:|---:|
+| Core | 83.806818 | 85.9387 | +0.296 |
+| SYS | 102.430556 | 108.0885 | +0.511 |
+| DDR-user | 125 | 132.6612 | +0.462 |
+| 外设 | 65.848214 | 72.8046 | +1.451 |
+| NPU | 92.1875 | 95.5526 | +0.382 |
+| 视频 | 148.5 | 162.8928 | +0.595 |
+
+六工作域达到C10，0未布通；LUT94202（含常量/旁路）、FF73263、DRM169格（165×36K＋6×18K）、APM86单元/44格。
+slow/fast全部setup、hold、recovery、removal、MPW、skew失败端点均0；
+hold最小+0.052/+0.041 ns，recovery+1.846/+4.217、removal+0.351/+0.235、MPW均+0.035。
+DDR PHY setup最小+0.045/+2.896，hold+0.473/+0.041；功能CDC max-delay最小+0.873/+4.517，
+Gray skew+3.214/+4.222，同域/第二同步级误例外0，约束无效告警0。
+36输入/103输出仍缺通用delay；相对main额外有hdmi_sda输入和RGB/DE/HS/VS/reset/I2C输出，转发像素钟单独定义。
+板级采样和厂商IP外部覆盖另核，不能据内部STA称板上HDMI或完整RV32整网已通过。
+
+实际Core最差为ISS packet→ROB result CE，12级、扇出164，data10.839 ns中net9.022（83.2%）；
+NPU为activation RAM→MAC DSP，3级、扇出16，data9.421 ns中net7.501（79.6%）；
+SYS为fabric返回FIFO占用→DMA入口R FIFO，9级、扇出64，线路81.8%；
+视频为pixel BRAM输出→underflow_gray CE，10级、扇出28。保留实际路径供A定位，不再新增本机优化轮。
+
+devmap12m59、place15m18、route1h17m16、opt4m07、report3m10；工具池峰9004 MB。
+请求8线程，route上限8、STA实际4进程；所有启动/大阶段双6 GiB门禁通过，未改分页/杀进程。
+原始工程$PDS_WORK_ROOT/work/release-ab-20261030/yolo-full-c10-r2，
+摘要和逐arc路径在logs/release-ab-20261030/yolo-physical-r1/{physical-receipt.json,actual-worst-paths.txt}。
+
+### 历史无NPU C6
+
 无 NPU C6 工程已完成 normal 布局、布线和 route_optimize。源码 `80576b9`，
 I16/D8/mask2、O3/64 次自动 TCM CoreMark 固件，最终报告为：
 
@@ -30,7 +64,7 @@ Core 未达到 100 MHz，SYS 和 DDR 也有负裕量，不能按配置目标宣�
 DDR→PHY 仍有 −0.027 ns setup，缺输入/输出 delay 为 35/73。
 原始摘要 `logs/main-coremark-c6-cdc-20261029/physical-summary.json`，
 工程 `$PDS_WORK_ROOT/work/main-coremark-c6-cdc-20261029`，命令、固件和报告哈希在摘要内。
-该工程没有装入常驻交互固件。新增视频/YOLO 组合尚未综合布线，没有 bitstream 或板级结果。
+该历史工程没有装入常驻交互固件或当前视频/YOLO组合，没有bitstream或板级结果。
 
 当前入口要求 `max_threads=8`，`HGB_PDS_THREADS` 可覆盖；C6 最终时序报告实际使用 4 个进程，
 尚无同输入 1/8 线程加速比。当前配对采用timing-v2：fanout64、retiming开、资源共享关、布局双输出LUT合并关、
@@ -57,6 +91,16 @@ C 在电脑执行，没有 RISC-V Core、CPU Cache 或 Flash，DDR 为行为模�
 
 
 ## 完整程序与原生调试入口
+
+新工程入口已补齐生成IP的pnr/ddr3_test.rcf，冻结为board_ddr.rcf并用add_constraint加载一次，
+manifest核SHA与两条ioclk_gate优先网。原字节SHA256为01a316eaa22fb40512d6d7948533b18296e2cc2860469bbf1ae8dbf0fe872002。
+对应厂商HMIC_S手册UG042003的PDF第67页，PDS Tcl手册add_constraint支持.rcf。
+厂商例程仍需核对；增加该文件不代表PHY或I/O问题已解决，两网也与main的adj_wrdqs_en负路径不同。
+
+74项纯工具检查通过。新离线输入在$PDS_WORK_ROOT/work/release-ab-20261030/yolo-c10-rcf-inputs，
+与原物理工程的260份HDL、完整固件、时钟、策略逐项同SHA，compile仅增加RCF加载，HDMI约束保留。
+原物理工程没有加载RCF，修正后的输入未运行综合或PDS。本机结束当前YOLO并补文件后停止；
+后续由A核原生网名/加载和板级覆盖，再做最多一次同配置比较，不追加种子矩阵。
 
 已准备工程为`$PDS_WORK_ROOT/work/release-ab-20261030/yolo-full-c10-r2`，源`45de647`且当时工作树洁净；
 完整UART/HDMI生产程序ID为`6aff928ff969d57d`，真实名称program.elf，O3、115200、HDMI1。

@@ -1,5 +1,16 @@
 # 项目配置与测量
 
+2026-10-30工具补充：9e213c1将DDR生成RCF随新工程冻结并明确加载，74项纯工具检查通过。
+新离线输入yolo-c10-rcf-inputs与原工程的260份HDL、完整程序、C10与64/80策略相同，
+仅compile增加board_ddr.rcf加载；未重新运行PDS，原始缺RCF的结果不回写，后续比较交A。
+
+本轮完整YOLO＋HDMI的原始P&R已于16:00正常结束：Core/SYS/DDR-user/外设/NPU/视频Fmax为
+85.9387/108.0885/132.6612/72.8046/95.5526/162.8928 MHz，对C10六域WNS均正，0未布通。
+全部slow/fast内部setup/hold、复位时序、MPW和CDC/Gray通过，DDR PHY最小setup+0.045 ns。
+资源LUT94202（含常量/旁路）、FF73263、DRM169格（165×36K＋6×18K）、APM86单元/44格。
+I/O仍有36输入/103输出通用delay提示，需按DDR、HDMI/I2C及异步接口核覆盖；没有板上FPS、bitstream或实物验收。
+物理输入源45de647、正式程序6aff928ff969d57d，源/HEX/命令/报告哈希见logs/release-ab-20261030/yolo-physical-r1。
+
 ## 目录与公共配置
 
 `vsrc/core` 保存共享 Core，`vsrc/soc` 保存 TCM/Cache、AXI、DMA、MMIO 和跨域接口，
@@ -23,9 +34,9 @@ SYS 与 Core 是并行的时钟域；SYS 域不包含 Core、TCM 或 Cache。各
 | 发布分支 | CoreMark | RT-Thread | 加速器 |
 |---|---|---|---|
 | main | M0与三层、完整上板程序 | 无 | 无 |
-| yolo | 无 | 无 | YOLO |
+| yolo | 无 | 无 | YOLO＋HDMI |
 | minimind | 无 | 无 | MiniMind |
-| all | M0、三层与 YOLO 并发层 | 一份独立应用 | 分别选择 YOLO / MiniMind |
+| all | M0、三层与 YOLO 并发层 | 一份独立应用 | 同时挂载YOLO/MiniMind，仅仿真 |
 
 所有分支保留公共功能、ISA、AXI、CDC、UART 下载验证。加速器分支不携带 CoreMark 算法、
 跑分脚本或 RT-Thread。原作者 MiniMind C 代码、模型锁和导出工具保留在 MiniMind/all。
@@ -93,11 +104,13 @@ READY 的 DETECT/HDMI 位由模型发布、NPU 和显示状态决定；缺模型
 预载模型经过同一 CRC/图结构检查；模型 UART 命令可用，但没有 Flash 冷启动或板上约 5 MB 全传验收。
 固件按 READY→上传→计算→框/画框图回传→显示完成→READY 循环，不使用 RT-Thread。
 
+长测先将YOLO_IO_LIBRARY、YOLO_MODEL、YOLO_IMAGE、YOLO_REFERENCE设置为已生成的I/O库、320模型、原图RGB和同源参考目录；下面采用已测的192×144原图尺寸。
+
 ```bash
 make yolo-io-test XLEN=32 YOLO_IO_OUT=build/yolo/io-new YOLO_IO_LOG=logs/yolo/io-new
-make yolo-demo-cosim YOLO_IO_LIBRARY=<已生成的.so> YOLO_MODEL=<320模型.bin>
-make yolo-demo-cosim-full YOLO_IO_LIBRARY=<已生成的.so> YOLO_MODEL=<320模型.bin> \
-    YOLO_IMAGE=<原图.rgb> YOLO_WIDTH=128 YOLO_HEIGHT=96 YOLO_REFERENCE=<同源参考目录>
+make yolo-demo-cosim YOLO_IO_LIBRARY="$YOLO_IO_LIBRARY" YOLO_MODEL="$YOLO_MODEL"
+make yolo-demo-cosim-full YOLO_IO_LIBRARY="$YOLO_IO_LIBRARY" YOLO_MODEL="$YOLO_MODEL" \
+    YOLO_IMAGE="$YOLO_IMAGE" YOLO_WIDTH=192 YOLO_HEIGHT=144 YOLO_REFERENCE="$YOLO_REFERENCE"
 ```
 
 联合入口执行同一 C 服务和真实 I/O RTL；完整网络为数小时长测，普通短测不会隐式启动它。
@@ -151,10 +164,10 @@ I$16/D$4 KiB 的 cold、warm、DMA/IRQ performance 为 2.507487、2.508556、2.1
 真实 TCM 重放周期不变，RV64 候选功能通过；RT32 的 I$ miss 6048→1635，总周期减少约 0.44%。
 后者包含 tick 等待，单独记录。
 
-## RT-Thread 独立运行
+## 历史RT-Thread数据（源码仅在all）
 
-仅 main/all 保留，固定 v5.2.2 提交 `ddf52e2cdd977f14fc04035c88672ac204aec713`。
-先 `make rt-thread-fetch`，再 `make rt-thread XLEN=32`；RV64 使用相同入口。
+RT-Thread固定v5.2.2提交`ddf52e2cdd977f14fc04035c88672ac204aec713`，源码和执行入口仅在all。
+本分支不提供RT命令，下列保留既有四域实验数据。
 完整四域 SoC 无 NPU。Boot ROM 跳到 ITCM 启动，常用 trap/上下文代码驻 ITCM 顶部 8 KiB，
 其加载镜像在 DTCM 的 `0x0110c000`；DMA 搬入后校验并执行 FENCE.I，再安装 mtvec。
 程序主体、数据、BSS、线程栈/堆在 DDR `0x80000000`，由 Cache 自动填充；
@@ -163,13 +176,13 @@ DTCM 保留观测区和机器异常栈。TB 为仿真预装 DDR 镜像，板上�
 O3 双宽实际运行通过：RV32/RV64 为 2,765,395/2,774,072 TB 周期，39 次 trap，
 DDR 退休计数均超过 260 万，I$/D$ 命中和 DMA 热代码搬运均被检查。它们是功能时间，不能换算 CoreMark。
 
-## FPGA 当前结果（2026-10-30）
+## 历史无NPU C6结果（2026-10-30）
 
 无 NPU C6 最终布线 Fmax Core/SYS/DDR-user/外设为 87.3057/98.2415/122.5490/72.2201 MHz，
 setup WNS 分别为 −1.454/−0.179/−0.160/+2.820 ns，0 未布通；Core 尚未达到 100 MHz。
 源码提交 `80576b9`，I16/D8/mask2、O3/64 次 TCM 自动固件，原始摘要在
 `logs/main-coremark-c6-cdc-20261029/physical-summary.json`。该结果属于 main 的无 NPU 完整系统，
-不能套到新视频/YOLO硬件或交互固件。交互固件、新视频通路尚未综合/布线、未上板。
+不能套到新视频/YOLO硬件或交互固件。该次物理未包含当前交互固件和视频通路，没有板测。
 DDR PHY 的负裕量、35/73 项缺少输入/输出 delay 等分别保留，不能把 0 未布通写成时序通过。
 
 

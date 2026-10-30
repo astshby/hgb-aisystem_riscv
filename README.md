@@ -12,7 +12,10 @@ I$/D$ 本轮明确使用 16/8 KiB、bank XOR mask2，ITCM/DTCM 各 64 KiB。
 当前时钟档为 **C10 `yolo_sys`**：Core/SYS/DDR-user/外设/NPU =
 **83.806818 / 102.430556 / 125 / 65.848214 / 92.1875 MHz**，视频为独立 **148.5 MHz**。
 系统GPLL使用125 MHz输入、I/M/F=8/1/59、921.875 MHz VCO，输出分频11/9/14/10。
-旧C1–C8继续保留；本档没有新布局布线结果，不能按配置值宣称时序闭合。
+旧C1–C8继续保留。本轮完整程序＋HDMI P&R正常完成，Core/SYS/DDR-user/外设/NPU/视频Fmax为
+85.9387/108.0885/132.6612/72.8046/95.5526/162.8928 MHz，六域达到C10工作档、0未布通。
+slow/fast全部内部setup/hold、恢复、MPW、CDC/Gray及DDR PHY无失败；PHY最小setup+0.045 ns。
+实际工作频率仍为上述PLL配置，板级I/O有36输入/103输出通用delay提示，尚无bitstream或板测。
 
 设置 `RISCV_TOOL_ROOT` 为交叉编译器bin目录，`PDS_HOME`/`PDS_WORK_ROOT`为工具和原生工程目录。
 完整固件入口默认O3、HDMI=1、115200波特率，RV64还需指向已有纯RV64IM软数学库的
@@ -57,5 +60,9 @@ python3 scripts/pango/prepare_yolo_application.py \
 每次选新输出目录。此入口固定NPU＋HDMI、C10、I16/D8/hash2、真实交互固件，
 不把旧卷积小程序改名为loader。timing-v2使用8线程、fanout64、retiming开启、算术共享关闭、
 normal布局/布线、LUT合并关闭、route权重80；新工程尚需综合、原生CDC绑定和完整物理验收。
+RCF补充已通过74项纯工具测试：新工程冻结生成IP的pnr/ddr3_test.rcf并加载board_ddr.rcf。
+离线输入在$PDS_WORK_ROOT/work/release-ab-20261030/yolo-c10-rcf-inputs，
+原有RTL、固件、时钟、策略逐项一致，compile仅增加RCF加载，未重新运行综合或布线。
+本轮原始物理工程未加载RCF，结果与修正入口分开；后续原生网名、加载和性能比较交A。
 具体原生执行命令、输入身份和失败路径处理见[FPGA适配](docs/fpga/FPGA_ADAPTATION.md)，
 程序证据与缺口见[项目介绍](docs/PROJECT_INTRO.md)。
