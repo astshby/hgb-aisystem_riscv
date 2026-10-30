@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "source": "https://github.com/Megvii-BaseDetection/YOLOX",
+  "commit": "6ddff4824372906469a7fae2dc3206c7aa4bbaee",
+  "checkpoint_sha256": "9de513de589ac98bb92d3bca53b5af7b9acfa9b0bacb831f7999d0f7afaee8f0",
+  "files": {
+    "yolox-tiny-320.bin": {
+      "bytes": 5239288,
+      "sha256": "50fb5df506e4763dc07e65a394396df1215487150cafd66a219282751d48ee71"
+    },
+    "yolox-tiny-416.bin": {
+      "bytes": 5239288,
+      "sha256": "48138514f398d5a0a143a7c3f20f85ec3eee6a82ac0d78db9d7b29ed0042fa19"
+    }
+  }
+}

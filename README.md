@@ -1,5 +1,12 @@
 # hgb-aisystem：all 联合仿真
 
+克隆：`git clone --branch all https://github.com/astshby/hgb-aisystem_riscv.git`。
+程序、两个 YOLO 模型、MiniMind 整数模型/分词器、RT-Thread 内核和各应用测试均在版本库。
+[软件复现说明](software/README.md)列出依赖与命令；设置工具链和固定 Python 依赖后执行
+`make software-prepare`、`make software-build XLEN=both`、`make software-test`。
+不需要另一台电脑的 build。all 保持联合仿真用途，各上板程序仍由对应独立分支发布。
+
+
 本分支保存最新共享 Core/SoC、YOLO、MiniMind、分层 CoreMark、三套交互程序及唯一一份 RT-Thread。
 `main` 为无 NPU 的 CoreMark 系统，`yolo` 与 `minimind` 分别保存各自硬件与程序；
 本分支只做仿真，不生成第四套 FPGA 物理镜像。

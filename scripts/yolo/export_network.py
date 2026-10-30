@@ -255,12 +255,22 @@ class Graph:
         convs = [node for node in self.nodes if node["op"] == CONV]
         if len(convs) != 83:
             raise ValueError("complete Tiny graph must have 83 convolutions")
-        for node, reference in zip(convs, profile["layers"]):
-            actual = dict(name=node["name"], input=[1, *self.shape(node["inputs"][0])],
-                          output=[1, *self.shape(node["output"])], kernel=[node["p"][0]] * 2,
-                          stride=[node["p"][1]] * 2)
-            if any(actual[key] != reference[key] for key in actual):
-                raise ValueError("graph differs from saved upstream audit: " + node["name"])
+        if "layers" in profile:
+            if len(profile["layers"]) != len(convs):
+                raise ValueError("incomplete upstream layer audit")
+            for node, reference in zip(convs, profile["layers"]):
+                actual = dict(name=node["name"], input=[1, *self.shape(node["inputs"][0])],
+                              output=[1, *self.shape(node["output"])], kernel=[node["p"][0]] * 2,
+                              stride=[node["p"][1]] * 2)
+                if any(actual[key] != reference[key] for key in actual):
+                    raise ValueError("graph differs from saved upstream audit: " + node["name"])
+        else:
+            # 发布的独立上游摘要保留 MAC/参数计数；准备脚本另核对完整模型二进制 SHA。
+            weights = sum(int(np.prod(self.model.shape(node["params"][0]))) for node in convs)
+            macs = sum(int(np.prod(self.shape(node["output"]))) *
+                       self.shape(node["inputs"][0])[0] * node["p"][0] ** 2 for node in convs)
+            if (len(convs), weights, macs) != (profile["conv_calls"], audit["conv_int8_weight_bytes"], profile["conv_macs"]):
+                raise ValueError("graph differs from published upstream MAC/parameter audit")
         if [self.shape(t) for t in self.heads] != [[85, self.size // s, self.size // s] for s in (8, 16, 32)]:
             raise ValueError("head shape mismatch")
 

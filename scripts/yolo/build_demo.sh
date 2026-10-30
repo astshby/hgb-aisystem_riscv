@@ -35,3 +35,31 @@ SOC=1 SOC_DDR=0 bash scripts/verilator/build_baremetal_image.sh "$xlen" "$output
     software/yolo/network.c software/yolo/network_service.c software/yolo/network_pool.c \
     software/yolo/video_service.c software/yolo/demo_libc.c \
     "${math_libraries[@]}"
+
+# all 保留独立的仿真构建收据，不冒用 yolo 分支的生产 PDS 身份。
+python3 - "$output" "$xlen" <<'PY'
+import hashlib,json,os,re,subprocess,sys
+from pathlib import Path
+out=Path(sys.argv[1]);width=int(sys.argv[2]);sha=lambda p:hashlib.sha256(Path(p).read_bytes()).hexdigest()
+prefix=str(Path(os.environ['RISCV_TOOL_ROOT'])/'riscv64-unknown-elf-')
+dump=subprocess.check_output([prefix+'objdump','-d','-M','no-aliases',str(out/'program.elf')],text=True)
+count=0
+for line in dump.splitlines():
+    match=re.match(r'^\s*[0-9a-f]+:\s+([0-9a-f]+)\s+(\S+)',line)
+    if not match:continue
+    if len(match[1])!=8 or int(match[1],16)&3!=3:raise ValueError('compressed instruction: '+line)
+    if int(match[1],16)&127 in (7,39,67,71,75,79,83) or re.search(r'\b(frm|fflags|fcsr)\b',line):
+        raise ValueError('floating instruction or CSR: '+line)
+    count+=1
+sources=list(Path('software/yolo').glob('*.c'))+list(Path('software/yolo').glob('*.h'))
+sources+=list(Path('software/common/baremetal').glob('*'))
+sources+=[Path('software/common/soc_clocks.h'),Path('software/common/soc_capabilities.h'),Path('scripts/yolo/build_demo.sh')]
+receipt=dict(role='yolo-interactive-simulation',xlen=width,
+    source_commit=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
+    source_sha256={str(p):sha(p) for p in sources if p.is_file()},
+    image_sha256={name:sha(out/name) for name in ('program.elf','imem.hex','dmem.hex')},
+    integer_instructions=count,compressed_instructions=0,floating_instructions=0,
+    scope='all simulation firmware; not a production PDS input')
+(out/'manifest.json').write_text(json.dumps(receipt,indent=2)+'\n')
+print('PASS all YOLO firmware RV'+str(width)+' ISA and image SHA')
+PY

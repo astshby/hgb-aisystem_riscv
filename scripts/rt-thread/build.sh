@@ -7,10 +7,9 @@ xlen="${1:-32}"
 case "$xlen" in 32) abi=ilp32;; 64) abi=lp64;; *) echo 'XLEN must be 32 or 64' >&2; exit 2;; esac
 opt="${SOFTWARE_OPT:-O3}"
 case "$opt" in O2|O3|Ofast) ;; *) echo 'SOFTWARE_OPT must be O2, O3 or Ofast' >&2; exit 2;; esac
-rt="${RTTHREAD_ROOT:-build/rt-thread-v5.2.2}"
+rt="${RTTHREAD_ROOT:-third_party/rt-thread}"
 revision=ddf52e2cdd977f14fc04035c88672ac204aec713
-[[ "$(git -C "$rt" rev-parse HEAD)" == "$revision" ]] || { echo 'RT-Thread revision mismatch'; exit 1; }
-[[ -z "$(git -C "$rt" status --porcelain --untracked-files=no)" ]] || { echo 'RT-Thread dependency is modified'; exit 1; }
+python3 scripts/rt-thread/verify.py "$rt"
 prefix="${CROSS_COMPILE:-${RISCV_TOOL_ROOT:?set RISCV_TOOL_ROOT to the toolchain bin directory}/riscv64-unknown-elf-}"
 bsp=software/rt-thread
 app="${RTTHREAD_APP:-smoke}"
@@ -70,7 +69,7 @@ receipt=dict(app=app,xlen=int(width),optimization=opt,coremark=False,
     compiler=subprocess.check_output([compiler,'--version'],text=True).splitlines()[0],
     source_branch=subprocess.check_output(['git','branch','--show-current'],text=True).strip(),
     source_commit=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
-    rt_revision=subprocess.check_output(['git','-C',rt,'rev-parse','HEAD'],text=True).strip(),
+    rt_revision='ddf52e2cdd977f14fc04035c88672ac204aec713',
     source_sha256={p:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in sources},
     image_sha256={p:hashlib.sha256((out/p).read_bytes()).hexdigest()
                   for p in ('program.elf','imem.hex','dmem.hex','ddr.hex')},

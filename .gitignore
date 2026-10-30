@@ -3,6 +3,7 @@
 !/third_party/
 /third_party/*
 !/third_party/yolo_npu128/
+!/third_party/rt-thread/
 !/.gitignore
 !/.gitattributes
 !/.gitmodules
@@ -23,6 +24,8 @@
 # Python bytecode
 __pycache__/
 *.pyc
+/.venv/
+/software/yolo/.cache/
 
 # MiniMind: preserve sources/configuration/manifests, ignore generated large files.
 /software/minimind3/model/*.safetensors
@@ -31,6 +34,8 @@ __pycache__/
 /software/minimind3/.cache/
 /software/minimind3/.venv*/
 /software/minimind3/c_runtime/assets/*.bin
+!/software/minimind3/c_runtime/assets/model_w8a16_int.bin
+!/software/minimind3/c_runtime/assets/tokenizer.bin
 /software/minimind3/c_runtime/assets/*.hex
 /software/minimind3/c_runtime/build/
 /software/minimind3/c_runtime/minimind3.elf
