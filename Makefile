@@ -21,22 +21,13 @@ export SPLIT_ISSUE_QUEUE INTEGER_QUEUE_ENTRIES MEMORY_QUEUE_ENTRIES LIMITED_INTE
 # Four publication branches share one reviewed Core profile. Optional software
 # targets exist only when that branch retains their make fragment and sources.
 include scripts/make/checks.mk
--include scripts/make/coremark.mk scripts/make/rt_thread.mk scripts/make/yolo.mk scripts/make/minimind.mk
+include scripts/make/yolo.mk
 
 .PHONY: help check
 help:
 	@printf '%s\n' 'make check XLEN=32|64' 'SOFTWARE_OPT=O2|O3|Ofast (default O3)'
-ifneq ($(wildcard scripts/make/coremark.mk),)
-	@printf '%s\n' 'make score (M0 + runnable CoreMark platforms)'
-endif
-ifneq ($(wildcard scripts/make/rt_thread.mk),)
-	@printf '%s\n' 'make rt-thread (standalone four-domain DDR system)'
-endif
 ifneq ($(wildcard scripts/make/yolo.mk),)
 	@printf '%s\n' 'make yolo (five domains, convolution + DMA overlap)'
 	@printf '%s\n' 'make yolo-demo-build XLEN=32|64 (UART RGB/SELFTEST firmware)' 'make yolo-demo-test (lightweight software tests)'
-endif
-ifneq ($(wildcard scripts/make/minimind.mk),)
-	@printf '%s\n' 'make minimind (five domains, runtime + 38-command layer)'
 endif
 check: test scoreboard-test riscv-tests soc-test soc-riscv-tests soc-system-test soc-axi-test tcm-bram-test benchmark-smoke
