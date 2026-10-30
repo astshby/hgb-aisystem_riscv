@@ -65,7 +65,7 @@ logs/release-ab-20261030/main-physical-r1/{physical-receipt.json,actual-worst-pa
 
 ### 新工程和原生CDC
 
-先设置RISCV_TOOL_ROOT、PDS_HOME和PDS_WORK_ROOT；生成DDR IP目录必须包含pnr/ddr_test.fdc。
+先设置RISCV_TOOL_ROOT、PDS_HOME和PDS_WORK_ROOT；生成DDR IP目录必须包含pnr/ddr_test.fdc及pnr/ddr3_test.rcf。
 下列命令在WSL执行，PDS_WORK_ROOT使用/mnt盘符映射，输出用未存在的新目录：
 
 ```bash
@@ -92,6 +92,34 @@ main本轮绑定31 FIFO、442同步FF、93 max-delay和60 max-skew；
 YOLO还包含视频FIFO及同步器，必须使用它自己的原生清单，不能套main对象数。
 新C9的分层CoreMark由B从当前P2源重新构建并冻结bundle，旧ELF拒绝C9/C10。
 原有分层分数继续保留为旧档测量。
+
+### RCF补充与I/O分类
+
+HMIC_S手册UG042003的PDF第67页要求自建工程导入生成的pnr/*.rcf，
+PDS Tcl手册UG990004的add_constraint条目支持.rcf。
+本轮原始main/YOLO暂存未加载该文件；厂商例程本身也可能有缺项，不能将增加文件当作物理修复已通过。
+新prepare_project精确冻结pnr/ddr3_test.rcf原字节为board_ddr.rcf，compile.tcl加载一次，
+manifest绑定SHA和两条ioclk_gate优先网。它们与当前adj_wrdqs_en负路径不同。
+原始RCF SHA256为01a316eaa22fb40512d6d7948533b18296e2cc2860469bbf1ae8dbf0fe872002。
+旧manifest继续可核验且明确RCF未验证；115项工具测试通过，没有重跑PDS或修改原件。
+
+新离线交接输入在$PDS_WORK_ROOT/work/release-ab-20261030/main-c9-rcf-inputs，
+真实程序、244份HDL、C9与64/80策略保持，尚未运行综合/PDS。B先核两条原生网名和RCF实际加载，再按同配置比较。
+PHY的同一路径从旧+0.089到新−0.028 ns，损失117 ps：数据线路+96、逻辑+6、发射时钟+15 ps。
+DDR FDC和75项公共IP哈希相同。单branch MPNR建议仅作为B的未执行候选，本机不启动probe/ECO。
+
+35输入/73输出中的103条为DDR方向条目（双向DQ会计两次），其余5条为
+差分时钟负端、异步UART收发、异步复位和LED。专用DDR约束、外部板级数据眼、同步器和内部恢复时序分别核验。
+io_coverage.py只分类并输出CLASSIFIED_NOT_TIMING_CLOSED，未补通用0/1ns或宽泛例外：
+
+```bash
+python3 scripts/pango/io_coverage.py \
+  --project "$PDS_WORK_ROOT/work/release-ab-20261030/main-coremark-r2" \
+  --physical-summary logs/release-ab-20261030/main-physical-r1/physical-summary.json \
+  --output logs/main-io-classification-new.json
+```
+
+本机按最新要求完成当前YOLO、添加文件后停止；不追加完整P&R、MPNR或原生help/probe。
 
 ### A/B复测与内存
 
