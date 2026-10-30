@@ -10,4 +10,6 @@ software/yolo/vendor/** -text -whitespace
 software/yolo/assets/** -text
 software/minimind3/model/** -text
 software/minimind3/c_runtime/assets/** -text
-tb/assets/** -text
+tb/assets/** -text -whitespace
+*.rgb binary
+*.bin binary
