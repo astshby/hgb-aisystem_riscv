@@ -23,8 +23,8 @@ def main():
     inputs = sorted(set(p for p in tracked+generated_sources
                         if p.startswith(('vsrc/', 'tb/', 'scripts/', 'third_party/')) and Path(p).is_file()))
     initial_hashes = {p:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in inputs}
-    out = root / 'build' / f'all-system-rv{args.xlen}'
-    logs = root / 'logs' / f'all-system-rv{args.xlen}' / f'attempt-{time.time_ns()}'
+    out = (root / 'build' / f'all-system-rv{args.xlen}').resolve()
+    logs = (root / 'logs' / f'all-system-rv{args.xlen}' / f'attempt-{time.time_ns()}').resolve()
     out.mkdir(parents=True, exist_ok=True)
     logs.mkdir(parents=True, exist_ok=True)
     commands = []
