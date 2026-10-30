@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / 'scripts/benchmark_platforms.json'
-from hardware_config import PROFILE, PROFILE_PATH, cache_memory
+from hardware_config import PROFILE, PROFILE_PATH, cache_memory, clock_periods
 CONFIG = dict(PROFILE, **json.loads(CONFIG_PATH.read_text()))
 DOMAINS = ('core', 'sys', 'ddr', 'periph')
 
@@ -22,7 +22,7 @@ def configuration(platform, clock='target', xlen=32, icache_bytes=None, dcache_b
     identity = sha(CONFIG_PATH) + sha(PROFILE_PATH)
     if memory != CONFIG['memory']:
         identity += json.dumps(memory, sort_keys=True)
-    periods = dict(CONFIG['clock_periods_ps'][clock])
+    periods = clock_periods(clock, bool(result.get('npu_enable')))
     if result.get('npu_enable'):
         result['npu_period_ps'] = periods.get('npu', result['npu_period_ps'])
         periods['npu'] = result['npu_period_ps']

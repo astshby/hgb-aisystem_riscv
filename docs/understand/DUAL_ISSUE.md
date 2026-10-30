@@ -17,6 +17,13 @@ LQ 与 SQ 分离描述符/有效位/完成状态，`load_store_queue` 管双数�
 两个 AGU 不代表两个任意 Store 可以同时提交；第二数据口按当前优化配置只承担读路径。
 共享年龄关系、Store→Load 字节转发和新分配 Load 提前请求减少等待，同时保留请求寄存边界。
 
-本轮未改 Core 算法，软件拆分和 NPU 跨域接口沿用共同 Core 源码。
+2026-10-30条件候选`b94580c`保持8/10/10级与包宽401/625位，调整三个组合边界。
+RAT先从`map_q[rs]`选中条目再检查退休，第二槽显式旁路第一槽的新标签；映射更新、
+checkpoint和恢复仍按原顺序。D1为合法B/JAL提前计算绝对目标并复用`imm`字段，
+scoreboard中的D1和branch_unit配对开启`PC_REL_TARGET_IN_IMM`；JAL沿用原专用快路，
+JALR和其他指令继续保存原位移，legacy默认参数为0。IQ/ISS以后解释B/JAL包时须遵循该语义。
+ISS的`STATIC_SELECT`用固定两槽压缩/插入替代宽包可变索引，保留原标记、无效槽载荷和复位/flush行为。
+这些修改不增加等待拍或状态位；RAT双宽4项、B/JAL与ISS双宽12项对照通过，频率与整体回归另记。
+
 `make scoreboard-test XLEN=32|64` 覆盖 RAT、RAW/WAW、广播、双发射、恢复、退休、LSU 和完成队列；
 `make check` 另覆盖 ISA、异常/CSR、SoC 与异频通信。历史实验通过本地 archive 标签和 git log 查询。

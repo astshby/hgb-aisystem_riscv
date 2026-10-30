@@ -107,7 +107,9 @@ def freeze(bundle, iterations, modes):
     return manifest
 
 
-def build(config, root):
+def build(config, root, jobs=1):
+    if jobs <= 0:
+        raise ValueError('jobs must be positive')
     top=config['sim_top']
     binary=root/('V'+top)
     sources=p2.rtl_sources()
@@ -120,7 +122,7 @@ def build(config, root):
         return binary,receipt
     root.mkdir(parents=True,exist_ok=False)
     p2.copy_sources([Path(p) for p in sources],root/'source')
-    command=['verilator','--binary','--assert','--timing','-Wall','-Wno-fatal','-j','2','-CFLAGS','-O1',
+    command=['verilator','--binary','--assert','--timing','-Wall','-Wno-fatal','-j',str(jobs),'-CFLAGS','-O1',
              *[f'-D{k}={v}' for k,v in config['macros'].items()],
              '-f','scripts/system_files.f','tb/common/store_result_monitor.sv',
              'tb/common/scoreboard_metrics.sv','tb/benchmark/bind_scoreboard_metrics.sv',
@@ -159,8 +161,9 @@ def parse_tcm(text, image, config):
         raise ValueError('TCM execution did not retire a successful tohost store')
     p2.parse_core_config(text,core_record(config))
     if config['platform']=='core_tcm':
-        period=re.search(r'^UNIFIED_TCM core_period_ps=(\d+) itcm_bytes=65536 dtcm_bytes=65536 cache=0 ddr=0$',text,re.M)
-        if not period or int(period[1])!=config['periods_ps']['core']:
+        period=re.search(r'^UNIFIED_TCM core_period_ps=(\d+(?:\.\d+)?) itcm_bytes=65536 dtcm_bytes=65536 cache=0 ddr=0$',text,re.M)
+        # TB打印到1e-6 ps；容差仅覆盖显示舍入，整数化的新档会被拒绝。
+        if not period or abs(float(period[1])-config['periods_ps']['core']) > 0.000001:
             raise ValueError('core TCM clock/memory configuration mismatch')
     else:
         hardware=re.search(r'^P2_HARDWARE (.*)$',text,re.M)
@@ -209,8 +212,10 @@ def replay(binary, config, bundle, image, output, receipt):
     if ddr or image['scenario']=='tcm_background': command += ['+P2_ROI=01100100','+P2_METRICS','+P2_PLATFORM']
     run(command,log)
     text=log.read_text()
-    if config.get('npu_enable') and f'NPU_HARDWARE enabled=1 period_ps={config["npu_period_ps"]}' not in text:
-        raise ValueError('missing NPU clock/configuration receipt')
+    if config.get('npu_enable'):
+        npu_clock = re.search(r'^NPU_HARDWARE enabled=1 period_ps=([0-9.]+)', text, re.M)
+        if not npu_clock or abs(float(npu_clock[1])-config['npu_period_ps']) > 0.001:
+            raise ValueError('missing or mismatched NPU clock/configuration receipt')
     periods=[config['periods_ps'][d] for d in DOMAINS]
     result=(p2.parse_result(text,image['mode'],image['iterations'],
                            'background' if image['scenario']=='npu_background' else image['scenario'],
@@ -281,6 +286,7 @@ def main():
     parser.add_argument('--scenarios',nargs='+',choices=sorted({s for p in CONFIG['platforms'].values() for s in p['scenarios']}))
     parser.add_argument('--modes',nargs='+',choices=p2.EXPECTED,default=list(p2.EXPECTED))
     parser.add_argument('--iterations',type=int,default=2)
+    parser.add_argument('--jobs',type=int,default=1,help='Verilator compile workers; default 1 to limit memory use')
     parser.add_argument('--icache-bytes',type=int)
     parser.add_argument('--dcache-bytes',type=int)
     parser.add_argument('--dcache-bank-xor-mask',type=int,choices=(0,1,2,3),default=0)
@@ -289,6 +295,7 @@ def main():
     parser.add_argument('--xlen',type=int,choices=(32,64),default=32)
     args=parser.parse_args()
     if args.iterations<=0: parser.error('iterations must be positive')
+    if args.jobs<=0: parser.error('jobs must be positive')
     if args.build_only and args.functional: parser.error('choose --build-only or --functional')
     if args.xlen==64 and not (args.build_only or args.functional): parser.error('RV64 is functional-only; use --functional')
     if not (args.build_only or args.functional) and args.scenarios and not any(
@@ -302,7 +309,7 @@ def main():
     for platform in args.platforms:
         for clock in args.clocks:
             config=configuration(platform,clock,args.xlen,args.icache_bytes,args.dcache_bytes,args.dcache_bank_xor_mask)
-            binary,receipt=build(config,(args.models.resolve() if args.models else output/'models')/f'{platform}-{clock}-rv{args.xlen}')
+            binary,receipt=build(config,(args.models.resolve() if args.models else output/'models')/f'{platform}-{clock}-rv{args.xlen}',args.jobs)
             if args.functional:
                 functional(binary,config,output,receipt)
             if firmware:

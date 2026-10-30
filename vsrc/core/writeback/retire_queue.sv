@@ -54,7 +54,9 @@ module retire_queue #(
     output pipeline_pkg::retire_gpr_entry_t        producer_entries [core_config_pkg::RETIRE_ENTRIES],
     // 完成源用寄存 ID 并行预检；选中后不再经 ROB 动态读决定是否广播。
     input  pipeline_pkg::retire_id_t               probe_id [PROBE_PORTS],
-    output logic [PROBE_PORTS-1:0]                 probe_accept
+    output logic [PROBE_PORTS-1:0]                 probe_accept,
+    // 仅供无副作用的操作数预览；同拍分支取消仍由 ROB 写回及 IQ 所有权处理。
+    output logic [PROBE_PORTS-1:0]                 probe_live
 );
     import core_config_pkg::*;
     import pipeline_pkg::*;
@@ -95,9 +97,10 @@ module retire_queue #(
     // 每个完成源在仲裁前用自己的寄存 ID 检查槽状态；条件与 complete_match 相同，
     // 结果只用于选中后关闭广播，不替代 complete 握手，旧完成仍照常弹出。
     for (genvar probe = 0; probe < PROBE_PORTS; probe++) begin : g_accept_probe
-        assign probe_accept[probe] = valid_q[probe_id[probe].slot] &&
+        assign probe_live[probe] = valid_q[probe_id[probe].slot] &&
             generation_q[probe_id[probe].slot] == probe_id[probe].generation &&
-            !done_q[probe_id[probe].slot] && !killed[probe_id[probe].slot];
+            !done_q[probe_id[probe].slot];
+        assign probe_accept[probe] = probe_live[probe] && !killed[probe_id[probe].slot];
     end
 
     assign second_head = head_q + RETIRE_IDX_W'(1);

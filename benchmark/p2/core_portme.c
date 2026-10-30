@@ -253,7 +253,7 @@ void portable_init(core_portable *portable, int *argc, char *argv[])
     portable->portable_id = 1;
     if (p2_platform[0] != 0x50324346u || p2_platform[1] != 1 ||
         p2_platform[2] == 0 || p2_platform[2] > 1000000u ||
-        p2_platform[3] > 8 || p2_platform[3] == 5) fail(86);
+        p2_platform[3] > 10 || p2_platform[3] == 5) fail(86);
     if (timer_mode > 1 || requested_interval_ps == 0) fail(87);
     timer_ticks = timer_mode == 1 ? LEGACY_TIMER_TICKS :
         (uint32_t)(((uint64_t)requested_interval_ps + p2_platform[2] - 1) / p2_platform[2]);

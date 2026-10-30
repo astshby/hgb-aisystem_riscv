@@ -41,7 +41,7 @@ module tb_scoreboard_lsu_slots;
     load_store_queue #(.COMPLETION_PORTS(ENTRIES)) dut (.*);
     completion_select #(.SOURCES(SOURCES)) u_select (
         .rst, .head_slot, .source_valid, .source_accept, .source_ready, .source_completion,
-        .complete_valid(selected_valid), .complete_accept(selected_accept), .completion(selected)
+        .complete_valid(selected_valid), .complete_accept(selected_accept), .source_live('0), .complete_live(), .completion(selected)
     );
     assign source_accept = source_valid;
     for (genvar slot = 0; slot < ENTRIES; slot++) begin : g_lsu_source

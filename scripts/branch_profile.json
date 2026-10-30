@@ -3,5 +3,5 @@
   "default_accelerator": "none",
   "accelerators": [],
   "coremark": true,
-  "rt_thread": true
+  "rt_thread": false
 }

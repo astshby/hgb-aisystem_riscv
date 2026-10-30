@@ -18,3 +18,12 @@ coremark-platforms:
 coremark-platforms-test:
 	python3 -m unittest tb.scripts.test_unified_coremark tb.scripts.test_p2_coremark tb.scripts.test_p2_build_config tb.tools.test_soc_clock_plan tb.tools.test_measurement_constraints
 
+# 常驻裸机 UART 程序。正式构建按真实 Core 时基运行至少十秒；短测试另列。
+.PHONY: coremark-board coremark-board-test coremark-board-uart
+coremark-board:
+	bash scripts/coremark/build_board.sh $(XLEN)
+coremark-board-test:
+	python3 -m unittest tb.scripts.test_coremark_board tb.scripts.test_coremark_board_host
+coremark-board-uart:
+	python3 scripts/coremark/run_uart.py --xlen $(XLEN) $(COREMARK_BOARD_UART_ARGS)
+

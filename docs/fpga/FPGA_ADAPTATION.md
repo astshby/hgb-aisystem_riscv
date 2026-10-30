@@ -2,23 +2,169 @@
 
 ## 当前应用时钟与PDS入口
 
-2026-10-29，main采用C6无NPU完整系统100/100/125/60 MHz；以下C7/C8为YOLO用途分支的配置记录，
-C7 YOLO为90/100/125/60/100 MHz，C8将YOLO Core改为900/11≈81.818182 MHz。
-系统GPLL的900 MHz VCO分别使用/9、/10或/11、/9、/15、/9分频；DDR用户钟125 MHz仍由DDR IP提供。
-C8频率寄存器四舍五入为81818182 Hz，FDC用36/55的精确参考比。C1/C4/C5保留历史对照。
-PLL、板级时钟发现、UART/timer和应用仿真同步改档；仿真使用分数周期累计边沿，避免逐半拍取整漂移。
+2026-10-30，main为无NPU完整系统，C9 `main_margin2`：
+Core/SYS/DDR-user/外设为88.75/98.611111/125/68.269231 MHz。
+系统GPLL输入125 MHz，I/M/F=10/1/71，VCO887.5 MHz，输出分频10/9/13；
+DDR用户钟125 MHz由DDR IP提供。PLL、FDC、TB、频率寄存器和软件时基使用同一profile。
+main不保留RT-Thread或NPU，RT仅在all。YOLO独立分支采用C10并由A负责，main和MiniMind由B负责。
 
-当前统一入口默认`max_threads=8`，`HGB_PDS_THREADS`可覆盖；综合入口同样使用8线程。
-性能策略timing-v3固定fanout128、retiming开、资源共享关，布局LUT合并关，布线时序权重90；布局/布线均为normal。
-旧timing-v2的64/80报告继续按旧参数核验。当前授权先完成仿真和四组综合，不启动完整布局布线。
-本机`pds_shell`已接受`set_option max_threads 4`；实际各阶段线程数、峰值内存和耗时需从随后运行日志记录，
-尚无同输入1/8线程加速比。使用normal布局/布线和原有内存预检；性能策略生成器已取消本机不支持的performance模式。
-原生帮助的`route`未列旧手册的`number_of_router_thread`，新入口通过全局max_threads控制并行，不传该旧参数。
-对应选项帮助保存在`$PDS_WORK_ROOT/work/final-app60-20261029/option-check/`，仿真证据在`logs/final-app60-20261029/`。
+本轮统一8线程、timing-v2：fanout64、retiming开启、算术资源共享关闭、normal布局/布线、
+双输出LUT合并关闭、route时序权重80、GP/route recovery和route_optimize开启。
+旧timing-v3的128/90保留；fast不使用，PDS2025.2的place/route不支持performance模式。
 
-新档尚未综合或布线。此前C5的Core/NPU布线Fmax为85.7036/97.9528 MHz，不能继承为新档结果。
-完整程序仍须完成真实UART的CoreMark命令循环、独立RT-Thread演示、板端完整YOLO及HDMI、MiniMind文本交互。
-仅算子或一次性软件测试不计完整程序交付；增加视频通路后必须对最终YOLO硬件重新物理验收。
+完整交互固件为`build/coremark-board/rv32-O3-i0-b115200`，生产ID `ea1773fca42aa7c6`。
+冻结目录保留program.elf、20项源/HEX身份，生产test_iterations=0；
+上电READY后回车/P运行performance，V运行validation，返回64位周期/CRC、DONE、READY。
+软件从实际硬件频率寄存器取得UART和计时参数，正式计分需运行至少十秒；尚无板上成绩。
+双宽旧C6短流程已通过，迭代2、500000 baud、formal=0，不替代正式成绩。
+
+硬件82cbf7a、I16/D8/hash2的完整C9综合估计如下；综合阶段Core低于所选工作档，后续布线结果单列。
+新旧时钟、综合/物理策略和RTL有差异，不能把差额归因单项修改。
+
+| 域 | 目标MHz | 综合估计Fmax MHz | setup WNS ns |
+|---|---:|---:|---:|
+| Core | 88.75 | 83.5307 | −0.704 |
+| SYS | 98.611111 | 110.0987 | +1.058 |
+| DDR user | 125 | 144.7387 | +1.091 |
+| 外设 | 68.269231 | 93.3476 | +3.935 |
+
+综合LUT56468、FF60595、DRM38、APM4、latch0。原件在
+`$PDS_WORK_ROOT/work/release-ab-20261030/main-coremark-r2/`，
+本地摘要为`logs/release-ab-20261030/main-synthesis-summary.json`。
+最差综合路径是ISS操作数经branch、issue许可和early广播返回memory IQ/ISS；
+18级，data11.485 ns，其中logic2.245、估计net9.240 ns，最大扇出64。
+### 本轮完整布局布线
+
+唯一一次P&R于2026-10-30 14:06正常退出，原生用时1h33m04s；固件、IP和时钟与上表同一冻结输入。
+
+| 域 | 工作档MHz | 布线Fmax MHz | setup WNS ns |
+|---|---:|---:|---:|
+| Core | 88.75 | 90.3702 | +0.202 |
+| SYS | 98.611111 | 107.5410 | +0.842 |
+| DDR user | 125 | 131.9784 | +0.423 |
+| 外设 | 68.269231 | 78.5252 | +1.913 |
+
+0未布通；LUT75364（含常量/旁路）、FF60590、DRM36K38、APM4。
+slow/fast hold最小+0.054/+0.042 ns，recovery+2.871/+4.823、removal+0.363/+0.222、MPW均+0.035，失败端点均0。
+CDC max-delay最小+3.278/+6.125，Gray skew+6.402/+6.688；同域/第二同步级误例外0。
+DDR PHY的ddrphy_sysclk→phy_dq_sysclk_1仍有1端点setup−0.028 ns，
+实际是phy_wrdata_en_d[0]→DQS group1 TS_CTRL[2]，6.019 ns中线路5.511 ns，占91.6%。
+I/O缺35输入/73输出delay，尚无bitstream/板测；只能确认C9四工作域通过，不能宣布整机全部闭合或Core100 MHz达标。
+
+实际Core最差转为retire generation→LSU选择→store hint broadcast[9]→integer IQ packet CE，
+14级、扇出156、data10.268 ns=logic2.745+net7.523，线路占73.3%。
+报告的100条Core slow路径中77条经过store hint[7–10]，其余最差为head copy→IQ packet D、WNS+0.307 ns。
+七广播候选须与真实TCM效率一起验证；去掉hint后仍有接近的非hint路径，不能据此承诺100 MHz。
+旧90.6208到本轮90.3702 MHz为−0.28%，SYS/DDR/外设能力提高，FF少3463；配置、策略、RTL均不同，不能分摊为某项优化收益。
+DDR用户域已通过125 MHz，原读缓冲候选移后；PHY使能那1条负路径须单独处理，不能靠改DDR用户侧载荷清零逻辑代替。
+
+本轮devmap9m21、place9m46、route1h08m36、opt2m55；工具池峰值12995 MB，route峰4946 MB。
+入口与大阶段双6 GiB门禁通过，运行中提交余量可低于6 GiB，日志保留实际样本；未改分页或停止无关进程。
+原始报告在上述Windows工程，摘要、完整路径和精确命令/哈希在
+logs/release-ab-20261030/main-physical-r1/{physical-receipt.json,actual-worst-paths.txt}。
+
+### 新工程和原生CDC
+
+先设置RISCV_TOOL_ROOT、PDS_HOME和PDS_WORK_ROOT；生成DDR IP目录必须包含pnr/ddr_test.fdc。
+下列命令在WSL执行，PDS_WORK_ROOT使用/mnt盘符映射，输出用未存在的新目录：
+
+```bash
+make coremark-board XLEN=32
+python3 scripts/pango/prepare_project.py \
+  --output "$PDS_WORK_ROOT/work/main-c9-new" \
+  --ip-dir "$PDS_WORK_ROOT/work/clocks-c5-yolo-20261029/ddr-ip/candidate/ddr3_test" \
+  --xlen 32 --core-backend scoreboard --board-clock-profile 9 \
+  --soc-profile full --icache-bytes 16384 --dcache-bytes 8192 --dcache-bank-xor-mask 2 \
+  --firmware-dir build/coremark-board/rv32-O3-i0-b115200 \
+  --firmware-role coremark-interactive --synthesis-strategy timing-v2
+```
+
+兼容入口默认仍为旧时钟和4/4 KiB，不能省略上面的profile/Cache参数。
+Windows PDS先用scripts/pango/run_phase.ps1的synthesis阶段编译；
+用summarize_benchmark.py解析该次日志，prepare_cdc_audit.py生成查询，
+在原生open_design的synthesize动作内查询对象与时钟根，再以--bind-log发布
+backend_sync.lcf、backend_cdc.scf和scope收据；implementation默认implement_cdc.tcl。
+query_cdc.tcl通过Windows环境HGB_PDS_PROJECT打开已有.pds，
+implementation不再创建工程；只open_project后的延迟句柄不计原生绑定证据。
+两份约束必须在dev_map前加载，第二同步级、普通同域、复位和DDR PHY继续检查。
+
+main本轮绑定31 FIFO、442同步FF、93 max-delay和60 max-skew；
+YOLO还包含视频FIFO及同步器，必须使用它自己的原生清单，不能套main对象数。
+新C9的分层CoreMark由B从当前P2源重新构建并冻结bundle，旧ELF拒绝C9/C10。
+原有分层分数继续保留为旧档测量。
+
+### A/B复测与内存
+
+本机只做完整main、完整YOLO各一次同策略P&R。A复用YOLO报告后处理UART、DDR资源加载、
+HDMI与上板；B复用main报告后重测分层CoreMark、UART并修MiniMind多写RAM。
+仅在实际失败路径或板级约束已修复时，A、B各最多再做一次P&R；MiniMind先修RTL和综合，
+本计划不追加MiniMind布线或种子矩阵，all不做PDS。
+
+本机Windows可见31.78 GiB内存、24逻辑CPU，WSL约15 GiB并有4 GiB swap；
+PDS请求8线程，STA历史最多4进程。启动及每大阶段要求Windows物理余量和真实提交余量各至少6 GiB，
+约10分钟查看一次阶段/内存，错误/结束单独记录。Linux available不能代替Windows提交量。
+WSL缓存曾令Windows只余物理3.70 GiB、提交1.03 GiB，门禁拒绝启动；
+对自有已完成文件fsync并回收干净文件缓存后恢复到15.75/8.42 GiB，没有修改分页或结束无关进程。
+只有可重建且已结束的中间文件经哈希后可清理，固件、模型、源码和原始报告继续保留。
+布局布线用于测实际线延迟、hold修复和资源分布，综合估计不能替代它；
+两组规模与时钟不同，也不能把对照差值全部归给某个RTL或64/80策略。
+
+## 历史C6交互候选（2026-10-30）
+
+2026-10-30的条件候选采用旧RTL `d273172`、新RTL `b94580c`配对，工程位于`$PDS_WORK_ROOT/work/c6-interactive-20261030/{baseline,candidate}`，两套使用相同交互ELF/HEX/DDR IP/时钟/综合策略。原物理87.3057 MHz使用旧自动O3/64固件，不能将其与新交互镜像直接当作纯RTL配对收益。配对SYN、双宽回归与唯一追加P&R均已完成；本次从新SYN查询CDC对象/时钟根，绑定发布93 delay/60 skew及scope收据。入口工具163项Python与14项原生PowerShell检查通过。
+
+新交互程序的实际四域UART仿真已通过RV32/RV64启动、P/V、计数/CRC回传、DONE和READY，使用2次迭代与500000 baud、`formal=0`；生产115200 baud、自动校准且至少十秒的正式板上成绩尚未测量。短流程与最终固件镜像身份分别记录，不将短流程数值作为正式CoreMark成绩。
+
+新建工程由prepare_project/prepare_benchmark复制CDC入口并写入输入哈希；旧清单仍按旧字段核验，不回写历史输入。对已完成SYN的工程在新物理目录追加CDC约束和新入口，保留原RTL/IP/固件/SYN文件哈希，不重新compile/synthesize。原生查询必须在`open_design`的synthesize动作内执行；仅open_project返回的`::tcicmd::`延迟句柄不计绑定证据。C6的60 MHz报告周期16.6667 ns按报告小数位与真实分数周期核对，不能因显示舍入改FDC周期。
+
+### 正式交互候选最终布局布线（2026-10-30）
+
+`b94580c`、生产固件ID `ea1773fca42aa7c6`、C6、I16/D8/hash2于07:25:43完成唯一追加P&R。
+本轮没有第二个物理候选、不升级baseline；原生工程为`$PDS_WORK_ROOT/work/c6-interactive-20261030/candidate/`。
+
+| 域 | 目标MHz | 最终Fmax MHz | setup WNS ns |
+|---|---:|---:|---:|
+| Core | 100 | 90.6208 | −1.035 |
+| SYS | 100 | 100.9082 | +0.090 |
+| DDR user | 125 | 124.1619 | −0.054 |
+| 外设 | 60 | 73.0004 | +2.968 |
+
+0未布通；LUT75543（含常量/旁路）、FF64053、DRM36K38、APM4。
+slow/fast hold最小+0.062/+0.039 ns，recovery+1.890/+4.115、removal+0.244/+0.163、MPW均+0.035，均0失败。
+CDC max_delay最小+2.781/+4.820，Gray skew最小+4.395/+5.625，无受保护路径误例外。
+DDR PHY setup/hold均通过，最小slow setup+0.089、fast hold+0.042；DDR用户域自身3端点−0.054，Core3222端点−1.035。
+35输入/73输出delay仍缺，1个virtual clock，no_clock/loop/latch为0；没有bitstream或板测。
+
+耗时1:19:45：devmap9:37、place8:52、route57:30、opt2:35、report1:11；工具池峰place12088 MB、route4860 MB。
+请求8线程，STA实际最多4进程；所有阶段使用原memory gate，启动前Windows物理/提交余量9.268/6.671 GiB，
+退出后13.491/13.225 GiB，无运行PDS。没有调整分页、停止无关进程或放宽约束。
+
+实际Core最差是ISS操作数→分支方向→ROB取消→完成选择/广播→memory IQ→ISS，
+14级、data10.326 ns=logic2.875+net7.451（72.16%），最大扇出63；两段net1.578/1.491 ns。
+它与SYN的JALR路径不同，后续按实际弧段处理。物理收据和完整路径在
+`logs/closing-c6-20261030/physical/{physical-receipt.json,actual-worst-paths.txt}`。
+旧物理使用自动固件，不能将旧/新物理差值全部归到单项RTL；严格同固件SYN对照与性能周期另见优化文档。
+
+### 原RTL C6布局布线（2026-10-30）
+
+工程`$PDS_WORK_ROOT/work/main-coremark-c6-cdc-20261029/`于01:27:37完成。复用80576b9的baseline-main SYN，硬件与main@e3bcf17等价；RV32、I16/D8/hash2、TCM各64 KiB。31个FIFO、442同步寄存器、16244原生引脚已绑定，93条max_delay及60条max_skew在映射前加载。
+
+| 域 | 目标MHz | 最终Fmax MHz | setup WNS ns |
+|---|---:|---:|---:|
+| Core | 100 | 87.3057 | −1.454 |
+| SYS | 100 | 98.2415 | −0.179 |
+| DDR user | 125 | 122.5490 | −0.160 |
+| 外设 | 60 | 72.2201 | +2.820 |
+
+0未布通；LUT74,746、FF61,967、38 DRM36K、4 APM。物理LUT包含常量/旁路，不能直接与综合逻辑LUT比较。总耗时2小时19分10秒；place峰值14,079 MB，route4,555 MB，route_optimize4,780 MB。请求8线程，实际route8、Timing4；没有同输入1/8线程速度对照。
+
+slow/fast全部hold、recovery、removal、MPW、PHY skew通过，fast hold最小+0.025 ns。CDC max_delay最小+1.741 ns、Gray max_skew最小+5.144 ns，无同步路径误例外。DDR→PHY0另有setup−0.027 ns、5失败端点；35 input/73 output缺delay逐端口保存。Core/SYS/DDR user同域setup未闭合，不能据CDC通过宣布整机100 MHz通过。
+
+Core前100路径中，79条为系统TCM读地址→译码/辅助口选择/碰撞→fetch_fire，最差−1.454 ns；15条reset→ROB/commit→rename→IQ，最差−1.215 ns、复位扇出2372；6条ISS反馈经过分支/ROB取消/完成选择/广播/IQ，最差−1.134 ns。TCM末网fetch_fire扇出195、单网2.462 ns。先评估原推进边沿保存地址游标、局部TCM合法位、并行碰撞比较，同时检查复位与ISS反馈；单改TCM不足以承诺100 MHz。SYS的write_error−0.179 ns、DDR写/读选择及PHY0分别处理。
+
+原件摘要和76条逐arc分析保存在`logs/main-coremark-c6-cdc-20261029/{physical-summary.json,physical-path-analysis.json,physical-worst-paths.txt}`，完整原生报告仍在Windows工程。hold修复前后最差setup均−1.454 ns，逻辑数据实例和LUT/FF未变，没有新增数据buffer导致Core下降的证据。每次启动/大阶段检查物理与提交余量各≥6 GiB；未改分页、未停止无关进程。
+
+本次固件是冻结O3/64次TCM performance、sim_console输出。新独立UART CoreMark已通过双宽真实SoC流程短测，RT终端已双宽构建；均未替换该物理工程固件，没有bitstream或板级验收。Logos2的免重布线INIT更新流程尚未验证。按用户顺序先完成演示仿真；频率仍未达标且候选验证有收益后，才追加一次优化P&R。
 
 ## 历史停止点：TCM重构后布局布线前
 
@@ -37,11 +183,12 @@ PDS 查询使用 128 项精确引脚分组，避开延迟集合句柄及 1000 �
 保留性能策略综合数据库、配对 O3 YOLO 固件、`backend_cdc.scf`、`backend_sync.lcf`、`ready-inputs.json` 和 `READY.json`。
 `implement_ready.tcl` 每次打开工程后显式加载两份约束，再运行物理阶段；PDS CLI 的 `save_project` 仅适用于 GUI，
 此入口不依赖它保存约束。`launch-physical.ps1` 先核对文件哈希和内存，再调用上述入口。
-使用 performance 放置和布线，非 fast；单线程，约 10 分钟打印进度，结束/失败立即返回。
+该历史准备稿曾填写performance放置/布线；PDS2025.2仅支持fast/normal，
+该配置未执行物理阶段。后续使用上文normal入口，约10分钟检查进度，结束/失败记录。
 映射、布局、布线、优化前分别检查物理与提交余量各至少 6 GiB。最终报告启用 max-skew 与 exception 明细。
 
 2026-10-29 00:15 的预检为物理 14.988 GiB、提交余量 8.370 GiB；下次启动时重新查询。
-待审核后，从 Windows PowerShell 执行以下入口，本轮未执行：
+历史准备入口如下；未执行，不能直接用于本轮新RTL/时钟：
 
 ```powershell
 & "$env:PDS_WORK_ROOT\work\tcm-bram-20261028\yolo\physical-ready\launch-physical.ps1" -PdsHome $env:PDS_HOME
@@ -51,7 +198,7 @@ PDS 查询使用 128 项精确引脚分组，避开延迟集合句柄及 1000 �
 Core 综合为 92.9282 MHz、100 MHz 下 WNS −0.761 ns。当前没有布线 Fmax/WNS、零未布通、bitstream 或板级结果；
 物理阶段继续检查 Gray 最大偏斜、同域 setup/hold、DDR PHY 和 I/O，不能据本次 CDC 对照宣称整体时序闭合。
 
-## 配置与入口
+## 历史配置与入口（2026-10-27）
 
 Windows PDS 2025.2 ADS，器件 PG2L200H-6IFBB676，HMIC_S 1.10 DDR3 IP。
 生成 IP 和原生工程使用 `$PDS_WORK_ROOT` 的新目录；`reference` 只读。
@@ -62,7 +209,7 @@ C1 目标 Core/SYS/DDR-user/外设 = 100/80/125/25 MHz。
 C5 目标 Core/SYS/DDR-user/外设/NPU = 90/100/125/25/100 MHz，供 YOLO 布局布线；见下节。
 `pango_soc_pll` 为功能域生成时钟，DDR 用户时钟来自 DDR IP；选定加速器使用额外 100 MHz 输出。
 
-`prepare_project.py --core-backend scoreboard --board-clock-profile 6 --icache-bytes 16384 --dcache-bytes 8192 --dcache-bank-xor-mask 2` 暂存当前无加速器板级基线；
+`prepare_project.py --core-backend scoreboard --board-clock-profile 6 --icache-bytes 16384 --dcache-bytes 8192 --dcache-bank-xor-mask 2` 暂存当时无加速器板级基线；
 加 `--npu-enable` 或 `--mm3-enable` 选择对应加速器。两标志互斥，分支未保留的设备不能选择。
 加速器专用分支从 `branch_profile.json` 读取默认设备，all 默认无设备。
 默认入口已选择 scoreboard/C1；显式 legacy 使用原共同时钟，仍可显式覆盖时钟档。
@@ -335,7 +482,7 @@ Fmax 是对应域内路径的综合估计，不等于已上板频率。WNS、资
 端点绑定、skew、DDR PHY/I/O 和板上启动仍需后续验收。不能用 false path 隐藏真实同步路径，
 也不能修改约束数字来宣称时序闭合。
 
-## 内存与启动
+## 启动边界
 
 每阶段开跑前至少 6 GiB 物理与提交余量。WSL 的可回收文件缓存也可能占 Windows 提交预算。
 本轮只对自己生成且闲置的构建文件使用 POSIX_FADV_DONTNEED，保留文件和日志；

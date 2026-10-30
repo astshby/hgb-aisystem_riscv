@@ -8,12 +8,156 @@ import shutil
 import subprocess
 import sys
 import re
+import struct
+from fractions import Fraction
 import xml.etree.ElementTree as ET
 
 
 GENERATED_SCRIPTS = ("compile.tcl", "synthesize.tcl", "implement.tcl")
+CDC_IMPLEMENTATION_SCRIPTS = ("implement_cdc.tcl",)
 MEMORY_SCRIPTS = ("memory_guard.ps1", "memory_gate.ps1")
 SYNTHESIZE_COMMANDS = "source compile.tcl\nsynthesize -ads -selected_syn_tool_opt 2\n"
+TIMING_V3_SYNTHESIS = ("synthesize -ads -selected_syn_tool_opt 2 -resource_sharing false "
+                       "-fanout_guide 128 -retiming -max_path 100 -nworst 3 "
+                       "-report_logic_level_distribution -report_exception TRUE")
+COREMARK_INPUTS = tuple("""
+software/coremark-board/startup.S software/coremark-board/main.c
+software/coremark-board/platform.c software/coremark-board/port.c
+software/common/baremetal/runtime.c software/common/baremetal/softarith.c
+benchmark/coremark/port/ee_printf.c benchmark/coremark/vendor/coremark/core_main.c
+benchmark/coremark/vendor/coremark/core_list_join.c benchmark/coremark/vendor/coremark/core_matrix.c
+benchmark/coremark/vendor/coremark/core_state.c benchmark/coremark/vendor/coremark/core_util.c
+software/coremark-board/board.h software/common/soc_clocks.h software/common/soc_capabilities.h
+software/common/baremetal/benchmark_runtime.h software/common/baremetal/link_soc.ld
+benchmark/coremark/port/core_portme.h benchmark/coremark/vendor/coremark/coremark.h
+scripts/coremark/build_board.sh
+""".split())
+
+
+def synthesis_commands(strategy="standard"):
+    if strategy == "standard":
+        return SYNTHESIZE_COMMANDS
+    if strategy not in ("timing-v2", "timing-v3"):
+        raise ValueError("unsupported synthesis strategy")
+    synthesis = TIMING_V3_SYNTHESIS.replace('-fanout_guide 128', '-fanout_guide 64') if strategy == 'timing-v2' else TIMING_V3_SYNTHESIS
+    return ('set hgb_root [file dirname [info script]]\n'
+            'puts [exec powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass '
+            '-File [file join $hgb_root memory_gate.ps1] -LogDirectory [file join $hgb_root memory] -Phase synthesis]\n'
+            'set_option max_threads 8\nsource [file join $hgb_root compile.tcl]\n' +
+            synthesis + '\nputs "HGB_SYNTHESIS_DONE"\n')
+
+
+def implementation_commands(template, strategy="standard"):
+    """Only newly staged timing-v2 projects use the measured 64/80 policy."""
+    if strategy == 'timing-v2':
+        if template.count('-slack_weight 90') != 1:
+            raise ValueError('timing-v2 requires the reviewed normal/90 implementation template')
+        return template.replace('-slack_weight 90', '-slack_weight 80')
+    if strategy not in ('standard', 'timing-v3'):
+        raise ValueError('unsupported implementation strategy')
+    return template
+
+
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def inspect_firmware(directory, xlen, role="loader", source_root=None):
+    """Validate actual initialized TCM bytes; interactive images keep program.elf."""
+    directory = Path(directory)
+    if role not in ("loader", "coremark-interactive"):
+        raise ValueError("unsupported firmware role")
+    elf_name = "program.elf" if role == "coremark-interactive" else "loader.elf"
+    elf = (directory / elf_name).read_bytes()
+    if (len(elf) < (52 if xlen == 32 else 64) or elf[:4] != b"\x7fELF" or
+            elf[4:6] != bytes((1 if xlen == 32 else 2, 1)) or elf[18:20] != b"\xf3\x00"):
+        raise ValueError("loader ELF width mismatch" if role == "loader" else
+                         "firmware ELF width/machine/endianness mismatch")
+    raw = {}
+    for name in ("imem.hex", "dmem.hex"):
+        words = (directory / name).read_text().split()
+        if len(words) != 65536 // (xlen // 8) or any(len(w) != xlen // 4 for w in words):
+            raise ValueError("invalid production TCM HEX: " + name)
+        raw[name] = b"".join(int(w, 16).to_bytes(xlen // 8, "little") for w in words)
+    identity = dict(role=role, elf=elf_name,
+                    image_sha256={n: sha(directory / n) for n in (elf_name, "imem.hex", "dmem.hex")})
+    if role == "loader":
+        return identity
+    receipt = json.loads((directory / "manifest.json").read_text())
+    config = receipt["config"]
+    if (config.get("xlen") != xlen or config.get("memory") != "tcm" or
+            config.get("test_iterations") != 0 or config.get("optimization") not in ("O2", "O3", "Ofast") or
+            type(config.get("baud")) is not int or config["baud"] <= 0 or
+            config.get("formal_minimum_seconds", 0) < 10 or config.get("target_seconds", 0) < 10):
+        raise ValueError("production interactive firmware requires matching XLEN, TCM and test_iterations=0")
+    sources = receipt["source_sha256"]
+    if set(sources) != set(COREMARK_INPUTS):
+        raise ValueError("interactive firmware requires its complete 20-source build receipt")
+    if source_root is None:
+        raise ValueError("interactive firmware source snapshot is required")
+    source_root = Path(source_root).resolve()
+    for name, digest in sources.items():
+        path = (source_root / name).resolve()
+        path.relative_to(source_root)
+        if sha(path) != digest:
+            raise ValueError("firmware source hash differs: " + name)
+    build_id = hashlib.sha256(json.dumps(dict(config=config, sources=sources), sort_keys=True).encode()).hexdigest()[:16]
+    if receipt.get("firmware_id") != build_id or receipt.get("image_sha256") != identity["image_sha256"]:
+        raise ValueError("interactive firmware build/image identity mismatch")
+    if xlen == 32:
+        entry, phoff, shoff, flags = struct.unpack_from("<4I", elf, 24)
+        phsize, phcount, shsize, shcount, names_index = struct.unpack_from("<5H", elf, 42)
+    else:
+        entry, phoff, shoff = struct.unpack_from("<3Q", elf, 24)
+        flags = struct.unpack_from("<I", elf, 48)[0]
+        phsize, phcount, shsize, shcount, names_index = struct.unpack_from("<5H", elf, 54)
+    if entry != 0x01000000 or flags != 0:
+        raise ValueError("interactive ELF entry/ISA ABI flags differ from supported initialized TCM")
+    segments = []
+    for index in range(phcount):
+        values = struct.unpack_from("<8I" if xlen == 32 else "<2I6Q", elf, phoff + index * phsize)
+        if xlen == 32:
+            kind, offset, address, physical, filesz, memsz, permissions, _ = values
+        else:
+            kind, permissions, offset, address, physical, filesz, memsz, _ = values
+        if kind != 1:
+            continue
+        region = next(((name, base) for name, base in (("imem.hex", 0x01000000), ("dmem.hex", 0x01100000))
+                       if base <= address < base + 65536), None)
+        if (region is None or address != physical or filesz > memsz or offset + filesz > len(elf) or
+                address + memsz > region[1] + 65536):
+            raise ValueError("interactive ELF LOAD segment outside TCM")
+        name, base = region
+        if raw[name][address-base:address-base+filesz] != elf[offset:offset+filesz]:
+            raise ValueError("interactive ELF/HEX bytes differ: " + name)
+        segments.append(dict(address=address, file_bytes=filesz, memory_bytes=memsz,
+                             flags=permissions, region=name))
+    if {s["region"] for s in segments} != {"imem.hex", "dmem.hex"}:
+        raise ValueError("interactive ELF must initialize both TCM regions")
+    def section(index):
+        values = struct.unpack_from("<10I" if xlen == 32 else "<2I4Q2I2Q", elf, shoff + index * shsize)
+        return values[0], values[4], values[5]
+    _, names_offset, names_size = section(names_index)
+    names = elf[names_offset:names_offset+names_size]
+    attributes = []
+    for index in range(shcount):
+        name, offset, size = section(index)
+        if names[name:].split(b"\0", 1)[0] == b".riscv.attributes":
+            attributes += re.findall(rb"rv(?:32|64)i[0-9]+p[0-9]+(?:_[a-z0-9]+)*", elf[offset:offset+size])
+    if len(attributes) != 1:
+        raise ValueError("interactive ELF is missing unambiguous RISC-V ISA attributes")
+    arch = attributes[0].decode()
+    tokens = arch.split("_")
+    if not tokens[0].startswith("rv" + str(xlen) + "i") or any(
+            not re.fullmatch(r"(?:m|zicsr|zifencei|zmmul)[0-9]+p[0-9]+", token) for token in tokens[1:]):
+        raise ValueError("interactive ELF requires unsupported ISA extensions: " + arch)
+    if build_id.encode() not in raw["dmem.hex"]:
+        raise ValueError("interactive firmware ID is absent from initialized DTCM")
+    return dict(identity, firmware_id=build_id, build_config=config, source_sha256=sources,
+                build_commit=receipt.get("source_commit"), build_source_status=receipt.get("source_status"),
+                build_manifest_sha256=sha(directory / "manifest.json"),
+                entry=entry, elf_arch=arch, elf_flags=flags, load_segments=segments,
+                boot="reset ROM0 trampoline -> initialized ITCM0x01000000", clocks="runtime discovery")
 SCOREBOARD_CONFIGURATION = {
     "core_backend": "scoreboard", "core_issue_width": 2, "core_retire_entries": 16,
     "core_issue_queue_entries": 8, "core_load_queue_entries": 4,
@@ -52,6 +196,10 @@ BOARD_CLOCK_PROFILES = {
         "ddr": 125000000, "periph": 60000000},
     8: {"name": "C8", "core": 81818182, "sys": 100000000,
         "ddr": 125000000, "periph": 60000000},
+    9: {"name": "C9", "core": 88750000, "sys": 98611111,
+        "ddr": 125000000, "periph": 68269231},
+    10: {"name": "C10", "core": 83806818, "sys": 102430556,
+         "ddr": 125000000, "periph": 65848214},
 }
 # 相对 125 MHz ref_clk 的 GTP_GPLL 输出比；与 pango_soc_pll 的 STATIC_RATIO* 对齐。
 # C5 的 GPLL 分频是 900/10、900/9、900/36，折算到 ref_clk 即 18/25、4/5、1/5。
@@ -62,7 +210,38 @@ BOARD_CLOCK_RATIOS = {
     6: {"core": (4, 5), "sys": (4, 5), "periph": (12, 25)},
     7: {"core": (18, 25), "sys": (4, 5), "periph": (12, 25)},
     8: {"core": (36, 55), "sys": (4, 5), "periph": (12, 25)},
+    9: {"core": (71, 100), "sys": (71, 90), "periph": (71, 130), "npu": (71, 90)},
+    10: {"core": (59, 88), "sys": (59, 72), "periph": (59, 112), "npu": (59, 80)},
 }
+BOARD_PLL_PARAMETERS = {
+    9: dict(reference_hz=125000000, input_div=10, multiply=1, feedback_div=71,
+            output_div=dict(core=10, sys=9, periph=13, npu=9)),
+    10: dict(reference_hz=125000000, input_div=8, multiply=1, feedback_div=59,
+             output_div=dict(core=11, sys=9, periph=14, npu=10)),
+}
+
+
+def board_clock_hz(profile, domain):
+    if domain == 'ddr':
+        return 125000000
+    ratio = BOARD_CLOCK_RATIOS[profile].get(domain, (4, 5))
+    return round(Fraction(125000000 * ratio[0], ratio[1]))
+
+
+def board_clock_periods(profile, clocks):
+    # 旧档继续按历史整数Hz生成；C9/C10直接由PLL比率生成分数周期。
+    if profile < 9:
+        return {domain: 10**12 / hz for domain, hz in clocks.items()}
+    result = {}
+    for domain in clocks:
+        multiply, divide = (1, 1) if domain == 'ddr' else BOARD_CLOCK_RATIOS[profile][domain]
+        result[domain] = float(Fraction(8000 * divide, multiply))
+    return result
+
+
+def board_clock_relationship(profile):
+    vco = 887.5 if profile == 9 else (921.875 if profile == 10 else (900 if profile >= 5 else 800))
+    return f'independent_gpll_{vco}mhz_vco'
 
 
 def verify_default_board_clocks(wrapper):
@@ -125,8 +304,14 @@ def verify_independent_board_clocks(wrapper, profile):
                    "(BOARD_CLOCK_PROFILE>=4?100000000:80000000)"),
         "PERIPH_HZ": ("25000000", "(BOARD_CLOCK_PROFILE>=6?60000000:25000000)"),
     }
+    formulas['HOT_HZ'] += ('(BOARD_CLOCK_PROFILE==9?88750000:(BOARD_CLOCK_PROFILE==10?83806818:'
+                           '(BOARD_CLOCK_PROFILE==8?81818182:((BOARD_CLOCK_PROFILE==5||BOARD_CLOCK_PROFILE==7)?90000000:100000000))))',)
+    formulas['SYS_HZ'] += ('(BOARD_CLOCK_PROFILE==9?98611111:(BOARD_CLOCK_PROFILE==10?102430556:'
+                           '(BOARD_CLOCK_PROFILE>=4?100000000:80000000)))',)
+    formulas['PERIPH_HZ'] += ('(BOARD_CLOCK_PROFILE==9?68269231:(BOARD_CLOCK_PROFILE==10?65848214:'
+                              '(BOARD_CLOCK_PROFILE>=6?60000000:25000000)))',)
     for name, choices in formulas.items():
-        allowed = choices[1:] if profile >= 6 else choices
+        allowed = choices[-1:] if profile >= 9 else (choices[1:] if profile >= 6 else choices)
         if not any(f"{name}=BOARD_CLOCK_PROFILE==0?125000000:{formula};" in compact for formula in allowed):
             raise ValueError(f"unexpected {name} profile formula")
 
@@ -144,7 +329,7 @@ def board_clock_constraints(profile, npu_enable=False):
                                ("sys", "CLKOUT1", "clk_sys"),
                                ("periph", "CLKOUT2", "clk_periph"),
                                *(([("npu", "CLKOUT3", "clk_npu")]) if npu_enable else [])):
-        multiply, divide = (4, 5) if domain == "npu" else BOARD_CLOCK_RATIOS[profile][domain]
+        multiply, divide = BOARD_CLOCK_RATIOS[profile].get(domain, (4, 5))
         lines.append(
             f"create_generated_clock -name {{{clock}}} -source [get_ports {{ref_clk_p}}] "
             f"[get_pins {{g_domain_clocks.u_soc_pll.u_pll/{pin}}}] "
@@ -160,7 +345,7 @@ def board_clock_constraints(profile, npu_enable=False):
 
 
 def verify_npu_board_clocks(root):
-    """Bind the optional 100 MHz domain to the actual GPLL output and NPU wrapper."""
+    """Bind the optional domain to its actual GPLL output and NPU wrapper."""
     wrapper = (root / 'vsrc/cpu/pango_200hp_top.sv').read_text()
     pll = (root / 'vsrc/cpu/pango_soc_pll.sv').read_text()
     checks = ((wrapper, r'\.NPU_ENABLE\(NPU_ENABLE(?:\s*\|\|\s*MM3_ENABLE)?\)'),
@@ -168,11 +353,11 @@ def verify_npu_board_clocks(root):
               (wrapper, r'\.NPU_BYTES\((?:NPU_ENABLE|\(NPU_ENABLE\s*\|\|\s*MM3_ENABLE\))\s*\?\s*65536\s*:\s*0\)'),
               (pll, r'\.STATIC_RATIO3\(NPU_DIV\)'),
               (pll, r'HIGH_VCO\s*=\s*CLOCK_PROFILE\s*>=\s*5'),
-              (pll, r'NPU_DIV\s*=\s*HIGH_VCO\s*\?\s*9\s*:\s*8'),
+              (pll, r'NPU_DIV\s*=\s*(?:CLOCK_PROFILE\s*==\s*10\s*\?\s*10\s*:\s*\()?HIGH_VCO\s*\?\s*9\s*:\s*8'),
               (pll, r'\.CLKOUT3\(pll_npu\)'),
               (pll, r'if\s*\(NPU_ENABLE\).*?\.CLKIN\(pll_npu\),\s*\.CLKOUT\(clk_npu\)'))
     if any(not re.search(pattern, text, re.S) for text, pattern in checks):
-        raise ValueError('NPU clock or target wiring differs from the paired 100 MHz profile')
+        raise ValueError('NPU clock or target wiring differs from the paired PLL profile')
 
 
 def staged_soc_system(root, manifest):
@@ -189,6 +374,55 @@ def staged_soc_system(root, manifest):
 def core_profile(configuration):
     return ("p1" if all(configuration.get(key) == value
                         for key, value in P1_SCOREBOARD_CONFIGURATION.items()) else "custom")
+
+
+def project_configuration(manifest):
+    """Normalize a verified native SoC manifest for the existing timing/CDC readers."""
+    if manifest.get("soc_topology") != "soc_system" or manifest.get("schema_version") != 9:
+        raise ValueError("native timing/CDC requires independent soc_system clocks")
+    profile = manifest["board_clock_profile"]
+    clocks = dict(manifest["board_clock_domains_hz"])
+    names = {1: "target", 4: "sys100", 5: "yolo", 6: "main60", 7: "yolo60", 8: "yolo60_core81",
+             9: "main_margin2", 10: "yolo_sys"}
+    keys = dict(CORE_ISSUE_WIDTH="core_issue_width", CORE_RETIRE_ENTRIES="core_retire_entries",
+                CORE_SPLIT_ISSUE_QUEUE="core_split_issue_queue", CORE_ISSUE_QUEUE_ENTRIES="core_issue_queue_entries",
+                CORE_MEMORY_QUEUE_ENTRIES="core_memory_queue_entries", CORE_LOAD_QUEUE_ENTRIES="core_load_queue_entries",
+                CORE_STORE_QUEUE_ENTRIES="core_store_queue_entries", CORE_BRANCH_CHECKPOINTS="core_branch_checkpoints",
+                CORE_LIMITED_INTEGER_OOO="core_limited_integer_ooo", CORE_SCHEDULER_FORWARD_MODE="core_scheduler_forward_mode",
+                CORE_PREDICTOR_MODE="core_predictor_mode", CORE_RAS_ENABLE="core_ras_enable")
+    macros = dict(CORE_SCOREBOARD=1, CORE_XLEN=manifest["xlen"], CORE_MUL_IMPL=0, CORE_DIV_IMPL=1,
+                  SOC_ICACHE_FILL_BYTES=4, **{macro: manifest[key] for macro, key in keys.items()})
+    mask = manifest.get("dcache_bank_xor_mask", 0)
+    if mask:
+        macros["SOC_DCACHE_BANK_XOR_MASK"] = mask
+    memory = dict(itcm_bytes=65536, dtcm_bytes=65536, icache_bytes=manifest["icache_bytes"],
+                  dcache_bytes=manifest["dcache_bytes"], cache_line_bytes=32,
+                  ddr_sim_backing_bytes=262144, dcache_bank_xor_mask=mask)
+    config = dict(platform="soc_ddr", clock=names[profile], xlen=manifest["xlen"],
+                  domains=list(clocks), ddr_bytes=536870912, cache_enable=1,
+                  pds_top=manifest["top"], native_board_profile=profile, macros=macros,
+                  memory=memory, frequencies_hz=clocks,
+                  periods_ps=board_clock_periods(profile, clocks),
+                  timing_status="unvalidated_target")
+    config["config_sha256"] = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
+    return config
+
+
+def timing_input(project):
+    """Read native interactive or historical benchmark/application identity without relabeling firmware."""
+    project = Path(project)
+    for name in ("application.json", "benchmark.json", "manifest.json"):
+        path = project / name
+        if not path.exists():
+            continue
+        manifest = json.loads(path.read_text())
+        if name == "manifest.json":
+            verify_staged_manifest(project, manifest)
+            if manifest.get("firmware_role") != "coremark-interactive":
+                raise ValueError("native timing input requires an explicit interactive firmware role")
+            return path, manifest, project_configuration(manifest)
+        return path, manifest, manifest["config"]
+    raise FileNotFoundError("missing staged input manifest")
 
 
 def compile_command(xlen, profile_id, local_tcm, dma_wide=1,
@@ -334,10 +568,10 @@ def verify_staged_manifest(root, manifest):
                                 for domain in ("core", "sys", "ddr", "periph")}
             if manifest.get("npu_enable") or manifest.get("mm3_enable"):
                 verify_npu_board_clocks(root)
-                expected_domains["npu"] = 100000000
+                expected_domains["npu"] = board_clock_hz(profile, 'npu')
             if (manifest.get("clock_profile") != BOARD_CLOCK_PROFILES[profile]["name"] or
                     manifest.get("board_clock_domains_hz") != expected_domains or
-                    manifest.get("clock_relationship") != f"independent_gpll_{900 if profile >= 5 else 800}mhz_vco" or
+                    manifest.get("clock_relationship") != board_clock_relationship(profile) or
                     manifest.get("mtime_clock_domain") != "periph"):
                 raise ValueError("unexpected independent board clock configuration")
             if "board_clocks.fdc" not in manifest["files"]:
@@ -366,6 +600,10 @@ def verify_staged_manifest(root, manifest):
     for name in GENERATED_SCRIPTS:
         if name not in manifest["files"]:
             raise ValueError(f"generated script not covered by manifest: {name}")
+    if manifest.get("cdc_implementation_version") == 1:
+        for name in CDC_IMPLEMENTATION_SCRIPTS:
+            if name not in manifest["files"]:
+                raise ValueError(f"CDC implementation entry not covered by manifest: {name}")
     if manifest.get("memory_guard_version") == 1:
         for name in MEMORY_SCRIPTS:
             if name not in manifest["files"]:
@@ -392,8 +630,22 @@ def verify_staged_manifest(root, manifest):
                                                   1, 1, 1, 2, scoreboard=True, soc_system=True)])
     if commands not in accepted_commands:
         raise ValueError("compile Tcl parameters differ from staging manifest")
-    if (root / "synthesize.tcl").read_text(encoding="utf-8") != SYNTHESIZE_COMMANDS:
+    if (root / "synthesize.tcl").read_text(encoding="utf-8") != synthesis_commands(manifest.get("synthesis_strategy", "standard")):
         raise ValueError("unexpected generated synthesis commands")
+    if manifest.get('synthesis_strategy') == 'timing-v2':
+        for name in ('implement.tcl', *CDC_IMPLEMENTATION_SCRIPTS):
+            lines = (root / name).read_text().splitlines()
+            if (lines.count('place -mode normal -optimize_gp_recovery TRUE -logic_optimize_lut6d FALSE') != 1 or
+                    lines.count('route -route_mode normal -slack_weight 80 -optimize_routing_recovery TRUE') != 1 or
+                    lines.count('route_optimize') != 1):
+                raise ValueError('timing-v2 implementation must preserve normal/LUT-off/80/recovery/route_optimize')
+    if manifest.get("firmware_manifest_version") == 1:
+        if manifest.get("firmware_role") != "coremark-interactive":
+            raise ValueError("unsupported versioned firmware role")
+        actual = inspect_firmware(root / "firmware", manifest["xlen"], "coremark-interactive",
+                                  root / "firmware/source")
+        if actual != manifest.get("firmware") or manifest.get("config") != project_configuration(manifest):
+            raise ValueError("interactive firmware or hardware binding differs from staged inputs")
     configuration.update({key: manifest[key] for key in
                           ("soc_profile", "soc_profile_id", "local_tcm_enable",
                            "soc_presence", "slow_presence")})
@@ -439,6 +691,9 @@ def main():
     parser.add_argument("--output", type=Path, required=True, help="empty local ASCII Windows directory")
     parser.add_argument("--ip-dir", type=Path, required=True, help="generated ddr3_test candidate directory")
     parser.add_argument("--xlen", type=int, choices=(32, 64), default=32)
+    parser.add_argument("--firmware-dir", type=Path, help="existing initialized TCM image directory; never rebuilt")
+    parser.add_argument("--firmware-role", choices=("loader", "coremark-interactive"), default="loader")
+    parser.add_argument("--synthesis-strategy", choices=("standard", "timing-v2", "timing-v3"), default="standard")
     parser.add_argument('--icache-bytes', type=int, choices=(4096, 8192, 16384, 32768, 65536), default=4096)
     parser.add_argument('--dcache-bank-xor-mask', type=int, choices=(0,1,2,3), default=0)
     parser.add_argument('--dcache-bytes', type=int, choices=(4096, 8192, 16384, 32768, 65536), default=4096)
@@ -456,7 +711,7 @@ def main():
     parser.add_argument("--predictor-mode", type=int, choices=(0, 1), default=None)
     parser.add_argument("--ras-enable", type=int, choices=(0, 1), default=None)
     parser.add_argument("--board-clock-profile", type=int, choices=tuple(BOARD_CLOCK_PROFILES), default=None,
-                        help="0=common; C1/C4/C5 historical; C6=100/100/60, C7=90/100/60, C8=(900/11)/100/60 MHz; DDR125/NPU100")
+                        help="0=common; C1-C8 historical; C9=main_margin2, C10=yolo_sys; DDR125 remains IP-owned")
     parser.add_argument("--npu-enable", action="store_true", help="attach pinned 128-MAC NPU on dedicated 100 MHz clock")
     parser.add_argument("--mm3-enable", action="store_true", help="attach MiniMind on dedicated 100 MHz clock")
     args = parser.parse_args()
@@ -498,6 +753,9 @@ def main():
         parser.error("limited integer issue requires scoreboard and split queues")
     if args.scheduler_forward_mode and args.core_backend != "scoreboard":
         parser.error("scheduler forward mode requires scoreboard")
+    if args.firmware_role == "coremark-interactive" and (
+            args.firmware_dir is None or not scoreboard or not args.board_clock_profile or args.npu_enable or args.mm3_enable):
+        parser.error("interactive firmware requires --firmware-dir and an independent no-NPU scoreboard SoC")
     repo = Path(__file__).resolve().parents[2]
     root = args.output.resolve()
     # WSL 负责固件与 Python，PDS 仍在 Windows 本地盘运行；只接受可映射的原生盘目录。
@@ -526,27 +784,28 @@ def main():
     subprocess.run([sys.executable, str(repo / "scripts/pango/check_ip_dq.py"),
                     str(ip / "ddr3_test.idf"), "--fdc",
                     str(repo / "scripts/pango/mes2l676_200hp.fdc")], check=True)
-    firmware = repo / f"build/loader/rv{args.xlen}"
+    firmware = args.firmware_dir.resolve() if args.firmware_dir else repo / f"build/loader/rv{args.xlen}"
+    try:
+        firmware_identity = inspect_firmware(firmware, args.xlen, args.firmware_role, repo)
+    except FileNotFoundError as error:
+        parser.error("missing generated IP or production loader; generate IP and make loader first"
+                     if args.firmware_role == "loader" else str(error))
+    except (OSError, ValueError, KeyError, TypeError, struct.error) as error:
+        parser.error(str(error))
     staged = [(source, source.relative_to(repo)) for source in sources(repo, "scripts/pango_files.f")]
     for name in ("ddr3_test.v", "ddr3_test_ddrphy_top.v", "ddr3_test.idf"):
         staged.append((ip / name, Path("ip") / name))
     for source in sorted((ip / "rtl").rglob("*")):
         if source.is_file():
             staged.append((source, Path("ip") / source.relative_to(ip)))
-    for name in ("imem.hex", "dmem.hex", "loader.elf"):
+    for name in ("imem.hex", "dmem.hex", firmware_identity["elf"]):
         staged.append((firmware / name, Path("firmware") / name))
+    if args.firmware_role == "coremark-interactive":
+        staged.append((firmware / "manifest.json", Path("firmware/manifest.json")))
+        for name in firmware_identity["source_sha256"]:
+            staged.append((repo / name, Path("firmware/source") / name))
     if any(not source.is_file() for source, _ in staged):
         parser.error("missing generated IP or production loader; generate IP and make loader first")
-    elf = (firmware / "loader.elf").read_bytes()
-    if (len(elf) < (52 if args.xlen == 32 else 64) or elf[:4] != b"\x7fELF" or
-            elf[4] != (1 if args.xlen == 32 else 2) or elf[18:20] != b"\xf3\x00"):
-        parser.error("loader ELF width mismatch")
-    for name in ("imem.hex", "dmem.hex"):
-        words = (firmware / name).read_text().split()
-        if len(words) != 65536 // (args.xlen // 8) or any(len(word) != args.xlen // 4 for word in words):
-            parser.error(f"invalid production TCM HEX: {name}")
-        for word in words:
-            int(word, 16)
     fdc = (ip / "pnr/ddr_test.fdc").read_text(encoding="utf-8")
     ref = re.search(r"create_clock -name \{ref_clk\}.*?-period \{([\d.]+)\}", fdc)
     generated = next((line for line in fdc.splitlines()
@@ -577,6 +836,8 @@ def main():
                 "ddr_actual_rate_mbps": float(params["ACTUAL_RATE"]),
                 "device": "PG2L200H-6IFBB676", "top": "pango_200hp_top",
                 "status": "candidate; no timing closure or board compatibility claim", "files": {}}
+    if args.synthesis_strategy != "standard":
+        manifest["synthesis_strategy"] = args.synthesis_strategy
     if scoreboard:
         manifest.update(SCOREBOARD_CONFIGURATION)
         manifest.update(icache_bytes=args.icache_bytes, dcache_bytes=args.dcache_bytes, dcache_bank_xor_mask=args.dcache_bank_xor_mask)
@@ -594,7 +855,7 @@ def main():
                             clock_profile=profile["name"],
                             board_clock_domains_hz={domain: profile[domain]
                                                     for domain in ("core", "sys", "ddr", "periph")},
-                            clock_relationship=f"independent_gpll_{900 if args.board_clock_profile >= 5 else 800}mhz_vco",
+                            clock_relationship=board_clock_relationship(args.board_clock_profile),
                             mtime_clock_domain="periph")
         else:
             manifest.update(soc_topology="soc_system", core_profile=core_profile(manifest),
@@ -602,7 +863,10 @@ def main():
                             clock_relationship="common_ddr_user_clock", mtime_clock_domain="periph")
     if args.npu_enable or args.mm3_enable:
         manifest["mm3_enable" if args.mm3_enable else "npu_enable"] = True
-        manifest["board_clock_domains_hz"]["npu"] = 100000000
+        manifest["board_clock_domains_hz"]["npu"] = board_clock_hz(args.board_clock_profile, 'npu')
+    if args.firmware_role == "coremark-interactive":
+        manifest.update(firmware_manifest_version=1, firmware_role=args.firmware_role,
+                        firmware=firmware_identity, config=project_configuration(manifest))
     try:
         manifest["source_commit"] = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True,
                                                             stderr=subprocess.DEVNULL).strip()
@@ -649,12 +913,15 @@ def main():
                                  board_clock_profile=args.board_clock_profile,npu_enable=args.npu_enable,mm3_enable=args.mm3_enable,
                                  icache_bytes=args.icache_bytes,dcache_bytes=args.dcache_bytes, dcache_bank_xor_mask=args.dcache_bank_xor_mask)]
     (root / "compile.tcl").write_text("\n".join(commands) + "\n", encoding="utf-8")
-    (root / "synthesize.tcl").write_text(SYNTHESIZE_COMMANDS, encoding="utf-8")
-    shutil.copyfile(repo / "scripts/pango/implement.tcl", root / "implement.tcl")
+    (root / "synthesize.tcl").write_text(synthesis_commands(args.synthesis_strategy), encoding="utf-8")
+    for name in ('implement.tcl', *CDC_IMPLEMENTATION_SCRIPTS):
+        template = (repo / 'scripts/pango' / name).read_text()
+        (root / name).write_text(implementation_commands(template, args.synthesis_strategy))
     for name in MEMORY_SCRIPTS:
         shutil.copyfile(repo / "scripts/pango" / name, root / name)
     manifest["memory_guard_version"] = 1
-    for name in GENERATED_SCRIPTS + MEMORY_SCRIPTS:
+    manifest["cdc_implementation_version"] = 1
+    for name in GENERATED_SCRIPTS + MEMORY_SCRIPTS + CDC_IMPLEMENTATION_SCRIPTS:
         manifest["files"][name] = hashlib.sha256((root / name).read_bytes()).hexdigest()
     verify_staged_manifest(root, manifest)
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

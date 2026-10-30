@@ -26,7 +26,9 @@ def compile_tcm(config):
 def constraints(config):
     lines=['# Runnable TCM configuration; external clocks, no board pin or CDC timing closure claim.']
     for d in config['domains']:
-        lines += [f'create_clock -name {{clk_{d}}} -period {{{config["periods_ps"][d]/1000:g}}} [get_ports {{clk_{d}}}]',
+        period = format(config['periods_ps'][d]/1000,
+                        '.15g' if config.get('native_board_profile', 0) in (9, 10) else 'g')
+        lines += [f'create_clock -name {{clk_{d}}} -period {{{period}}} [get_ports {{clk_{d}}}]',
                   f'set_clock_uncertainty -setup 0.2 [get_clocks {{clk_{d}}}]',
                   f'set_clock_uncertainty -hold 0.05 [get_clocks {{clk_{d}}}]']
     return '\n'.join(lines)+'\n'
@@ -63,7 +65,7 @@ def stage(output, config, bundle, sim_receipt, ip_dir=None):
             inputs=set(board.sources(ROOT,'scripts/pango_files.f')) | set((ROOT/'scripts').glob('*.f'))
             inputs.update(ROOT/'scripts/pango'/name for name in (
                 'prepare_project.py','check_ip_dq.py','mes2l676_200hp.fdc',
-                'implement.tcl','memory_gate.ps1','memory_guard.ps1'))
+                'implement.tcl','implement_cdc.tcl','memory_gate.ps1','memory_guard.ps1'))
             for path in inputs:
                 dest=source/path.relative_to(ROOT)
                 dest.parent.mkdir(parents=True,exist_ok=True)
@@ -95,7 +97,7 @@ def stage(output, config, bundle, sim_receipt, ip_dir=None):
                   'set_option max_threads 8',*[f'add_design {{{p.as_posix()}}}' for p in rtl],
                   'add_constraint {benchmark.fdc}',compile_tcm(config)]
         (output/'compile.tcl').write_text('\n'.join(commands)+'\n')
-        for name in ('implement.tcl','memory_gate.ps1','memory_guard.ps1'):
+        for name in ('implement.tcl','implement_cdc.tcl','memory_gate.ps1','memory_guard.ps1'):
             shutil.copyfile(ROOT/'scripts/pango'/name,output/name)
     (output/'firmware').mkdir(exist_ok=True)
     for name in ('imem.hex','dmem.hex','program.elf'):

@@ -1,5 +1,46 @@
 # 项目配置与测量
 
+## 当前发布整理（2026-10-30）
+
+main仅包含无NPU硬件、公共测试、分层CoreMark和上板交互程序；RT-Thread移至all。
+运行候选C9 main_margin2为Core/SYS/DDR-user/外设88.75/98.611111/125/68.269231 MHz，
+系统VCO887.5 MHz、输出分频10/9/13；新档仿真与物理结果分别记录，不覆盖历史C6成绩。
+本机计划以历史YOLO实际使用的timing-v2策略比较完整CoreMark与完整YOLO，
+两组均8线程、fanout64、retiming开、资源共享关、normal、LUT合并关、route80，
+GP/route recovery和route_optimize开启。原timing-v3的128/90保留。
+YOLO交A继续整机/板测，CoreMark与MiniMind修正交B，all只仿真。
+本机各做一次完整main/YOLO P&R；必要修复后A、B各最多再做一次，MiniMind先修综合。
+
+本轮main硬件82cbf7a、I16/D8/hash2，生产交互程序ID为ea1773fca42aa7c6，
+镜像位于build/coremark-board/rv32-O3-i0-b115200。综合估计Core/SYS/DDR-user/外设为
+83.5307/110.0987/144.7387/93.3476 MHz。完整P&R得到
+90.3702/107.5410/131.9784/78.5252 MHz，对C9 setup为+0.202/+0.842/+0.423/+1.913 ns，0未布通。
+LUT75364、FF60590、DRM38、APM4；四工作域通过，但DDR PHY另有1端点−0.028 ns，
+I/O缺35输入/73输出delay，整机尚未全部闭合，Core100 MHz也未达到。
+与历史C6相比，策略、时钟、RTL均有变化，不能把差值解释为单项RTL效果。
+
+双宽公共回归366 PASS/8 SKIP，加独立RV32 M0两项合计368/8；
+786项源SHA起终相同，20项定向验证不重复计入。两个可选SoC短测延期，未计入SKIP。
+RV32 O3/64 M0 P/V为3.590617/3.570731，RV64为3.145656/3.133377 CoreMark/MHz。
+新C9三层测试交B从当前P2源重建并冻结软件bundle，旧ELF拒绝C9/C10；
+新档等待比例与旧档不同，尚未重新测量分层成绩。
+11fa81b已补齐纯TCM分数时钟、旧/新日志解析和--jobs默认1，118项工具测试通过；没有重编整Core长测。
+
+## 历史C6条件候选（2026-10-30）
+
+性能RTL固定为`b94580c`，唯一追加物理实现使用正式O3交互固件`ea1773fca42aa7c6`。
+Core/SYS/DDR-user/外设布线Fmax为90.6208/100.9082/124.1619/73.0004 MHz，
+WNS分别−1.035/+0.090/−0.054/+2.968 ns，0未布通。Core100与DDR125目标未通过，停止本轮优化，不升baseline。
+LUT75543（含常量/旁路）、FF64053、DRM36K38、APM4；hold/恢复/MPW/CDC/PHY均通过，
+I/O仍缺35输入/73输出delay，没有bitstream或板测。完整数据见[FPGA结果](fpga/FPGA_ADAPTATION.md)。
+
+该轮双宽公共回归368 PASS/8 SKIP，784项源SHA起终相同；另有44项定向对照。
+RV32 O3/64轮M0 P/V3.590617/3.570731、真实TCM3.095736/3.081770、完整DDR warm2.538337/2.521957，
+全部固定镜像周期/CRC与旧版相同。双宽真实UART演示四项ROI也相同，2轮短测formal=0。
+YOLO的同C程序＋真实NPU/总线/串口/显示RTL完整联合演示及真实RV32驱动短测已通过；
+用户确认采用此层次，完整代码在`demo/yolo-full-network@8a8f484`，没有声称完整RV32整网执行或上板。
+MiniMind按要求未新增整机仿真，独立RT终端仍只有构建/软件命令检查。
+
 ## 目录与公共配置
 
 `vsrc/core` 保存共享 Core，`vsrc/soc` 保存 TCM/Cache、AXI、DMA、MMIO 和跨域接口，
@@ -8,8 +49,9 @@
 Core 为 RV32/RV64 IM+Zicsr，双发射、按序双退休，ROB16、int8/mem4、LQ4/SQ4，
 正常 ALU/Load/DSP 为 8/10/10 级；C、F/V、MMU/Linux 未实现。
 
-main 的 C6 目标 Core/SYS/DDR-user/外设为 100/100/125/60 MHz。加速器保存在用途分支，使用独立时钟域。
-ITCM/DTCM 各 64 KiB，I$/D$ 各 4 KiB、两路、32 B 行；I$ 当前填充粒度 4 B。
+main当前选C9运行档；旧C6的100/100/125/60 MHz继续作历史时序目标。加速器分别保存在yolo/minimind，使用独立时钟域。
+ITCM/DTCM各64 KiB；本轮显式选择I$16 KiB、D$8 KiB、bank XOR mask2，
+两路、32 B行，I$当前填充粒度4 B。通用API保留4/4 KiB历史默认值。
 TCM 与 Cache 命中逻辑仍在 Core 域；Core 与它们进一步分域仅是未来候选。
 SYS 负责统一 AXI 仲裁，DDR 与外设分别通过 FIFO 跨域。DMA 是 SYS 域主设备，
 CPU 提交地址/长度/方向、启动、核对完成和处理 Cache 所有权；不允许 DMA 写 START 等控制寄存器。
@@ -18,15 +60,15 @@ SYS 与 Core 是并行的时钟域；SYS 域不包含 Core、TCM 或 Cache。各
 
 | 发布分支 | CoreMark | RT-Thread | 加速器 |
 |---|---|---|---|
-| main | M0 与三层实际硬件 | 独立应用 | 无 |
-| baseline-yolo | 无 | 无 | YOLO |
-| baseline-minimind | 无 | 无 | MiniMind |
-| baseline-all | M0、三层与 YOLO 并发层 | 一份独立应用 | 分别选择 YOLO / MiniMind |
+| main | M0与三层实际硬件 | 无 | 无 |
+| yolo | 无 | 无 | YOLO与HDMI |
+| minimind | 无 | 无 | MiniMind，专属修正交B |
+| all | 全部测试入口 | 一份独立应用 | 两套源码与联合仿真 |
 
 所有分支保留公共功能、ISA、AXI、CDC、UART 下载验证。加速器分支不携带 CoreMark 算法、
 跑分脚本或 RT-Thread。原作者 MiniMind C 代码、模型锁和导出工具保留在 MiniMind/all。
 
-main 已吸收复核后的共享 TCM/Cache/总线/CDC/时钟基线和统一 PDS 入口，保留 CoreMark/RT 独立应用。YOLO 实体与专属软件继续保存在用途分支；下方 YOLO 数值为该分支的测量记录。
+main已吸收复核后的共享TCM/Cache/总线/CDC/时钟基线和统一PDS入口，保留CoreMark独立应用；RT只在all。YOLO 实体与专属软件继续保存在用途分支；下方 YOLO 数值为该分支的测量记录。
 
 ## 环境与命令
 
@@ -39,7 +81,20 @@ main 已吸收复核后的共享 TCM/Cache/总线/CDC/时钟基线和统一 PDS 
 本分支应用入口以 `make help` 为准。
 软件默认 O3，用 `SOFTWARE_OPT=O2|O3|Ofast` 覆盖。Ofast 本轮没有稳定额外收益，未设为默认。
 
-Cache 容量实验共用上述软件入口。`coremark-platforms`、独立 RT 测试和 PDS 暂存均支持
+交互式裸机固件用`make coremark-board XLEN=32|64`构建，
+`make coremark-board-test`运行固件循环、实际vendor重复调用和PC解析测试，共21 PASS/0 SKIP。
+新端口在`software/coremark-board/`，没有改vendor或旧归一化仿真端口。
+上电READY后回车/P运行performance，V运行validation，结果/DONE后再次READY；
+短校准选择12秒目标迭代，实测至少10秒才发布formal标志。
+PC工具`scripts/coremark/host.py --port COM5 --require-formal`保存UART和JSON；
+也可`--input uart.log`离线解析，无须pyserial。计分使用独立64位roi_cycles，忽略vendor的32位Total ticks。
+双宽正式/短测固件编译后，已运行真实四域SoC UART闭环：无命令不启动、CRLF单触发、两次P/V请求、CRC、u64计数、DONE及三次READY全部通过，PC解析valid且official=false。
+C6=100/100/125/60 MHz、I16/D8/hash2，UART500000、迭代2。RV32 P/V ROI为646078/650897周期，RV64为725475/727605周期。
+上述只验收演示流程，不替换冻结64次分层成绩。命令为`python3 scripts/coremark/run_uart.py --xlen 32 --jobs 1 --output build/demo-software-20261030/coremark-uart-rv32`，RV64改宽度及新输出目录；收据`logs/demo-software-20261030/coremark-uart-summary.json`。
+固件为TCM初始化镜像；本轮C9 PDS使用上述115200正式交互程序。
+历史自动运行sim_console工程独立保留；交互镜像不能直接当DDR loader载荷。
+
+Cache容量实验共用上述软件入口。`coremark-platforms`和PDS暂存均支持
 `--icache-bytes` / `--dcache-bytes`，未指定时各为 4096。实际实例参数、固件和时钟写入测量清单。
 批量容量测试使用 `scripts/verilator/run_cache_sweep.py`，命令见[联合优化](understand/OPTIMIZATION.md)。
 
@@ -62,7 +117,7 @@ background 加 DMA 和 Timer IRQ，NPU background 还执行、核对卷积。
 
 编译矩阵 78 PASS、0 SKIP，源提交 d5abd51；公共集成 edc2349 重放 O3 24 项周期一致。
 O3 提升 M0/TCM，但 DDR 略低；同表保留取舍。短仿真未满足正式十秒要求。
-完整记录在工作区 `2-coremark/record.md`，镜像及日志在本仓库忽略目录
+完整记录在本地工作区[record.md](../../record.md)，镜像及日志在本仓库忽略目录
 `build/four-branches/`、`logs/four-branches-20261027/`。记录包含命令、CRC、ELF/HEX/源码哈希。
 历史日志曾被维护者删除，旧摘要不能替代本轮原始报告。
 
@@ -74,10 +129,11 @@ I$16/D$4 KiB 的 cold、warm、DMA/IRQ performance 为 2.507487、2.508556、2.1
 真实 TCM 重放周期不变，RV64 候选功能通过；RT32 的 I$ miss 6048→1635，总周期减少约 0.44%。
 后者包含 tick 等待，单独记录。
 
-## RT-Thread 独立运行
+## RT-Thread 历史结果与位置
 
-仅 main/all 保留，固定 v5.2.2 提交 `ddf52e2cdd977f14fc04035c88672ac204aec713`。
-先 `make rt-thread-fetch`，再 `make rt-thread XLEN=32`；RV64 使用相同入口。
+当前仅`all`保留，本分支已移除源码、构建入口和专用测试。以下是迁移前的历史测量。
+RT-Thread固定v5.2.2提交 `ddf52e2cdd977f14fc04035c88672ac204aec713`。
+在`all`分支先运行`make rt-thread-fetch`，再运行`make rt-thread XLEN=32`；RV64使用相同入口。
 完整四域 SoC 无 NPU。Boot ROM 跳到 ITCM 启动，常用 trap/上下文代码驻 ITCM 顶部 8 KiB，
 其加载镜像在 DTCM 的 `0x0110c000`；DMA 搬入后校验并执行 FENCE.I，再安装 mtvec。
 程序主体、数据、BSS、线程栈/堆在 DDR `0x80000000`，由 Cache 自动填充；
@@ -86,12 +142,23 @@ DTCM 保留观测区和机器异常栈。TB 为仿真预装 DDR 镜像，板上�
 O3 双宽实际运行通过：RV32/RV64 为 2,765,395/2,774,072 TB 周期，39 次 trap，
 DDR 退休计数均超过 260 万，I$/D$ 命中和 DMA 热代码搬运均被检查。它们是功能时间，不能换算 CoreMark。
 
-## FPGA 边界
+独立常驻UART演示用`make rt-thread-demo XLEN=32|64`构建，默认`make rt-thread`仍为原smoke。
+终端115200 8N1发送回车/STATUS、PING、`ECHO 文本`、DEMO；
+返回时钟/调度计数、PONG、文本或周期线程推进量，再DONE/READY。
+它使用RX中断唤醒接收线程，另一周期线程独立运行，不调用CoreMark。
+双宽demo编译/热代码映像检查及7项C命令测试通过，新demo尚未RTL或上板运行。
+DDR预装和ITCM热代码DMA路径保持，Flash/TF装载未实现。
+证据在`logs/demo-software-20261029/`，软件收据保存命令、源与映像哈希；固定计时测试不计跑分。
+
+## 历史C6初次布局布线
 
 main 的三层 CoreMark 综合关闭 NPU；YOLO 用途分支的应用工程单独打开第五域。分别测资源、域内 Fmax/WNS 和最差路径。
-本轮没有 P&R、bitstream 或板级结果；CDC/PHY/I/O 的原始报告仍需后续处理。
+C6完整系统P&R于2026-10-30完成，Core/SYS/DDR-user/外设Fmax为87.3057/98.2415/122.5490/72.2201 MHz，
+setup WNS分别−1.454/−0.179/−0.160/+2.820 ns，0未布通。Core100 MHz未通过；hold、复位时序及已绑定CDC/Gray通过。
+DDR→PHY0另有setup−0.027 ns；I/O仍缺35 input/73 output delay。资源与真实路径见[FPGA适配](fpga/FPGA_ADAPTATION.md)。
+软件开发没有改动该冻结工程，新UART固件未参加本次物理实现，尚无bitstream或板级验收。
 
-## 本轮 TCM 与 YOLO 实验
+## 历史TCM与YOLO实验（2026-10-28）
 
 TCM 改用双端口 BRAM：取指/数据主口固定，辅助口公平仲裁，CPU 读不增加一级。AXI beat 级写校验、已有请求队列的静态路由预译码、8 路 SYS 复位释放副本和同步器保护已加入组合。
 真实 TCM 64 次为 3.095736/3.081770 CoreMark/MHz，较 R3 的 3.054825/3.040240 提高约 1.34%/1.37%。
@@ -127,7 +194,7 @@ YOLO 的 `physical-ready` 工程与启动脚本已冻结；预检为物理 14.98
 补测重复快照和可重建编译产物已清理，日志、固件和结果保留约 74 MB，清单为
 `logs/tcm-bram-20261028/recovery/retained-evidence.json`。所有原生 PDS 报告保留。
 
-## 上轮路径实验
+## 历史路径实验
 
 收尾分支integrate/soc-path-selected基于47aec08，保留SYS独热控制和可配置bank入口，不含A/B；正式baseline未升级。
 I16/D8/mask2是显式性能候选，默认I4/D4/mask0保持。六项64次DDR与bank-only对照同周期，TCM周期保持。

@@ -1,14 +1,25 @@
 // Module: tb_coremark_tcm
 // Description: Executes a preloaded program on the same real TCM composition used by PDS.
 module tb_coremark_tcm #(
-    parameter int CORE_PERIOD_PS = 10000
+    parameter real CORE_PERIOD_PS = 10000
 );
     timeunit 1ns;
     timeprecision 1ps;
     import core_config_pkg::*;
     import core_types_pkg::*;
     logic clk_core=0, rst_core=1;
-    always #(CORE_PERIOD_PS*0.5ps) clk_core=!clk_core;
+    // 累计绝对边沿，分数周期只在当前边沿量化，避免逐半拍取整漂移。
+    initial begin
+        realtime origin, edge_time;
+        longint unsigned edge_count;
+        assert (CORE_PERIOD_PS > 0) else $fatal(1,"invalid core clock period");
+        origin=$realtime; edge_count=0;
+        forever begin
+            edge_count++;
+            edge_time=origin+real'(edge_count)*CORE_PERIOD_PS*0.5ps;
+            #(edge_time-$realtime); clk_core=!clk_core;
+        end
+    end
     logic commit_valid, commit_rd_we, commit_exception, dmem_store_fire;
     xlen_t commit_pc, commit_rd_data, dmem_store_addr, dmem_store_data;
     logic [31:0] commit_inst;
@@ -43,7 +54,7 @@ module tb_coremark_tcm #(
         $display("P2_CORE xlen=%0d backend=scoreboard issue_width=%0d retire_entries=%0d split_issue_queue=%0d integer_queue_entries=%0d memory_queue_entries=%0d limited_integer_ooo=%0d scheduler_forward_mode=%0d predictor_mode=%0d ras_enable=%0d mul_impl=%0d div_impl=%0d",
             XLEN,ISSUE_WIDTH,RETIRE_ENTRIES,SPLIT_ISSUE_QUEUE,ISSUE_QUEUE_ENTRIES,
             MEMORY_QUEUE_ENTRIES,LIMITED_INTEGER_OOO,SCHEDULER_FORWARD_MODE,PREDICTOR_MODE,RAS_ENABLE,MUL_IMPL,DIV_IMPL);
-        $display("UNIFIED_TCM core_period_ps=%0d itcm_bytes=65536 dtcm_bytes=65536 cache=0 ddr=0",CORE_PERIOD_PS);
+        $display("UNIFIED_TCM core_period_ps=%0.6f itcm_bytes=65536 dtcm_bytes=65536 cache=0 ddr=0",CORE_PERIOD_PS);
         if (!$value$plusargs("IMEM=%s",imem_path) || !$value$plusargs("DMEM=%s",dmem_path) ||
             !$value$plusargs("TOHOST=%h",result_addr)) $fatal(1,"missing image/tohost");
         if (!$value$plusargs("CONSOLE=%h",console_addr)) console_addr='1;

@@ -19,7 +19,8 @@ EXPECTED = {
 }
 CLOCKS = {0: [5, 5, 5, 5], 1: [5, 6.25, 4, 20], 2: [4, 5, 6.25, 12.5],
           3: [5.882, 4.274, 5.376, 13.514], 4: [5, 5, 4, 20],
-          6: [5, 5, 4, 25/3], 7: [50/9, 5, 4, 25/3], 8: [55/9, 5, 4, 25/3]}
+          6: [5, 5, 4, 25/3], 7: [50/9, 5, 4, 25/3], 8: [55/9, 5, 4, 25/3],
+          9: [400/71, 360/71, 4, 520/71], 10: [352/59, 288/59, 4, 448/59]}
 LAYERS = {'cold': (0, 0), 'warm': (1, 0), 'background': (1, 1)}
 CORE_FIELDS = ('xlen', 'backend', 'issue_width', 'retire_entries', 'split_issue_queue',
                'integer_queue_entries', 'memory_queue_entries', 'limited_integer_ooo',
@@ -374,7 +375,7 @@ def parse_result(text, mode, iterations, layer, expected_core=None, expected_soc
     warm, busy = LAYERS[layer]
     if config is None or tuple(map(int, config.groups())) != (warm, busy, 1-warm, iterations):
         raise ValueError('software cache/background configuration does not match requested layer')
-    clock = re.search(r'^PASS p2-coremark-.* clocks=C([0-8]) core_half_ns=([0-9.]+) sys_half_ns=([0-9.]+) ddr_half_ns=([0-9.]+) periph_half_ns=([0-9.]+)', text, re.M)
+    clock = re.search(r'^PASS p2-coremark-.* clocks=C([0-9]+) core_half_ns=([0-9.]+) sys_half_ns=([0-9.]+) ddr_half_ns=([0-9.]+) periph_half_ns=([0-9.]+)', text, re.M)
     if clock is None:
         raise ValueError('missing complete simulator clock configuration record')
     clock_config = int(clock[1])

@@ -29,12 +29,12 @@ module tb_scoreboard_completion_cancel;
         end
     end
     completion_select #(.SOURCES(SOURCES)) u_candidate (
-        .rst, .head_slot, .source_valid(occupied), .source_accept(acceptable),
+        .rst, .head_slot, .source_valid(occupied), .source_accept(acceptable), .source_live('0), .complete_live(),
         .source_ready(selected), .source_completion(source), .complete_valid(result_valid),
         .complete_accept(result_accept), .completion(result)
     );
     completion_select #(.SOURCES(SOURCES)) u_previous (
-        .rst, .head_slot, .source_valid(surviving), .source_accept(acceptable),
+        .rst, .head_slot, .source_valid(surviving), .source_accept(acceptable), .source_live('0), .complete_live(),
         .source_ready(old_selected), .source_completion(source), .complete_valid(old_valid),
         .complete_accept(old_accept), .completion(old_result)
     );

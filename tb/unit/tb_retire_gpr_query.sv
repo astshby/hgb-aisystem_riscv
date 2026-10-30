@@ -36,7 +36,7 @@ module tb_retire_gpr_query;
     always #5 clk = ~clk;
     retire_queue dut (
         .branch_recovery('0), .producer_entries(),
-        .ras_entries(), .ras_head_slot(),
+        .probe_live(), .ras_entries(), .ras_head_slot(),
         .alloc_valid_1(1'b0), .alloc_ready_1(), .alloc_meta_1('0), .alloc_id_1(),
         .complete_valid_1(1'b0), .complete_ready_1(), .completion_1('0), .complete_reject_1(),
         .query_1('0), .query_result_1(), .head_valid_1(), .head_complete_1(),

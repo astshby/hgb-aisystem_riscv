@@ -4,6 +4,14 @@
 允许少量 FF 增加以换取 LUT 降低与两项性能提升。新增流水级最长正常路径不超过 12。
 Core 的目标与完整 DDR 系统的目标分别验收，不能把 Core+TCM 的 Fmax 套给全系统。
 
+2026-10-30 C6完整系统P&R得到Core87.3057 MHz，未达100 MHz，0未布通。最终Core三类违规路径为TCM授权、复位释放和ISS反馈，不能只按if/else数量推断收益。该阶段据此实施AXI本地游标、局部TCM译码和按客户端并行碰撞，保持CPU读延迟、双读吞吐和取消语义。后续已完成同配置仿真/综合及一次追加物理，实现结果与下一步见下文。
+
+条件候选`b94580c`已完成TCM游标/局部译码/冲突前移、RAT源查询重排、D1 B/JAL目标前移、ISS静态选择和SYS AW选通预存，定向44 PASS/0 SKIP；不新增访问拍或流水级。TCM游标和SYS选通分别理论新增64/32个FF，Core三项不新增状态位，最终资源按综合计。固定64轮真实TCM P/V保持20673595/20767289周期、3.095736/3.081770 CoreMark/MHz，与旧镜像逐周期相同。旧RTL `d273172`与候选使用同一正式交互固件、C6、I16/D8/hash2和timing-v3配对；结果见`logs/closing-c6-20261030/`，SYN与P&R分别记录。五项组合的物理收益不能分配为单项独立收益。
+
+配对SYN已完成：Core93.5279→96.4134 MHz，SYS118.2033→116.9317，DDR142.5923不变，外设92.3836→91.3623；LUT55905→57602、FF61977→64045，DRM38/APM4/latch0不变。两块TCM网表初值逐字节通过。新增2068个FF含综合retiming/复制变化，不能当作手工新增流水级。
+
+唯一追加P&R得到Core90.6208/SYS100.9082/DDR124.1619/外设73.0004 MHz、0未布通，Core100与DDR125未闭合；不升级基线，停止本轮优化。实际最差为分支方向→ROB取消→完成广播→memory IQ→ISS，logic2.875/net7.451 ns，两段net1.578/1.491 ns；SYN最差的JALR路径不再作为当前优先依据。先研究无副作用的操作数捕获能否与ROB写回接纳解耦，保留完整ID、异常/取消、退休和Store/MMIO许可；再评估CMP载荷CE和11→7路广播的独立对照，队列容量和8/10/10级保持。当前双宽368 PASS/8 SKIP、固定三层与UART周期均不变，达到频率/资源目标后才考虑新baseline。
+
 已采用的方向包括：RAS 关闭、发射选择并行化、IQ/内存队列分离、恢复载荷与有效位分离、
 完成预选/取指容量局部化、LSU 共享年龄及提前请求、TCM 系统端口地址逐 beat 更新。
 ROB32→16 降低组合选择和资源，同时减少在途容量；按实际工作负载记录收益和成本。
@@ -31,7 +39,7 @@ SOFTWARE_OPT=O3 python3 scripts/verilator/run_cache_sweep.py \
 
 `--pairs` 为 I:D KiB。长迭代使用新的 bundle，并用 `--models` 指向前一轮输出目录复用
 相同 RTL/参数的模型。单点重放使用 `make coremark-platforms COREMARK_PLATFORM_ARGS='--icache-bytes 16384 --dcache-bytes 4096'`。
-RT 使用 `scripts/rt-thread/run_system.py` 的相同容量参数；其定时等待周期与 CoreMark 分开统计。
+RT已移至`all`；其中的`scripts/rt-thread/run_system.py`使用相同容量参数，定时等待周期与CoreMark分开统计。
 
 行级 bank 扫描与单点候选使用不同入口，保持参数名称明确：
 
@@ -42,12 +50,10 @@ SOFTWARE_OPT=O3 python3 scripts/verilator/run_cache_sweep.py \
     --pairs 16:4 16:8 16:16 --bank-xor-masks 0 1 2 3 \
     --modes performance validation --iterations 2 --workers 2
 
-python3 scripts/rt-thread/run_system.py --xlen 32 \
-    --icache-bytes 16384 --dcache-bytes 8192 --dcache-bank-xor-mask 2
 ```
 
 `coremark-platforms` 的 `COREMARK_PLATFORM_ARGS` 与 PDS 的 `prepare_benchmark.py`
-同样接收 `--dcache-bank-xor-mask 2`；RT独立执行，RV64替换 `--xlen`。
+同样接收`--dcache-bank-xor-mask 2`；RV64替换`--xlen`。RT入口仅在`all`保留。
 每次重放使用新输出目录，具体测量的镜像/命令/哈希见本地结果JSON。
 
 上一轮容量实验推荐显式 I$16/D$4 KiB：64 次六项几何均值提高 4.8455%，Core 综合估计 85.1064→86.8282 MHz，
