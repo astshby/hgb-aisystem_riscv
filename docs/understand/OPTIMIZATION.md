@@ -39,7 +39,7 @@ SOFTWARE_OPT=O3 python3 scripts/verilator/run_cache_sweep.py \
 
 `--pairs` 为 I:D KiB。长迭代使用新的 bundle，并用 `--models` 指向前一轮输出目录复用
 相同 RTL/参数的模型。单点重放使用 `make coremark-platforms COREMARK_PLATFORM_ARGS='--icache-bytes 16384 --dcache-bytes 4096'`。
-RT 使用 `scripts/rt-thread/run_system.py` 的相同容量参数；其定时等待周期与 CoreMark 分开统计。
+RT已移至`all`；其中的`scripts/rt-thread/run_system.py`使用相同容量参数，定时等待周期与CoreMark分开统计。
 
 行级 bank 扫描与单点候选使用不同入口，保持参数名称明确：
 
@@ -50,12 +50,10 @@ SOFTWARE_OPT=O3 python3 scripts/verilator/run_cache_sweep.py \
     --pairs 16:4 16:8 16:16 --bank-xor-masks 0 1 2 3 \
     --modes performance validation --iterations 2 --workers 2
 
-python3 scripts/rt-thread/run_system.py --xlen 32 \
-    --icache-bytes 16384 --dcache-bytes 8192 --dcache-bank-xor-mask 2
 ```
 
 `coremark-platforms` 的 `COREMARK_PLATFORM_ARGS` 与 PDS 的 `prepare_benchmark.py`
-同样接收 `--dcache-bank-xor-mask 2`；RT独立执行，RV64替换 `--xlen`。
+同样接收`--dcache-bank-xor-mask 2`；RV64替换`--xlen`。RT入口仅在`all`保留。
 每次重放使用新输出目录，具体测量的镜像/命令/哈希见本地结果JSON。
 
 上一轮容量实验推荐显式 I$16/D$4 KiB：64 次六项几何均值提高 4.8455%，Core 综合估计 85.1064→86.8282 MHz，

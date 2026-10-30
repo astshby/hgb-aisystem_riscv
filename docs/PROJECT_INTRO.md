@@ -1,6 +1,15 @@
 # 项目配置与测量
 
-## 当前条件候选验收（2026-10-30）
+## 当前发布整理（2026-10-30）
+
+main仅包含无NPU硬件、公共测试、分层CoreMark和上板交互程序；RT-Thread移至all。
+运行候选C9 main_margin2为Core/SYS/DDR-user/外设88.75/98.611111/125/68.269231 MHz，
+系统VCO887.5 MHz、输出分频10/9/13；新档仿真与物理结果分别记录，不覆盖历史C6成绩。
+本机计划以历史YOLO实际使用的timing-v2策略比较完整CoreMark与完整YOLO，
+两组均8线程、fanout64、retiming开、资源共享关、normal、LUT合并关、route80。
+原timing-v3的128/90保留。YOLO交A继续整机/板测，CoreMark与MiniMind修正交B，all只仿真。
+
+## 已测C6条件候选（2026-10-30）
 
 性能RTL固定为`b94580c`，唯一追加物理实现使用正式O3交互固件`ea1773fca42aa7c6`。
 Core/SYS/DDR-user/外设布线Fmax为90.6208/100.9082/124.1619/73.0004 MHz，
@@ -23,7 +32,7 @@ MiniMind按要求未新增整机仿真，独立RT终端仍只有构建/软件命
 Core 为 RV32/RV64 IM+Zicsr，双发射、按序双退休，ROB16、int8/mem4、LQ4/SQ4，
 正常 ALU/Load/DSP 为 8/10/10 级；C、F/V、MMU/Linux 未实现。
 
-main 的 C6 目标 Core/SYS/DDR-user/外设为 100/100/125/60 MHz。加速器保存在用途分支，使用独立时钟域。
+main当前选C9运行档；旧C6的100/100/125/60 MHz继续作历史时序目标。加速器分别保存在yolo/minimind，使用独立时钟域。
 ITCM/DTCM 各 64 KiB，I$/D$ 各 4 KiB、两路、32 B 行；I$ 当前填充粒度 4 B。
 TCM 与 Cache 命中逻辑仍在 Core 域；Core 与它们进一步分域仅是未来候选。
 SYS 负责统一 AXI 仲裁，DDR 与外设分别通过 FIFO 跨域。DMA 是 SYS 域主设备，
@@ -33,10 +42,10 @@ SYS 与 Core 是并行的时钟域；SYS 域不包含 Core、TCM 或 Cache。各
 
 | 发布分支 | CoreMark | RT-Thread | 加速器 |
 |---|---|---|---|
-| main | M0 与三层实际硬件 | 独立应用 | 无 |
-| baseline-yolo | 无 | 无 | YOLO |
-| baseline-minimind | 无 | 无 | MiniMind |
-| baseline-all | M0、三层与 YOLO 并发层 | 一份独立应用 | 分别选择 YOLO / MiniMind |
+| main | M0与三层实际硬件 | 无 | 无 |
+| yolo | 无 | 无 | YOLO与HDMI |
+| minimind | 无 | 无 | MiniMind，专属修正交B |
+| all | 全部测试入口 | 一份独立应用 | 两套源码与联合仿真 |
 
 所有分支保留公共功能、ISA、AXI、CDC、UART 下载验证。加速器分支不携带 CoreMark 算法、
 跑分脚本或 RT-Thread。原作者 MiniMind C 代码、模型锁和导出工具保留在 MiniMind/all。
@@ -101,10 +110,11 @@ I$16/D$4 KiB 的 cold、warm、DMA/IRQ performance 为 2.507487、2.508556、2.1
 真实 TCM 重放周期不变，RV64 候选功能通过；RT32 的 I$ miss 6048→1635，总周期减少约 0.44%。
 后者包含 tick 等待，单独记录。
 
-## RT-Thread 独立运行
+## RT-Thread 历史结果与位置
 
-仅 main/all 保留，固定 v5.2.2 提交 `ddf52e2cdd977f14fc04035c88672ac204aec713`。
-先 `make rt-thread-fetch`，再 `make rt-thread XLEN=32`；RV64 使用相同入口。
+当前仅`all`保留，本分支已移除源码、构建入口和专用测试。以下是迁移前的历史测量。
+RT-Thread固定v5.2.2提交 `ddf52e2cdd977f14fc04035c88672ac204aec713`。
+在`all`分支先运行`make rt-thread-fetch`，再运行`make rt-thread XLEN=32`；RV64使用相同入口。
 完整四域 SoC 无 NPU。Boot ROM 跳到 ITCM 启动，常用 trap/上下文代码驻 ITCM 顶部 8 KiB，
 其加载镜像在 DTCM 的 `0x0110c000`；DMA 搬入后校验并执行 FENCE.I，再安装 mtvec。
 程序主体、数据、BSS、线程栈/堆在 DDR `0x80000000`，由 Cache 自动填充；
