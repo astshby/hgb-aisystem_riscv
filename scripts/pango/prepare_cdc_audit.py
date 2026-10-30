@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
-from prepare_project import timing_input
+from prepare_project import BOARD_CLOCK_PROFILES, timing_input
 
 from measurement_constraints import _fifo_inventory, _path_pattern, _register_pattern
 
@@ -21,7 +21,7 @@ def specification(config):
     domains = config['domains']
     if config['platform'] == 'core_tcm':
         raise ValueError('Core+TCM has no asynchronous FIFO boundary')
-    if config.get('native_board_profile') not in (1, 4, 5, 6, 7, 8):
+    if config.get('native_board_profile') not in BOARD_CLOCK_PROFILES or config.get('native_board_profile') == 0:
         raise ValueError('audit requires a supported independent clock profile')
     periods = {d: Decimal(config['periods_ps'][d]) / 1000 for d in domains}
     root = 'u_soc' if 'ddr' in domains else 'g_soc.u_soc'

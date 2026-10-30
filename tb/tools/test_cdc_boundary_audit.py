@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check native-log parsing, synthesized clock tracing and CDC fault rejection."""
 from pathlib import Path
+from decimal import Decimal
 import re
 import sys
 import tempfile
@@ -78,6 +79,21 @@ def native_log(spec, names):
 
 
 class CdcAuditTests(unittest.TestCase):
+    def test_selected_application_profiles_keep_exact_cdc_periods(self):
+        for clock, profile in (('main_margin2', 9), ('yolo_sys', 10)):
+            config = configuration('soc_ddr', clock=clock)
+            if profile == 10:
+                config = dict(config, domains=[*config['domains'], 'npu'], npu_enable=1,
+                              periods_ps=dict(config['periods_ps'], npu=10**12 / 92187500))
+            spec = specification(config)
+            self.assertEqual(config['native_board_profile'], profile)
+            self.assertEqual(Decimal(spec['periods_ns']['core']),
+                             Decimal(config['periods_ps']['core']) / 1000)
+            self.assertTrue(spec['fifos'])
+            if profile == 10:
+                self.assertLess(Decimal(spec['periods_ns']['npu']), Decimal('11'))
+                self.assertGreater(Decimal(spec['periods_ns']['npu']), Decimal('10'))
+
     def test_deferred_query_handles_are_not_native_binding_evidence(self):
         names = {'dut/write_gray_q[0]/Q'}
         text = native_log({}, names) + '::tcicmd::deferred_get_pins_1\n'
