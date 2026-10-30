@@ -1,5 +1,26 @@
 # MiniMind-3：FP32 与全整数 C 推理
 
+当前 Git 交付包含原作者完整 C/导出器、整数模型 model_w8a16_int.bin 和 tokenizer.bin，
+位置为 c_runtime/assets/，哈希与原 manifest 一致。八层整数软件演示可直接从克隆构建；
+不依赖旧 build 或另一台电脑的文件。Python 依赖由 software/requirements.txt 固定。
+
+```bash
+make software-prepare
+make software-build XLEN=both
+make software-test
+# 原始 Safetensors 约122 MiB，生成的 FP32 约244 MiB；两者按固定来源恢复。
+make minimind-assets-rebuild
+make -C software/minimind3/c_runtime PRECISION=fp32 MODEL_STORAGE=file MAX_SEQ_LEN=64 MAX_NEW_TOKENS=1
+```
+
+重新导出用 model_lock.json 的 Hugging Face 固定 revision 和 model_sha256.json 全文件 SHA。
+默认访问官方地址；已有同一源权重可设 MINIMIND_CHECKPOINT，仍核验完整 SHA。
+FP32、原整数模型及分词器输出均与作者 manifest 对比，导出器源码不改。
+重新导出的临时文件在 .cache/，不覆盖作者 manifest；原权重和 FP32 大文件不提交 Git。
+模型与分词器来源许可见 MODEL_NOTICE、MODEL_LICENSE。
+整数包约61.9 MiB随 Git 普通对象保存，无需 Git LFS。硬件全模型仿真和上板状态见下文。
+
+
 本轮五域集成仿真通过；PDS 多写 RAM 推断待修，未取得资源/Fmax。100 MHz 为配置目标。
 详见 [FPGA 状态](../../docs/fpga/FPGA_ADAPTATION.md#2026-10-27-标准综合状态)。
 

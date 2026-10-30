@@ -1,4 +1,10 @@
-# hgb-aisystem：baseline-minimind
+# hgb-aisystem：MiniMind
+
+克隆：`git clone --branch minimind https://github.com/astshby/hgb-aisystem_riscv.git`。
+程序与锁定整数模型随 Git 保存，见[软件复现说明](software/README.md)。设置工具链与 Python 依赖后，
+依次执行 `make software-prepare`、`make software-build XLEN=both`、`make software-test`。
+原 FP32 权重恢复和重新导出命令为 `make minimind-assets-rebuild`，不需要旧 build。
+
 
 MiniMind 整数算子、原作者软件与五域 SoC，无 CoreMark/RT-Thread。Core 使用 ROB16、int8/mem4、LQ4/SQ4、forward3、Tournament1、RAS0、OOO0。
 RV32 优先优化，RV64 验证功能。正常 ALU/Load/DSP 为 8/10/10 级，C 扩展尚未实现。
@@ -31,7 +37,7 @@ RV32/RV64 的真实 UART 与原加速器驱动固件编译通过。每轮重置 
 软件命令见[项目介绍](docs/PROJECT_INTRO.md#minimind-常驻交互软件)。
 
 说明见[项目介绍](docs/PROJECT_INTRO.md)、[系统结构](docs/understand/SOC_SYSTEM.md)、
-[FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。全部源码与可选应用集中保存在 baseline-all；
+[FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。全部源码与可选应用集中保存在 all；
 本分支只保留上述应用。历史分支已保存为本地 archive 标签，详细变更用 git log/git show 查询。
 
 MiniMind 的五域仿真通过；本次 PDS 出现多写 RAM 推断警告，约 59 分钟后按维护者决定停止。
