@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / 'scripts'), str(ROOT / 'scripts/pango')]
 from benchmark_config import configuration
 from netlist_clock_audit import ClockNetlist
-from prepare_cdc_audit import specification, generate, parse_native_queries, audit_objects, read_clock_sources
+from prepare_cdc_audit import specification, generate, parse_native_queries, audit_objects, read_clock_sources, native_cell_name
 
 PRESERVE = '(* PAP_PRESERVE="TRUE", PAP_ASYNC_REG="TRUE", PAP_ALLOW_RETIMING="FALSE" *)'
 
@@ -41,7 +41,12 @@ def fixture(spec, fault=None, include_prunable=False):
                     register(first, dst)
                 register(f'{f["path"]}/{direction}_sync2_q[{bit}]',
                          src if fault == 'wrong_second' else dst)
-        if not f['constant_payload']:
+        if f.get('dual_clock_bram'):
+            path=(f['path']+'/payload_0').replace('.', '/')
+            cells.append(f'GTP_DRM36K_E1 \\{path} (.CLKA(clk_{f["src"]}),'
+                         f'.CLKB(clk_{f["dst"]}),.WEB(1\'b0));')
+            pins.update(path+'/'+pin for pin in ('CLKA','CLKB','WEB'))
+        elif not f['constant_payload']:
             register(f'{f["path"]}/payload[0][0]', f['dst'] if fault == 'payload_clock' else f['src'])
             register(f'{f["path"]}/consumer_q', f['dst'])
             crossings.append(dict(source=f'{f["path"]}/payload[0][0]/CLK'.replace('.', '/'),
@@ -122,6 +127,12 @@ class CdcAuditTests(unittest.TestCase):
         self.assertIn('init_pixel2_q',' '.join(result['synchronizer_registers']))
         self.assertIn('write_gray_q',fdc)
         self.assertNotIn('set_false_path',fdc)
+        self.assertNotIn('u_pixels/payload_0',fdc)
+        self.assertIn('g_video/u_video/u_pixels/payload_0/CLKA',result['pins'])
+        for old,new in (('.CLKB(clk_video)','.CLKB(clk_sys)'),('.WEB(1\'b0)','.WEB(1\'b1)'),
+                        ('GTP_DRM36K_E1','GTP_DRM18K')):
+            with self.subTest(bram_fault=old), self.assertRaises(ValueError):
+                audit_objects(spec,pins,ClockNetlist(vm.replace(old,new),'top',clocks,spec),sources)
         # Missing a new video synchronizer must fail instead of silently escaping the audit.
         bad={p for p in pins if 'u_pixels/write_sync1_q[0]' not in p}
         with self.assertRaises(ValueError):
@@ -191,6 +202,8 @@ endmodule
 endmodule
 '''
         netlist = ClockNetlist(vm, 'top', clocks, spec)
+        self.assertEqual(native_cell_name('active_q_vname',netlist.cells['active_q_vname'][1]),'active_q')
+        self.assertEqual(native_cell_name('unrelated_vname',netlist.cells['active_q_vname'][1]),'unrelated_vname')
         self.assertEqual(netlist.domain('active_q/D')[0], 'core')
         self.assertEqual(netlist.native_aliases, {'active_q': 'active_q_vname'})
         with self.assertRaises(ValueError):

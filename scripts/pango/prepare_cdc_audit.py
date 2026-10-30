@@ -49,7 +49,8 @@ def specification(config):
                                     ('u_frame_command', 'video', 'sys', 3),
                                     ('u_pixels', 'sys', 'video', 12)):
             fifos.append(dict(path='g_video.u_video.' + name, bits=bits, src=src, dst=dst,
-                              prunable=False, constant_payload=False))
+                              prunable=False, constant_payload=False,
+                              dual_clock_bram=(name == 'u_pixels')))
     clocks = {d: 'ddrphy_sysclk' if d == 'ddr' else f'clk_{d}' for d in domains}
     levels = [dict(path=root, signal='irq_sync1_q', second_signal='irq_sync2_q',
                    bits=[0, 1, 2], second_bits=[0, 1, 2], src='periph', dst='core')]
@@ -62,8 +63,8 @@ def specification(config):
                 ('init_done_s1_q', 'init_done_s2_q', 'periph', 'sys', [0], True, None),
                 ('init_error_s1_q', 'init_error_s2_q', 'periph', 'sys', [0], True, None),
                 ('init_pixel1_q', 'init_pixel2_q', 'periph', 'video', [0], True, None),
-                ('retry_s1_q', 'retry_s2_q', 'periph', 'sys', list(range(2)), False, 'retry_gray_q'),
-                ('write_s1_q', 'write_s2_q', 'periph', 'sys', list(range(6)), False, 'write_gray_q'),
+                ('retry_s1_q', 'retry_s2_q', 'periph', 'sys', list(range(8)), False, 'retry_gray_q'),
+                ('write_s1_q', 'write_s2_q', 'periph', 'sys', list(range(8)), False, 'write_gray_q'),
                 ('frame_s1_q', 'frame_s2_q', 'video', 'sys', list(range(32)), False, 'frame_gray_q'),
                 ('underflow_s1_q', 'underflow_s2_q', 'video', 'sys', list(range(32)), False, 'underflow_gray_q')):
             levels.append(dict(path='g_video.u_video', signal=first, second_signal=second,
@@ -200,6 +201,19 @@ def audit_objects(spec, names, netlist, clock_sources):
                 continue
             constraints += [f'set_max_delay {budget} -datapath_only -from {object_list(groups[0])} -to {object_list(groups[2])}',
                             f'set_max_skew {budget} -from {object_list(groups[0])} -to {object_list(groups[2])}']
+        if fifo.get('dual_clock_bram'):
+            # 同步双时钟 BRAM 在端口内完成数据交接；只审核两端时钟，
+            # 不把写入/读出数据路径加入异步 LUTRAM 的时序例外。
+            writes = checked(scope + r'payload[^/]+/CLKA$', src, None, path + '/payload/CLKA')
+            reads = checked(scope + r'payload[^/]+/CLKB$', dst, None, path + '/payload/CLKB')
+            if not writes or {n.rsplit('/', 1)[0] for n in writes} != {n.rsplit('/', 1)[0] for n in reads}:
+                raise ValueError(f'missing/duplicate native dual-clock BRAM payload {path}')
+            for name in writes:
+                _, cell, _ = netlist.pin(name)
+                if cell.kind not in ('GTP_DRM36K_E1', 'GTP_DRM18K_E1') or cell.ports.get('WEB') != "1'b0":
+                    raise ValueError(f'unsupported native dual-clock BRAM payload {name}')
+            passed.append(index)
+            continue
         payload = checked(scope + r'payload[^/]*(?:/opit_[0-9]+)?/(?:WCLK|CLK)$', src,
                           None, path + '/payload')
         if not payload and not (fifo['constant_payload'] or fifo['prunable']):
@@ -255,7 +269,7 @@ def audit_objects(spec, names, netlist, clock_sources):
                                            f'-from {object_list(sources)} -to {object_list(selected)}')
         if level.get('gray_source'):
             source = checked(_register_pattern(level['path'], level['gray_source'], 'CLK'),
-                             level['src'], level['bits'], level['gray_source'], True)
+                                 level['src'], level['bits'], level['gray_source'], True)
             dest = checked(_register_pattern(level['path'], level['signal'], 'D'),
                            level['dst'], level['bits'], level['signal'], True)
             constraints.append(f'set_max_skew {budget} -from {object_list(source)} -to {object_list(dest)}')
@@ -265,6 +279,13 @@ def audit_objects(spec, names, netlist, clock_sources):
 
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def native_cell_name(name, cell):
+    # VM 为避免实例与 Q 网同名追加 _vname；原生对象仍使用原名。
+    if name.endswith('_vname') and cell.ports.get('Q') == name.rsplit('/', 1)[-1][:-6]:
+        return name[:-6]
+    return name
 
 
 def load_inputs(project, summary_file, spec):
@@ -292,9 +313,10 @@ def load_inputs(project, summary_file, spec):
                           summary['worst_same_domain_path'])
     level_names = '|'.join(re.escape(signal) for level in spec['levels']
                            for signal in (level['signal'], level['second_signal'], level.get('gray_source') or level['signal']))
-    pointer_or_level = re.compile(r'/(?:write|read)_(?:gray|sync[12])_q|/(?:' + level_names + r')(?:\[|/)')
+    pointer_or_level = re.compile(r'/(?:write|read)_(?:gray|sync[12])_q|/(?:' + level_names + r')(?:\[|/|$)')
     payload = re.compile('^(?:' + '|'.join(_path_pattern(f['path']) for f in spec['fifos']) + r')[./]payload')
-    names = {f'{name}/{pin}' for name, (_, cell) in netlist.cells.items()
+    native_cells = [(native_cell_name(name, cell), cell) for name, (_, cell) in netlist.cells.items()]
+    names = {f'{name}/{pin}' for name, cell in native_cells
              if pointer_or_level.search(name) or payload.match(name) for pin in cell.ports}
     clock_sources = read_clock_sources(project / network_db, spec)
     result, constraints = audit_objects(spec, names, netlist, clock_sources)

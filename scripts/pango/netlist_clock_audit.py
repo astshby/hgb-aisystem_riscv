@@ -248,7 +248,7 @@ class ClockNetlist:
 
     def domain(self, name):
         scope, inst, pin = self.pin(name)
-        if pin in ('CLK', 'WCLK'):
+        if pin in ('CLK', 'WCLK', 'CLKA', 'CLKB'):
             clock = pin
         else:
             clocks = [p for p in ('CLK', 'WCLK') if p in inst.ports]
