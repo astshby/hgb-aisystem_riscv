@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -58,6 +59,9 @@ def seal(output, tool_root):
             raise ValueError('complete application symbol missing: ' + name)
     if subprocess.check_output([prefix + 'nm', '-u', str(elf)], text=True).strip():
         raise ValueError('YOLO firmware has unresolved symbols')
+    if receipt['config']['xlen'] == 64:
+        archive = Path(os.environ.get('YOLO_SOFTMATH_ARCHIVE', output / 'softmath/libyolo_softmath.a'))
+        receipt['libraries_sha256'] = {'rv64im_softmath': sha(archive)}
     receipt.update(image_sha256={name: sha(output / name) for name in ('program.elf', 'imem.hex', 'dmem.hex')},
                    instruction_count=instructions, compressed_instructions=0, floating_point_instructions=0,
                    status='BUILD_AND_ISA_AUDIT_PASS', role='yolo-interactive')

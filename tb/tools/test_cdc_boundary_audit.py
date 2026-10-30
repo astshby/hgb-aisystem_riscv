@@ -57,6 +57,9 @@ def fixture(spec, fault=None, include_prunable=False):
             crossings.append(dict(source=(source+'/CLK').replace('.', '/'),
                                   destination=f'{level["path"]}/{level["signal"]}[{bit}]/D'.replace('.', '/'),
                                   source_clock=spec['clocks'][level['src']], destination_clock=spec['clocks'][level['dst']]))
+        if level.get('gray_source'):
+            for bit in level['bits']:
+                register(f'{level["path"]}/{level["gray_source"]}[{bit}]', level['src'])
     if fault == 'unknown_fifo':
         register('unreviewed/write_gray_q[0]', 'core')
     header = ', '.join('input clk_' + d for d in spec['clocks'])
@@ -105,6 +108,24 @@ class CdcAuditTests(unittest.TestCase):
                         self.assertIn('set_max_skew', fdc)
                         self.assertIn('irq_sync2_q', ' '.join(result['synchronizer_registers']))
                         self.assertEqual(len(result['passed_fifos']) + len(result['pruned_fifos']), len(spec['fifos']))
+
+    def test_full_video_fifo_scalar_and_gray_inventory(self):
+        config=configuration('soc_ddr','yolo_sys')
+        config.update(npu_enable=1,video_enable=1,domains=['core','sys','ddr','periph','npu','video'])
+        config['periods_ps'].update(npu=640000.0/59.0,video=1000000.0/148.5)
+        spec=specification(config)
+        self.assertEqual(len(spec['fifos']),40)
+        vm,clocks,pins,sources=fixture(spec)
+        result,fdc=audit_objects(spec,pins,ClockNetlist(vm,'top',clocks,spec),sources)
+        self.assertEqual(len(result['passed_fifos'])+len(result['pruned_fifos']),40)
+        self.assertIn('frame_s2_q',' '.join(result['synchronizer_registers']))
+        self.assertIn('init_pixel2_q',' '.join(result['synchronizer_registers']))
+        self.assertIn('write_gray_q',fdc)
+        self.assertNotIn('set_false_path',fdc)
+        # Missing a new video synchronizer must fail instead of silently escaping the audit.
+        bad={p for p in pins if 'u_pixels/write_sync1_q[0]' not in p}
+        with self.assertRaises(ValueError):
+            audit_objects(spec,bad,ClockNetlist(vm,'top',clocks,spec),sources)
 
     def test_native_log_errors_counts_and_deferred_handles(self):
         spec = next(self.specs())
