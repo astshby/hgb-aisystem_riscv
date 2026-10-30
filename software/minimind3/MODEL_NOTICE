@@ -1,0 +1,7 @@
+MiniMind-3 model and tokenizer
+Source: https://huggingface.co/jingyaogong/minimind-3
+Revision: f92512d4cd6142fa9acc0d6022375049a8974bf6
+Upstream model-card license: Apache-2.0; full text: MODEL_LICENSE
+Bundled assets: c_runtime/assets/model_w8a16_int.bin and tokenizer.bin
+The integer model is derived with the preserved author export tools.
+Original checkpoint and exported file identities are recorded in model_sha256.json and c_runtime/assets/*manifest.json.

@@ -17,6 +17,7 @@ make -C software/minimind3/c_runtime PRECISION=fp32 MODEL_STORAGE=file MAX_SEQ_L
 默认访问官方地址；已有同一源权重可设 MINIMIND_CHECKPOINT，仍核验完整 SHA。
 FP32、原整数模型及分词器输出均与作者 manifest 对比，导出器源码不改。
 重新导出的临时文件在 .cache/，不覆盖作者 manifest；原权重和 FP32 大文件不提交 Git。
+模型与分词器来源许可见 MODEL_NOTICE、MODEL_LICENSE。
 整数包约61.9 MiB随 Git 普通对象保存，无需 Git LFS。硬件全模型仿真和上板状态见下文。
 
 
