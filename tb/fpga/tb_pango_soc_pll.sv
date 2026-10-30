@@ -5,10 +5,15 @@ module tb_pango_soc_pll;
     timeprecision 1ps;
     parameter int CLOCK_PROFILE = 1;
     parameter bit NPU_ENABLE = 0;
-    localparam realtime CORE_PERIOD = CLOCK_PROFILE == 8 ? (110ns / 9.0) :
-        ((CLOCK_PROFILE == 5 || CLOCK_PROFILE == 7) ? (100ns / 9.0) : 10ns);
-    localparam realtime SYS_PERIOD = CLOCK_PROFILE == 1 ? 12.5ns : 10ns;
-    localparam realtime PERIPH_PERIOD = CLOCK_PROFILE >= 6 ? (50ns / 3.0) : 40ns;
+    localparam realtime CORE_PERIOD = CLOCK_PROFILE == 9 ? (800ns / 71.0) :
+        (CLOCK_PROFILE == 10 ? (704ns / 59.0) : (CLOCK_PROFILE == 8 ? (110ns / 9.0) :
+        ((CLOCK_PROFILE == 5 || CLOCK_PROFILE == 7) ? (100ns / 9.0) : 10ns)));
+    localparam realtime SYS_PERIOD = CLOCK_PROFILE == 9 ? (720ns / 71.0) :
+        (CLOCK_PROFILE == 10 ? (576ns / 59.0) : (CLOCK_PROFILE == 1 ? 12.5ns : 10ns));
+    localparam realtime PERIPH_PERIOD = CLOCK_PROFILE == 9 ? (1040ns / 71.0) :
+        (CLOCK_PROFILE == 10 ? (896ns / 59.0) : (CLOCK_PROFILE >= 6 ? (50ns / 3.0) : 40ns));
+    localparam realtime NPU_PERIOD = CLOCK_PROFILE == 9 ? (720ns / 71.0) :
+        (CLOCK_PROFILE == 10 ? (640ns / 59.0) : 10ns);
     logic ref_clk = 0, reset_n = 0;
     wire clk_core, clk_sys, clk_periph, clk_npu, locked;
     always #4ns ref_clk = ~ref_clk;
@@ -39,10 +44,10 @@ module tb_pango_soc_pll;
         measure(0, CORE_PERIOD);
         measure(1, SYS_PERIOD);
         measure(2, PERIPH_PERIOD);
-        if (NPU_ENABLE) measure(3, 10ns);
+        if (NPU_ENABLE) measure(3, NPU_PERIOD);
         else assert (clk_npu == 0) else $fatal(1, "disabled NPU clock toggled");
-        $display("PASS vendor GPLL C%0d: periods core=%0.6f sys=%0.6f periph=%0.6f ns npu=%0d MHz",
-            CLOCK_PROFILE, CORE_PERIOD, SYS_PERIOD, PERIPH_PERIOD, NPU_ENABLE ? 100 : 0);
+        $display("PASS vendor GPLL C%0d: periods core=%0.6f sys=%0.6f periph=%0.6f ns npu=%0.6f MHz",
+            CLOCK_PROFILE, CORE_PERIOD, SYS_PERIOD, PERIPH_PERIOD, NPU_ENABLE ? 1000.0/NPU_PERIOD : 0.0);
         $finish;
     end
     initial begin

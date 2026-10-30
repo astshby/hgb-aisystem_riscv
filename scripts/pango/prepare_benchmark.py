@@ -26,7 +26,9 @@ def compile_tcm(config):
 def constraints(config):
     lines=['# Runnable TCM configuration; external clocks, no board pin or CDC timing closure claim.']
     for d in config['domains']:
-        lines += [f'create_clock -name {{clk_{d}}} -period {{{config["periods_ps"][d]/1000:g}}} [get_ports {{clk_{d}}}]',
+        period = format(config['periods_ps'][d]/1000,
+                        '.15g' if config.get('native_board_profile', 0) in (9, 10) else 'g')
+        lines += [f'create_clock -name {{clk_{d}}} -period {{{period}}} [get_ports {{clk_{d}}}]',
                   f'set_clock_uncertainty -setup 0.2 [get_clocks {{clk_{d}}}]',
                   f'set_clock_uncertainty -hold 0.05 [get_clocks {{clk_{d}}}]']
     return '\n'.join(lines)+'\n'

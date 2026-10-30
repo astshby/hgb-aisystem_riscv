@@ -24,9 +24,11 @@ def summarize(root, native_log=None):
     text=log.read_text(errors='replace')
     if not re.search(r'^Executing : synthesize[^\r\n]* successfully\.$',text,re.M):
         raise ValueError('missing completed synthesis action')
-    if manifest.get('synthesis_strategy') == 'timing-v3' and (
-            'Executing : '+TIMING_V3_SYNTHESIS+' successfully.') not in text.splitlines():
-        raise ValueError('configured timing-v3 synthesis did not complete')
+    selected = manifest.get('synthesis_strategy')
+    if selected in ('timing-v2', 'timing-v3'):
+        expected = TIMING_V3_SYNTHESIS.replace('-fanout_guide 128', '-fanout_guide 64') if selected == 'timing-v2' else TIMING_V3_SYNTHESIS
+        if ('Executing : '+expected+' successfully.') not in text.splitlines():
+            raise ValueError(f'configured {selected} synthesis did not complete')
     strategy = None
     if (root/'strategy.json').exists():
         from prepare_performance_strategy import verify_strategy

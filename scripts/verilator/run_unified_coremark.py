@@ -209,8 +209,10 @@ def replay(binary, config, bundle, image, output, receipt):
     if ddr or image['scenario']=='tcm_background': command += ['+P2_ROI=01100100','+P2_METRICS','+P2_PLATFORM']
     run(command,log)
     text=log.read_text()
-    if config.get('npu_enable') and f'NPU_HARDWARE enabled=1 period_ps={config["npu_period_ps"]}' not in text:
-        raise ValueError('missing NPU clock/configuration receipt')
+    if config.get('npu_enable'):
+        npu_clock = re.search(r'^NPU_HARDWARE enabled=1 period_ps=([0-9.]+)', text, re.M)
+        if not npu_clock or abs(float(npu_clock[1])-config['npu_period_ps']) > 0.001:
+            raise ValueError('missing or mismatched NPU clock/configuration receipt')
     periods=[config['periods_ps'][d] for d in DOMAINS]
     result=(p2.parse_result(text,image['mode'],image['iterations'],
                            'background' if image['scenario']=='npu_background' else image['scenario'],

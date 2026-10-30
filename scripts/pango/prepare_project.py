@@ -9,6 +9,7 @@ import subprocess
 import sys
 import re
 import struct
+from fractions import Fraction
 import xml.etree.ElementTree as ET
 
 
@@ -36,13 +37,25 @@ scripts/coremark/build_board.sh
 def synthesis_commands(strategy="standard"):
     if strategy == "standard":
         return SYNTHESIZE_COMMANDS
-    if strategy != "timing-v3":
+    if strategy not in ("timing-v2", "timing-v3"):
         raise ValueError("unsupported synthesis strategy")
+    synthesis = TIMING_V3_SYNTHESIS.replace('-fanout_guide 128', '-fanout_guide 64') if strategy == 'timing-v2' else TIMING_V3_SYNTHESIS
     return ('set hgb_root [file dirname [info script]]\n'
             'puts [exec powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass '
             '-File [file join $hgb_root memory_gate.ps1] -LogDirectory [file join $hgb_root memory] -Phase synthesis]\n'
             'set_option max_threads 8\nsource [file join $hgb_root compile.tcl]\n' +
-            TIMING_V3_SYNTHESIS + '\nputs "HGB_SYNTHESIS_DONE"\n')
+            synthesis + '\nputs "HGB_SYNTHESIS_DONE"\n')
+
+
+def implementation_commands(template, strategy="standard"):
+    """Only newly staged timing-v2 projects use the measured 64/80 policy."""
+    if strategy == 'timing-v2':
+        if template.count('-slack_weight 90') != 1:
+            raise ValueError('timing-v2 requires the reviewed normal/90 implementation template')
+        return template.replace('-slack_weight 90', '-slack_weight 80')
+    if strategy not in ('standard', 'timing-v3'):
+        raise ValueError('unsupported implementation strategy')
+    return template
 
 
 def sha(path):
@@ -183,6 +196,10 @@ BOARD_CLOCK_PROFILES = {
         "ddr": 125000000, "periph": 60000000},
     8: {"name": "C8", "core": 81818182, "sys": 100000000,
         "ddr": 125000000, "periph": 60000000},
+    9: {"name": "C9", "core": 88750000, "sys": 98611111,
+        "ddr": 125000000, "periph": 68269231},
+    10: {"name": "C10", "core": 83806818, "sys": 102430556,
+         "ddr": 125000000, "periph": 65848214},
 }
 # 相对 125 MHz ref_clk 的 GTP_GPLL 输出比；与 pango_soc_pll 的 STATIC_RATIO* 对齐。
 # C5 的 GPLL 分频是 900/10、900/9、900/36，折算到 ref_clk 即 18/25、4/5、1/5。
@@ -193,7 +210,38 @@ BOARD_CLOCK_RATIOS = {
     6: {"core": (4, 5), "sys": (4, 5), "periph": (12, 25)},
     7: {"core": (18, 25), "sys": (4, 5), "periph": (12, 25)},
     8: {"core": (36, 55), "sys": (4, 5), "periph": (12, 25)},
+    9: {"core": (71, 100), "sys": (71, 90), "periph": (71, 130), "npu": (71, 90)},
+    10: {"core": (59, 88), "sys": (59, 72), "periph": (59, 112), "npu": (59, 80)},
 }
+BOARD_PLL_PARAMETERS = {
+    9: dict(reference_hz=125000000, input_div=10, multiply=1, feedback_div=71,
+            output_div=dict(core=10, sys=9, periph=13, npu=9)),
+    10: dict(reference_hz=125000000, input_div=8, multiply=1, feedback_div=59,
+             output_div=dict(core=11, sys=9, periph=14, npu=10)),
+}
+
+
+def board_clock_hz(profile, domain):
+    if domain == 'ddr':
+        return 125000000
+    ratio = BOARD_CLOCK_RATIOS[profile].get(domain, (4, 5))
+    return round(Fraction(125000000 * ratio[0], ratio[1]))
+
+
+def board_clock_periods(profile, clocks):
+    # 旧档继续按历史整数Hz生成；C9/C10直接由PLL比率生成分数周期。
+    if profile < 9:
+        return {domain: 10**12 / hz for domain, hz in clocks.items()}
+    result = {}
+    for domain in clocks:
+        multiply, divide = (1, 1) if domain == 'ddr' else BOARD_CLOCK_RATIOS[profile][domain]
+        result[domain] = float(Fraction(8000 * divide, multiply))
+    return result
+
+
+def board_clock_relationship(profile):
+    vco = 887.5 if profile == 9 else (921.875 if profile == 10 else (900 if profile >= 5 else 800))
+    return f'independent_gpll_{vco}mhz_vco'
 
 
 def verify_default_board_clocks(wrapper):
@@ -256,8 +304,14 @@ def verify_independent_board_clocks(wrapper, profile):
                    "(BOARD_CLOCK_PROFILE>=4?100000000:80000000)"),
         "PERIPH_HZ": ("25000000", "(BOARD_CLOCK_PROFILE>=6?60000000:25000000)"),
     }
+    formulas['HOT_HZ'] += ('(BOARD_CLOCK_PROFILE==9?88750000:(BOARD_CLOCK_PROFILE==10?83806818:'
+                           '(BOARD_CLOCK_PROFILE==8?81818182:((BOARD_CLOCK_PROFILE==5||BOARD_CLOCK_PROFILE==7)?90000000:100000000))))',)
+    formulas['SYS_HZ'] += ('(BOARD_CLOCK_PROFILE==9?98611111:(BOARD_CLOCK_PROFILE==10?102430556:'
+                           '(BOARD_CLOCK_PROFILE>=4?100000000:80000000)))',)
+    formulas['PERIPH_HZ'] += ('(BOARD_CLOCK_PROFILE==9?68269231:(BOARD_CLOCK_PROFILE==10?65848214:'
+                              '(BOARD_CLOCK_PROFILE>=6?60000000:25000000)))',)
     for name, choices in formulas.items():
-        allowed = choices[1:] if profile >= 6 else choices
+        allowed = choices[-1:] if profile >= 9 else (choices[1:] if profile >= 6 else choices)
         if not any(f"{name}=BOARD_CLOCK_PROFILE==0?125000000:{formula};" in compact for formula in allowed):
             raise ValueError(f"unexpected {name} profile formula")
 
@@ -275,7 +329,7 @@ def board_clock_constraints(profile, npu_enable=False):
                                ("sys", "CLKOUT1", "clk_sys"),
                                ("periph", "CLKOUT2", "clk_periph"),
                                *(([("npu", "CLKOUT3", "clk_npu")]) if npu_enable else [])):
-        multiply, divide = (4, 5) if domain == "npu" else BOARD_CLOCK_RATIOS[profile][domain]
+        multiply, divide = BOARD_CLOCK_RATIOS[profile].get(domain, (4, 5))
         lines.append(
             f"create_generated_clock -name {{{clock}}} -source [get_ports {{ref_clk_p}}] "
             f"[get_pins {{g_domain_clocks.u_soc_pll.u_pll/{pin}}}] "
@@ -291,7 +345,7 @@ def board_clock_constraints(profile, npu_enable=False):
 
 
 def verify_npu_board_clocks(root):
-    """Bind the optional 100 MHz domain to the actual GPLL output and NPU wrapper."""
+    """Bind the optional domain to its actual GPLL output and NPU wrapper."""
     wrapper = (root / 'vsrc/cpu/pango_200hp_top.sv').read_text()
     pll = (root / 'vsrc/cpu/pango_soc_pll.sv').read_text()
     checks = ((wrapper, r'\.NPU_ENABLE\(NPU_ENABLE(?:\s*\|\|\s*MM3_ENABLE)?\)'),
@@ -299,11 +353,11 @@ def verify_npu_board_clocks(root):
               (wrapper, r'\.NPU_BYTES\((?:NPU_ENABLE|\(NPU_ENABLE\s*\|\|\s*MM3_ENABLE\))\s*\?\s*65536\s*:\s*0\)'),
               (pll, r'\.STATIC_RATIO3\(NPU_DIV\)'),
               (pll, r'HIGH_VCO\s*=\s*CLOCK_PROFILE\s*>=\s*5'),
-              (pll, r'NPU_DIV\s*=\s*HIGH_VCO\s*\?\s*9\s*:\s*8'),
+              (pll, r'NPU_DIV\s*=\s*(?:CLOCK_PROFILE\s*==\s*10\s*\?\s*10\s*:\s*\()?HIGH_VCO\s*\?\s*9\s*:\s*8'),
               (pll, r'\.CLKOUT3\(pll_npu\)'),
               (pll, r'if\s*\(NPU_ENABLE\).*?\.CLKIN\(pll_npu\),\s*\.CLKOUT\(clk_npu\)'))
     if any(not re.search(pattern, text, re.S) for text, pattern in checks):
-        raise ValueError('NPU clock or target wiring differs from the paired 100 MHz profile')
+        raise ValueError('NPU clock or target wiring differs from the paired PLL profile')
 
 
 def staged_soc_system(root, manifest):
@@ -328,7 +382,8 @@ def project_configuration(manifest):
         raise ValueError("native timing/CDC requires independent soc_system clocks")
     profile = manifest["board_clock_profile"]
     clocks = dict(manifest["board_clock_domains_hz"])
-    names = {1: "target", 4: "sys100", 5: "yolo", 6: "main60", 7: "yolo60", 8: "yolo60_core81"}
+    names = {1: "target", 4: "sys100", 5: "yolo", 6: "main60", 7: "yolo60", 8: "yolo60_core81",
+             9: "main_margin2", 10: "yolo_sys"}
     keys = dict(CORE_ISSUE_WIDTH="core_issue_width", CORE_RETIRE_ENTRIES="core_retire_entries",
                 CORE_SPLIT_ISSUE_QUEUE="core_split_issue_queue", CORE_ISSUE_QUEUE_ENTRIES="core_issue_queue_entries",
                 CORE_MEMORY_QUEUE_ENTRIES="core_memory_queue_entries", CORE_LOAD_QUEUE_ENTRIES="core_load_queue_entries",
@@ -347,7 +402,7 @@ def project_configuration(manifest):
                   domains=list(clocks), ddr_bytes=536870912, cache_enable=1,
                   pds_top=manifest["top"], native_board_profile=profile, macros=macros,
                   memory=memory, frequencies_hz=clocks,
-                  periods_ps={name: 10**12 / hz for name, hz in clocks.items()},
+                  periods_ps=board_clock_periods(profile, clocks),
                   timing_status="unvalidated_target")
     config["config_sha256"] = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
     return config
@@ -513,10 +568,10 @@ def verify_staged_manifest(root, manifest):
                                 for domain in ("core", "sys", "ddr", "periph")}
             if manifest.get("npu_enable") or manifest.get("mm3_enable"):
                 verify_npu_board_clocks(root)
-                expected_domains["npu"] = 100000000
+                expected_domains["npu"] = board_clock_hz(profile, 'npu')
             if (manifest.get("clock_profile") != BOARD_CLOCK_PROFILES[profile]["name"] or
                     manifest.get("board_clock_domains_hz") != expected_domains or
-                    manifest.get("clock_relationship") != f"independent_gpll_{900 if profile >= 5 else 800}mhz_vco" or
+                    manifest.get("clock_relationship") != board_clock_relationship(profile) or
                     manifest.get("mtime_clock_domain") != "periph"):
                 raise ValueError("unexpected independent board clock configuration")
             if "board_clocks.fdc" not in manifest["files"]:
@@ -577,6 +632,13 @@ def verify_staged_manifest(root, manifest):
         raise ValueError("compile Tcl parameters differ from staging manifest")
     if (root / "synthesize.tcl").read_text(encoding="utf-8") != synthesis_commands(manifest.get("synthesis_strategy", "standard")):
         raise ValueError("unexpected generated synthesis commands")
+    if manifest.get('synthesis_strategy') == 'timing-v2':
+        for name in ('implement.tcl', *CDC_IMPLEMENTATION_SCRIPTS):
+            lines = (root / name).read_text().splitlines()
+            if (lines.count('place -mode normal -optimize_gp_recovery TRUE -logic_optimize_lut6d FALSE') != 1 or
+                    lines.count('route -route_mode normal -slack_weight 80 -optimize_routing_recovery TRUE') != 1 or
+                    lines.count('route_optimize') != 1):
+                raise ValueError('timing-v2 implementation must preserve normal/LUT-off/80/recovery/route_optimize')
     if manifest.get("firmware_manifest_version") == 1:
         if manifest.get("firmware_role") != "coremark-interactive":
             raise ValueError("unsupported versioned firmware role")
@@ -631,7 +693,7 @@ def main():
     parser.add_argument("--xlen", type=int, choices=(32, 64), default=32)
     parser.add_argument("--firmware-dir", type=Path, help="existing initialized TCM image directory; never rebuilt")
     parser.add_argument("--firmware-role", choices=("loader", "coremark-interactive"), default="loader")
-    parser.add_argument("--synthesis-strategy", choices=("standard", "timing-v3"), default="standard")
+    parser.add_argument("--synthesis-strategy", choices=("standard", "timing-v2", "timing-v3"), default="standard")
     parser.add_argument('--icache-bytes', type=int, choices=(4096, 8192, 16384, 32768, 65536), default=4096)
     parser.add_argument('--dcache-bank-xor-mask', type=int, choices=(0,1,2,3), default=0)
     parser.add_argument('--dcache-bytes', type=int, choices=(4096, 8192, 16384, 32768, 65536), default=4096)
@@ -649,7 +711,7 @@ def main():
     parser.add_argument("--predictor-mode", type=int, choices=(0, 1), default=None)
     parser.add_argument("--ras-enable", type=int, choices=(0, 1), default=None)
     parser.add_argument("--board-clock-profile", type=int, choices=tuple(BOARD_CLOCK_PROFILES), default=None,
-                        help="0=common; C1/C4/C5 historical; C6=100/100/60, C7=90/100/60, C8=(900/11)/100/60 MHz; DDR125/NPU100")
+                        help="0=common; C1-C8 historical; C9=main_margin2, C10=yolo_sys; DDR125 remains IP-owned")
     parser.add_argument("--npu-enable", action="store_true", help="attach pinned 128-MAC NPU on dedicated 100 MHz clock")
     parser.add_argument("--mm3-enable", action="store_true", help="attach MiniMind on dedicated 100 MHz clock")
     args = parser.parse_args()
@@ -793,7 +855,7 @@ def main():
                             clock_profile=profile["name"],
                             board_clock_domains_hz={domain: profile[domain]
                                                     for domain in ("core", "sys", "ddr", "periph")},
-                            clock_relationship=f"independent_gpll_{900 if args.board_clock_profile >= 5 else 800}mhz_vco",
+                            clock_relationship=board_clock_relationship(args.board_clock_profile),
                             mtime_clock_domain="periph")
         else:
             manifest.update(soc_topology="soc_system", core_profile=core_profile(manifest),
@@ -801,7 +863,7 @@ def main():
                             clock_relationship="common_ddr_user_clock", mtime_clock_domain="periph")
     if args.npu_enable or args.mm3_enable:
         manifest["mm3_enable" if args.mm3_enable else "npu_enable"] = True
-        manifest["board_clock_domains_hz"]["npu"] = 100000000
+        manifest["board_clock_domains_hz"]["npu"] = board_clock_hz(args.board_clock_profile, 'npu')
     if args.firmware_role == "coremark-interactive":
         manifest.update(firmware_manifest_version=1, firmware_role=args.firmware_role,
                         firmware=firmware_identity, config=project_configuration(manifest))
@@ -852,9 +914,9 @@ def main():
                                  icache_bytes=args.icache_bytes,dcache_bytes=args.dcache_bytes, dcache_bank_xor_mask=args.dcache_bank_xor_mask)]
     (root / "compile.tcl").write_text("\n".join(commands) + "\n", encoding="utf-8")
     (root / "synthesize.tcl").write_text(synthesis_commands(args.synthesis_strategy), encoding="utf-8")
-    shutil.copyfile(repo / "scripts/pango/implement.tcl", root / "implement.tcl")
-    for name in CDC_IMPLEMENTATION_SCRIPTS:
-        shutil.copyfile(repo / "scripts/pango" / name, root / name)
+    for name in ('implement.tcl', *CDC_IMPLEMENTATION_SCRIPTS):
+        template = (repo / 'scripts/pango' / name).read_text()
+        (root / name).write_text(implementation_commands(template, args.synthesis_strategy))
     for name in MEMORY_SCRIPTS:
         shutil.copyfile(repo / "scripts/pango" / name, root / name)
     manifest["memory_guard_version"] = 1

@@ -16,7 +16,7 @@ module tb_soc_system #(
     parameter bit MM3_ENABLE=0,
     parameter int MM3_MAC_LANES=16,
     parameter bit AUTO_FINISH=1,
-    parameter int NPU_PERIOD_PS=10000,
+    parameter real NPU_PERIOD_PS=10000,
     parameter int SOC_PROFILE=soc_config_pkg::SOC_PROFILE_FULL,
     parameter bit ICACHE_ENABLE=1,
     parameter bit DCACHE_ENABLE=1,
@@ -50,6 +50,8 @@ module tb_soc_system #(
             6: case(domain_index) 0,1:return 10000; 2:return 8000; default:return 1000000.0/60.0; endcase
             7: case(domain_index) 0:return 1000000.0/90.0; 1:return 10000; 2:return 8000; default:return 1000000.0/60.0; endcase
             8: case(domain_index) 0:return 110000.0/9.0; 1:return 10000; 2:return 8000; default:return 1000000.0/60.0; endcase
+            9: case(domain_index) 0:return 4000000.0/355.0; 1:return 3600000.0/355.0; 2:return 8000; default:return 5200000.0/355.0; endcase
+            10: case(domain_index) 0:return 88000000.0/7375.0; 1:return 72000000.0/7375.0; 2:return 8000; default:return 112000000.0/7375.0; endcase
             default:return 0;
         endcase
     endfunction

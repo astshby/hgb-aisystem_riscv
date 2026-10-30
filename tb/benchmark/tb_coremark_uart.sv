@@ -10,7 +10,8 @@ module tb_coremark_uart #(
     timeunit 1ns;
     timeprecision 1ps;
     import core_config_pkg::*;
-    localparam int DIVISOR = PERIPH_HZ / BAUD;
+    // 与固件时钟发现后的 UART 分频取整一致，外设分数频率不能向下取整。
+    localparam int DIVISOR = (PERIPH_HZ + BAUD/2) / BAUD;
     tb_soc_system #(.DDR_BYTES(262144), .FLASH_BYTES(0), .NPU_ENABLE(0),
         .CLOCK_PROFILE(CLOCK_PROFILE), .UART_DIVISOR(DIVISOR), .AUTO_FINISH(0),
         .ICACHE_BYTES(ICACHE_BYTES), .DCACHE_BYTES(DCACHE_BYTES)) u_test();
