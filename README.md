@@ -66,4 +66,5 @@ YOLO用途分支已集成`demo/yolo-full-network@8a8f484`的完整程序：同C�
 
 详细配置、数据和待办见[项目介绍](docs/PROJECT_INTRO.md)、
 [系统结构](docs/understand/SOC_SYSTEM.md)、[FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。
-本地工作区[record.md](../record.md)保存各次镜像、命令和测量记录。
+公开的配置与优化结果见[优化总结](docs/understand/OPTIMIZATION.md)；
+维护者的本地测量登记表不作为克隆后的构建依赖。
