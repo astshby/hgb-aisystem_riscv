@@ -7,7 +7,7 @@ main、yolo、minimind分支进行。已有无NPU物理Core90.6208MHz等结果�
 
 联合仿真前检查两个独立窗口、PLIC源8/9、软件MM3_MMIO_BASE与顶层一致；共同复位同时清CDC两端。
 MiniMind和显示在external口的读写owner各独立，突发最多四拍，轮询起点在真实响应完成后转移。
-HDMI是否无欠载须另测带宽竞争；小程序地址/中断/GEMV通过不能代替完整视频模型或物理时序验收。
+VIDEO_ENABLE=1的RV32 lint通过，但真实MiniMind与HDMI并发扫描尚未运行。HDMI是否无欠载须另测带宽竞争；小程序地址/中断/GEMV通过不能代替完整视频模型或物理时序验收。
 C9/C10时钟入口、原生CDC工具、normal种子对照及独立timing-v2/v3脚本均保留，未执行PDS。
 Windows PDS原始产物继续留PDS_WORK_ROOT，仿真日志与固件留主工作区logs/build。
 

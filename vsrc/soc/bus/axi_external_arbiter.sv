@@ -17,6 +17,7 @@ module axi_external_arbiter (
 
     // 在突发边界轮询。被反压的地址保存 owner，不能由后来的请求替换。
     // 每方向只接纳一笔，原本地 ID 无需新增位；另一个方向仍可独立前进。
+    // 下游是现有 fabric 的独立 AW/W 入口 FIFO；不适用于 AWREADY 等待 WVALID 的外部目标。
     always_comb begin
         read_owner = read_owner_q;
         write_owner = write_owner_q;

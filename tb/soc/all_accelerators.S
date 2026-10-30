@@ -21,7 +21,7 @@ _start:
     sw t0, 36(s2)
     li t0, 0x300
     sw t0, 0(s3)
-    /* Start without a shape/descriptor: both original devices report sticky error. */
+    /* YOLO completes its default shape; MiniMind reports invalid zero configuration. */
     li t0, 1
     sw t0, 8(s0)
     sw t0, 8(s1)

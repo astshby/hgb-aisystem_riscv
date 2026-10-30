@@ -1,5 +1,13 @@
 # 项目配置与测量
 
+
+本轮 RV32/RV64 真 Core 小程序各通过两次复位启动、两核地址/PLIC claim/清除和 MiniMind GEMV，
+每宽 MiniMind 实际发出 6 笔读、4 笔写。独立仲裁补测为 66 读/65 写，持续双 AR 公平 15 次、
+双 AW 公平 16 次，并覆盖三种公共复位取消。双宽 soc-test 各 12 PASS、SoC/联合顶层 lint 通过；
+VIDEO_ENABLE=1 的 RV32 lint 通过，未运行真实 MiniMind 与 HDMI 同时扫描。
+软件/工具合并测试 213 PASS / 8 SKIP；跳过 7 项 MiniMind 实模型和 1 项 YOLO 实模型资产测试，
+对应资产环境未设置，旧完整模型证据单独保留。没有新 RT-Thread 终端 RTL 或上板结果。
+
 本 all 分支用于联合仿真，包含两套加速器、三套交互程序及 RT-Thread。共享性能源以18598a6为基点，
 同步C9/C10时钟、CMP载荷分离及操作数完成预览；这些源码调整没有新的综合/布线成绩。
 双核入口为`vsrc/soc/soc_all_system.sv`，使用`make all-system-test XLEN=32|64`执行真实Core小程序。

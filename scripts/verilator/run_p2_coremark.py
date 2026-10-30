@@ -482,7 +482,7 @@ SOFTWARE_SOURCES = [Path(p) for p in (
     *('benchmark/coremark/vendor/coremark/' + name for name in
       ('core_list_join.c', 'core_main.c', 'core_matrix.c', 'core_state.c', 'core_util.c')))]
 SOFTWARE_INPUTS = SOFTWARE_SOURCES + [Path(p) for p in (
-    'benchmark/p2/core_portme.h', 'benchmark/coremark/port/core_portme.h',
+    'benchmark/p2/core_portme.h', 'benchmark/p2/npu_background.h', 'benchmark/coremark/port/core_portme.h',
     'benchmark/p2/link_soc_coremark_ddr.ld', 'software/common/baremetal/benchmark_runtime.h',
     'benchmark/coremark/vendor/coremark/coremark.h', 'benchmark/coremark/vendor/coremark/LICENSE.md',
     'scripts/verilator/verilog_hex_to_mem.py', 'scripts/verilator/run_p2_coremark.py')]
