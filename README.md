@@ -1,5 +1,11 @@
 # hgb-aisystem：YOLO 演示分支
 
+克隆本分支：`git clone --branch yolo https://github.com/astshby/hgb-aisystem_riscv.git`。
+程序、模型和测试集均有版本库入口，见[软件复现说明](software/README.md)和[YOLO 命令](software/yolo/README.md)。
+设置工具链并安装固定 Python 依赖后，执行 `make software-prepare`、
+`make software-build XLEN=both`、`make software-test`，无需旧 build 或 YOLO-accelerate 工作目录。
+
+
 本分支保存共享 Core/SoC、128-MAC YOLO NPU、UART 图片服务和 1080p HDMI 显示。
 分层 CoreMark 在 `main`，RT-Thread 在 `all`；本分支没有这两套应用代码或执行入口。
 模型名称为 MiniMind，它的独立发布分支为 `minimind`。
@@ -18,8 +24,9 @@ slow/fast全部内部setup/hold、恢复、MPW、CDC/Gray及DDR PHY无失败；P
 实际工作频率仍为上述PLL配置，板级I/O有36输入/103输出通用delay提示，尚无bitstream或板测。
 
 设置 `RISCV_TOOL_ROOT` 为交叉编译器bin目录，`PDS_HOME`/`PDS_WORK_ROOT`为工具和原生工程目录。
-完整固件入口默认O3、HDMI=1、115200波特率，RV64还需指向已有纯RV64IM软数学库的
-`YOLO_SOFTMATH_ARCHIVE`，本轮使用的库SHA256为
+完整固件入口默认O3、HDMI=1、115200波特率，RV64默认从随库保存的GCC/Newlib源码
+构建纯RV64IM数学库；无需本机工具链源码树。`YOLO_SOFTMATH_ARCHIVE`可显式指定已核验的库。
+历史C10构建使用的库SHA256为
 `819a14079182697a3ea1331886c5dc66239393ba215fe91a370c7a6059c8d467`。
 
 ```bash

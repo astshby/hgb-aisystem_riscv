@@ -1,0 +1,43 @@
+{
+  "source": "https://raw.githubusercontent.com/Megvii-BaseDetection/YOLOX/6ddff4824372906469a7fae2dc3206c7aa4bbaee/assets/dog.jpg",
+  "source_sha256": "5a9522051c3cec2bbd2f6323fccba32e8fbf3ddcc2b3e2fd46b04c720bc6f866",
+  "preprocess": "Pillow RGB888 BILINEAR; square inputs use top-left letterbox pad114; native C converts RGB to BGR CHW",
+  "files": {
+    "expected-native.json": {
+      "bytes": 2360,
+      "sha256": "e7362babbb1f73ca2e3a937525f879d0203e75fdcb56686a1fcf5d858ee2944d"
+    },
+    "dog-192x144.rgb": {
+      "bytes": 82944,
+      "sha256": "c22087e51103160dcdbcda579931d8e637df4df6a5cad1ceb27a65756543a3d6"
+    },
+    "black-320.rgb": {
+      "bytes": 307200,
+      "sha256": "7818f5542a0404157573be6cffc0e0c8e68ce3c0f5d17d07ccdd9313fb700baf"
+    },
+    "black-416.rgb": {
+      "bytes": 519168,
+      "sha256": "9ba3c3abe62d70c07a6c910efd20d18a7eef671ca547a9f91ee86eec32f797ca"
+    },
+    "dog.jpg": {
+      "bytes": 163759,
+      "sha256": "5a9522051c3cec2bbd2f6323fccba32e8fbf3ddcc2b3e2fd46b04c720bc6f866"
+    },
+    "cases.json": {
+      "bytes": 527,
+      "sha256": "18868cf58f64992e1ef199b8cef052bd3ac84546f6a9df10764d4e09913c4639"
+    },
+    "dog-416.rgb": {
+      "bytes": 519168,
+      "sha256": "a3db8cd35e4ced4bfa27c8475d58857c9b782a06242517e893a0f6531b471daa"
+    },
+    "dog-320.rgb": {
+      "bytes": 307200,
+      "sha256": "584ad72385aa400fe53d80565c1d1a05cc2c2901f95159185e71ea71b3af08fd"
+    },
+    "black-16x16.rgb": {
+      "bytes": 768,
+      "sha256": "ef115a0e0c15cdc41958ca46b5b14b456115f4baec5e3ca68599d2a8f435e3b8"
+    }
+  }
+}
