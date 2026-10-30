@@ -21,10 +21,12 @@ export SPLIT_ISSUE_QUEUE INTEGER_QUEUE_ENTRIES MEMORY_QUEUE_ENTRIES LIMITED_INTE
 # Four publication branches share one reviewed Core profile. Optional software
 # targets exist only when that branch retains their make fragment and sources.
 include scripts/make/checks.mk
+include scripts/make/software.mk
 -include scripts/make/coremark.mk scripts/make/rt_thread.mk scripts/make/yolo.mk scripts/make/minimind.mk
 
 .PHONY: help check
 help:
+	@printf '%s\n' 'make software-list|software-doctor|software-prepare|software-build|software-test [XLEN=32|64|both]'
 	@printf '%s\n' 'make check XLEN=32|64' 'SOFTWARE_OPT=O2|O3|Ofast (default O3)'
 ifneq ($(wildcard scripts/make/coremark.mk),)
 	@printf '%s\n' 'make score (M0 + runnable CoreMark platforms)'

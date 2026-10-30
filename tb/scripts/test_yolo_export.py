@@ -70,18 +70,27 @@ class ExportUnitTests(unittest.TestCase):
         self.assertFalse(any(name == "torch" or name.startswith("torch.") for name in sys.modules))
 
 
-@unittest.skipUnless(os.environ.get("YDM_MODEL_ROOT"), "set YDM_MODEL_ROOT for the pinned real model")
 class RealModelExportTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.model_root = Path(os.environ["YDM_MODEL_ROOT"])
         cls.output = Path(os.environ.get("YDM_EXPORT_TEST_OUT", ROOT / "build/yolo/export-tests"))
         cls.output.mkdir(parents=True, exist_ok=True)
-        cls.report = exporter.export(cls.model_root, cls.output / "unit-416.bin", 416)
-        cls.binary = (cls.output / "unit-416.bin").read_bytes()
+        if os.environ.get("YDM_MODEL_ROOT"):
+            cls.model_root = Path(os.environ["YDM_MODEL_ROOT"])
+            cls.report = exporter.export(cls.model_root, cls.output / "unit-416.bin", 416)
+            cls.binary = (cls.output / "unit-416.bin").read_bytes()
+        else:
+            assets = ROOT / "software/yolo/assets"
+            cls.report = json.loads((assets / "yolox-tiny-416.json").read_text())
+            cls.binary = (assets / "yolox-tiny-416.bin").read_bytes()
+            cache = ROOT / "software/yolo/.cache/export-root"
+            cls.model_root = cache if (cache / "build/models/yolox_tiny.pth").is_file() else None
+        manifest = json.loads((ROOT / "software/yolo/assets/manifest.json").read_text())
+        if exporter.hashlib.sha256(cls.binary).hexdigest() != manifest["files"]["yolox-tiny-416.bin"]["sha256"]:
+            raise ValueError("full model differs from the frozen release SHA256")
 
-    def test_all_83_quantized_weight_hashes_match_executed_rtl_reference(self):
-        reference = json.loads((self.model_root / "build/dog-adam128.json").read_text())
+    def test_all_83_quantized_weight_hashes_match_frozen_release_reference(self):
+        reference = json.loads((ROOT / "software/yolo/assets/weight-hashes.json").read_text())
         expected = {row["name"]: row["weight_int8_sha256"] for row in reference["layers"]}
         actual = {row["name"]: row["weight_int8_sha256"] for row in self.report["binary"]["layers"]}
         self.assertEqual(len(actual), 83)
@@ -120,6 +129,8 @@ class RealModelExportTests(unittest.TestCase):
                 self.assertEqual(last_use[index], tensor["last_use"])
 
     def test_original_batchnorm_parameters_are_preserved(self):
+        if self.model_root is None:
+            self.skipTest("run make software-prepare to fetch the pinned original checkpoint")
         checkpoint = exporter.Checkpoint(self.model_root / "build/models/yolox_tiny.pth")
         try:
             for index, row in enumerate(self.report["nodes"]):
@@ -133,6 +144,8 @@ class RealModelExportTests(unittest.TestCase):
             checkpoint.close()
 
     def test_export_is_deterministic_and_320_graph_is_complete(self):
+        if self.model_root is None:
+            self.skipTest("run make software-prepare to rebuild both model bundles")
         repeated = exporter.export(self.model_root, self.output / "unit-repeat-416.bin", 416)
         small = exporter.export(self.model_root, self.output / "unit-320.bin", 320)
         self.assertEqual(repeated["binary"]["sha256"], self.report["binary"]["sha256"])

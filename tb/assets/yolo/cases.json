@@ -1,0 +1,34 @@
+[
+  {
+    "name": "dog-320",
+    "model": "yolox-tiny-320.bin",
+    "image": "dog-320.rgb",
+    "classes": [
+      1,
+      2,
+      16
+    ]
+  },
+  {
+    "name": "black-320",
+    "model": "yolox-tiny-320.bin",
+    "image": "black-320.rgb",
+    "classes": []
+  },
+  {
+    "name": "dog-416",
+    "model": "yolox-tiny-416.bin",
+    "image": "dog-416.rgb",
+    "classes": [
+      1,
+      2,
+      16
+    ]
+  },
+  {
+    "name": "black-416",
+    "model": "yolox-tiny-416.bin",
+    "image": "black-416.rgb",
+    "classes": []
+  }
+]
