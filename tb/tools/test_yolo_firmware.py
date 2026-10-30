@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import shutil
 import struct
+import tempfile
 import sys
 import unittest
 
@@ -13,6 +14,7 @@ sys.path[:0]=[str(ROOT),str(ROOT/'scripts/pango'),str(ROOT/'scripts')]
 from tb.tools import test_pango_handoff as handoff
 from prepare_project import YOLO_INPUTS, inspect_firmware, verify_staged_manifest, sha
 from prepare_cdc_audit import specification
+from tb.tools.test_measurement_constraints import Tcl
 
 
 class YoloFirmwareInputsTest(unittest.TestCase):
@@ -142,6 +144,24 @@ class YoloFirmwareInputsTest(unittest.TestCase):
         self.assertEqual(spec['clocks']['video'],'clk_video')
         self.assertEqual(len(spec['levels']),10)
         self.assertEqual(sum(bool(x.get('gray_source')) for x in spec['levels']),4)
+
+    def test_native_query_uses_existing_synthesis_action(self):
+        with tempfile.TemporaryDirectory(prefix='yolo-cdc-query-') as temp:
+            root=Path(temp);project=root/'existing.pds';project.write_text('fixture')
+            audit=root/'cdc-audit/audit.tcl';audit.parent.mkdir();audit.write_text('puts fixture')
+            setup=(f'set ::env(HGB_PDS_PROJECT) {{{project}}}\n'
+                   'proc exec {args} {return {PASS memory fixture}}\n'
+                   'proc open_project {args} {set ::opened 1}\n'
+                   'proc set_option {args} {}\n'
+                   'proc get_tasks {args} {return syn_1}\n'
+                   'proc get_actions {args} {return synthesis_action}\n'
+                   'proc open_design {args} {if {[lindex $args 0] ne "-action" || [lindex $args 1] ne "synthesis_action" || [lindex $args 2] ne "-file"} {error "bad action"}; set ::queried 1}\n'
+                   f'source {{{ROOT / "scripts/pango/query_cdc.tcl"}}}\n')
+            runtime=Tcl();self.addCleanup(runtime.close)
+            runtime.evaluate(setup)
+            self.assertEqual(runtime.evaluate('set ::opened'),'1')
+            self.assertEqual(runtime.evaluate('set ::queried'),'1')
+
 
 
 if __name__=='__main__':

@@ -1,52 +1,61 @@
-# hgb-aisystem：Core/SoC 与 YOLO 演示
+# hgb-aisystem：YOLO 演示分支
 
-Core 为 RV32/RV64 IM+Zicsr，双发射、按序双退休，ROB16、int8/mem4、LQ4/SQ4，
-forward3、Tournament1、RAS0、OOO0；正常 ALU/Load/DSP 为 8/10/10 级，尚无 C 扩展。
-当前工作分支在 `7b52026` 上补全 YOLOX-Tiny 的模型导出、C 图执行、UART 服务和 1080p 显示通路。
-CoreMark 与 RT-Thread 的正式演示在无 NPU 的 main 分支单独验证，RT-Thread 不参与 CoreMark。
+本分支保存共享 Core/SoC、128-MAC YOLO NPU、UART 图片服务和 1080p HDMI 显示。
+分层 CoreMark 在 `main`，RT-Thread 在 `all`；本分支没有这两套应用代码或执行入口。
+模型名称为 MiniMind，它的独立发布分支为 `minimind`。
 
-截至 2026-10-30，验证范围如下：
+Core 为 RV32/RV64 IM+Zicsr，双发射、按序双退休，ROB16、int8/mem4、LQ4/SQ4；
+正常 ALU/Load/DSP 为 8/10/10 级。当前共享 Core 与 `main` 的 `82cbf7a` 逐文件一致，
+包含 CMP 载荷写使能分离、操作数捕获预览；四路 Store hint 默认保留。
+I$/D$ 本轮明确使用 16/8 KiB、bank XOR mask2，ITCM/DTCM 各 64 KiB。
 
-| 测试 | 结果与执行方式 |
-|---|---|
-| YOLOX-Tiny 416，83 Conv / 266 节点 | 33 分 28.7 秒通过；电脑执行 C 图，卷积使用真实 AXI/CDC/NPU RTL，无 RISC-V Core |
-| RV32/RV64 真实 Core 驱动 | 各通过 3 个小卷积、171 个输出、5 个量化值；未执行完整网络 |
-| 1920×1080 视频 RTL | 双宽通过完整帧 CRC、A/B 切换、AXI 反压、欠载恢复及 49 项 MS7210 初始化 |
-| 真实 UART + 原 C 应用短流程 | 两轮上传/回读、SELFTEST、原视频驱动与 A/B 全帧 CRC 通过；CPU 在电脑执行 |
-| 320 模型完整应用联合仿真 | 3 小时 13 分 58.68 秒通过；真实 UART 收图、83 Conv、框/画框图回传、1080p 扫描后回 READY；电脑执行 C |
+当前时钟档为 **C10 `yolo_sys`**：Core/SYS/DDR-user/外设/NPU =
+**83.806818 / 102.430556 / 125 / 65.848214 / 92.1875 MHz**，视频为独立 **148.5 MHz**。
+系统GPLL使用125 MHz输入、I/M/F=8/1/59、921.875 MHz VCO，输出分频11/9/14/10。
+旧C1–C8继续保留；本档没有新布局布线结果，不能按配置值宣称时序闭合。
 
-YOLO C7 目标 Core/SYS/DDR-user/外设/NPU 为 **90/100/125/60/100 MHz**，视频独立为 **148.5 MHz**。
-系统仍用一颗 GPLL 分频，视频另用 27 MHz 输入的 PPLL，DDR 保留控制器自己的时钟结构。
-目标频率不等于布线 Fmax。无 NPU C6 的最终布线 Fmax 为 Core/SYS/DDR-user/外设
-**87.3057/98.2415/122.5490/72.2201 MHz**，0 未布通，Core 尚未达到 100 MHz。
-该工程装入自动 CoreMark 固件；交互固件与新增视频硬件均未布线、未上板。
-
-设置 `RISCV_TOOL_ROOT` 后使用以下入口；输出已有内容时换用新目录：
+设置 `RISCV_TOOL_ROOT` 为交叉编译器bin目录，`PDS_HOME`/`PDS_WORK_ROOT`为工具和原生工程目录。
+完整固件入口默认O3、HDMI=1、115200波特率，RV64还需指向已有纯RV64IM软数学库的
+`YOLO_SOFTMATH_ARCHIVE`，本轮使用的库SHA256为
+`819a14079182697a3ea1331886c5dc66239393ba215fe91a370c7a6059c8d467`。
 
 ```bash
 make yolo-demo-test
-make yolo-demo-build XLEN=32
-make yolo-demo-build XLEN=64
+make yolo-demo-build XLEN=32 YOLO_OUT=build/yolo-board-rv32
+make yolo-demo-build XLEN=64 YOLO_OUT=build/yolo-board-rv64
+python3 scripts/yolo/firmware.py verify --output build/yolo-board-rv32
 make yolo XLEN=32
-make yolo-video-test XLEN=32
 make yolo-driver-test XLEN=32
+make yolo-video-test XLEN=32
 ```
 
-`yolo-demo-test` 只跑协议、导出、图算子、服务与视频 C 短测；`make yolo` 保留原卷积/DMA 回归。
-`yolo-io-test` 生成真实 I/O RTL 库并跑短测，完整联合运行必须显式调用 `yolo-demo-cosim-full`，
-并提供已导出模型、RGB 图片和 I/O 库。命令与证据见[项目介绍](docs/PROJECT_INTRO.md)。
-RV64 完整固件使用纯 RV64IM 软浮点库，源码根通过 `RISCV_GNU_SOURCE_ROOT` 提供。
+固件保留真实名称`program.elf`，`manifest.json`记录27份源文件、完整应用角色、配置、固件ID及ELF/HEX哈希。
+ID字符串随DTCM初始化，原串口协议不变。生产程序已包含模型装载、83层卷积图调度、非卷积算子、
+解码/NMS、回传图像和视频提交；复位后发READY，每轮上传/DETECT完成后返回结果并再次READY。
+PC入口为`scripts/yolo/host.py --port COM5 status|model|upload|detect|read|selftest`。
 
-板端服务按 READY→上传→DETECT→框结果/画框图片→显示完成→READY 循环。
-PC 工具为 `scripts/yolo/host.py --port COM5 status|model|upload|detect|read|selftest`；
-模型、图块和整帧均核对 CRC32。预载模型经过 CRC/图结构检查，不代表 Flash 启动已接通；
-模型 UART 命令已有软件测试，尚无板上约 5 MB 模型全传结果。
-完整应用使用 192×144 RGB 输入，C 预处理到 320；83 层共 5,775,300 个 INT32 输出逐项核对，返回 3 框。
-执行时没有 RISC-V Core、CPU Cache 或 Flash，DDR 使用共享行为模型；完整 RV32 整网仍未运行。
-构建记录的提交为 `6008bc5`；实际源文件已保存于 `a91c795`，逐文件 SHA256 与运行快照一致。结果和源码/库哈希见
-`logs/demo-software-20261029/yolo-full/app320-full-rtl-v2/result.json`。
+当前发布输入源码为`45de647`，两宽生产镜像ID分别为`6aff928ff969d57d`、`adcd70b68d805fcf`，
+均通过源码、ISA、ELF/HEX和TCM初始化核验。新C10真实RV32驱动通过3个卷积、171个输出及5个量化值；
+新SYS/外设频率下的AXIL32视频完整帧、A/B切换、反压、欠载恢复和I2C通过。
+RV64新档driver/video复测留给后续调试；本轮没有重复数小时整网。
 
-历史裸机数据：M0 O3 64 次为 3.590617/3.570731 CoreMark/MHz，真实 TCM 为
-3.095736/3.081770；短仿真没有达到正式十秒要求。分层结果、历史综合和布线分别记录在
-[项目介绍](docs/PROJECT_INTRO.md)、[系统结构](docs/understand/SOC_SYSTEM.md)和
-[FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。历史提交用 `git log`/`git show` 查询。
+此前同C程序＋真实NPU/总线/UART/视频RTL的320整网联合仿真已通过83 Conv、5775300个INT32、3个框，
+实际UART收图/回图、1080p扫描后回READY；C图调度在电脑执行，DDR为行为模型。
+完整RV32板端整网、Flash启动与板上HDMI仍待验证，当前没有FPGA实物FPS。
+
+完整生产PDS输入使用：
+
+```bash
+python3 scripts/pango/prepare_yolo_application.py \
+  --firmware-dir build/yolo-board-rv32 --xlen 32 --synthesis-strategy timing-v2 \
+  --ip-dir "$PDS_WORK_ROOT/work/clocks-c5-yolo-20261029/ddr-ip/candidate/ddr3_test" \
+  --output "$PDS_WORK_ROOT/work/yolo-full-c10-new"
+python3 scripts/pango/prepare_yolo_application.py \
+  --verify --output "$PDS_WORK_ROOT/work/yolo-full-c10-new"
+```
+
+每次选新输出目录。此入口固定NPU＋HDMI、C10、I16/D8/hash2、真实交互固件，
+不把旧卷积小程序改名为loader。timing-v2使用8线程、fanout64、retiming开启、算术共享关闭、
+normal布局/布线、LUT合并关闭、route权重80；新工程尚需综合、原生CDC绑定和完整物理验收。
+具体原生执行命令、输入身份和失败路径处理见[FPGA适配](docs/fpga/FPGA_ADAPTATION.md)，
+程序证据与缺口见[项目介绍](docs/PROJECT_INTRO.md)。

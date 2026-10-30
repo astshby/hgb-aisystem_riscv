@@ -8,10 +8,12 @@
 Core 为 RV32/RV64 IM+Zicsr，双发射、按序双退休，ROB16、int8/mem4、LQ4/SQ4，
 正常 ALU/Load/DSP 为 8/10/10 级；C、F/V、MMU/Linux 未实现。
 
-无 NPU C6 目标 Core/SYS/DDR-user/外设为 100/100/125/60 MHz；YOLO C7 为
-90/100/125/60 MHz，增加 100 MHz NPU 域和 148.5 MHz 视频域。旧 C1 的
-100/80/125/25 MHz 留作历史测量档，不能与 C6/C7 周期数混用。
-ITCM/DTCM 各 64 KiB，I$/D$ 各 4 KiB、两路、32 B 行；I$ 当前填充粒度 4 B。
+本分支当前使用C10 `yolo_sys`，Core/SYS/DDR-user/外设/NPU为
+83.806818/102.430556/125/65.848214/92.1875 MHz，视频独立148.5 MHz。
+系统GPLL为921.875 MHz VCO、I/M/F=8/1/59、输出分频11/9/14/10；DDR IP时钟不变。
+旧C1–C8保留历史值，不能把旧周期或Fmax直接填到新档。
+ITCM/DTCM各64 KiB，发布测量明确使用I$16 KiB、D$8 KiB、bank XOR mask2，两路、32 B行；
+通用API的4/4 KiB默认值继续保留，I$填充粒度4 B。
 TCM 与 Cache 命中逻辑仍在 Core 域；Core 与它们进一步分域仅是未来候选。
 SYS 负责统一 AXI 仲裁，DDR 与外设分别通过 FIFO 跨域。DMA 是 SYS 域主设备，
 CPU 提交地址/长度/方向、启动、核对完成和处理 Cache 所有权；不允许 DMA 写 START 等控制寄存器。
@@ -20,17 +22,29 @@ SYS 与 Core 是并行的时钟域；SYS 域不包含 Core、TCM 或 Cache。各
 
 | 发布分支 | CoreMark | RT-Thread | 加速器 |
 |---|---|---|---|
-| main | M0 与三层实际硬件 | 独立应用 | 无 |
-| baseline-yolo | 无 | 无 | YOLO |
-| baseline-minimind | 无 | 无 | MiniMind |
-| baseline-all | M0、三层与 YOLO 并发层 | 一份独立应用 | 分别选择 YOLO / MiniMind |
+| main | M0与三层、完整上板程序 | 无 | 无 |
+| yolo | 无 | 无 | YOLO |
+| minimind | 无 | 无 | MiniMind |
+| all | M0、三层与 YOLO 并发层 | 一份独立应用 | 分别选择 YOLO / MiniMind |
 
 所有分支保留公共功能、ISA、AXI、CDC、UART 下载验证。加速器分支不携带 CoreMark 算法、
 跑分脚本或 RT-Thread。原作者 MiniMind C 代码、模型锁和导出工具保留在 MiniMind/all。
 
-当前 `demo/yolo-full-network` 从 `7b52026` 继续 YOLO 演示，工作树仍保留旧实验的
-CoreMark/RT 回归入口；本轮不增加 MiniMind。上表表示用途分工，实际发布提交以分支指针为准。
-main 的 CoreMark UART 双宽结果单独保存，不把本分支的电脑执行 C 计为 CoreMark 或 RT-Thread 成绩。
+当前YOLO源码由`8a8f484`保留完整程序，选择性加入共享硬件、C10时钟和新Core优化。
+发布输入为`45de647`，Core/TCM/SYS与main的`82cbf7a`逐文件相同，默认保留Store hint；
+没有恢复旧Core，也没有保留CoreMark或RT-Thread专属程序/入口。
+
+| 本轮检查 | 结果与路径 |
+|---|---|
+| 完整RV32/RV64固件 | O3/115200/HDMI1，27源、ELF/HEX/TCM、无C/F ISA核验通过；ID `6aff928ff969d57d` / `adcd70b68d805fcf`；`build/release-ab-20261030/yolo/final-program-rv{32,64}/manifest.json` |
+| C10真实RV32生产驱动 | 3卷积、171输出、5量化值；`logs/release-ab-20261030/yolo/driver-c10-rv32/receipt.json` |
+| C10 SYS/外设视频 | AXIL32完整1080p帧、切换/反压/欠载/I2C通过；`logs/release-ab-20261030/yolo/video-c10-rv32/result.json` |
+| 原生暂存/角色/CDC工具 | 58 PASS/0 SKIP，视频清单共40 FIFO和10同步级组；`logs/release-ab-20261030/yolo/tools-delivery-pass.log` |
+| Windows原生输入保护 | 16 PASS/0 SKIP，无PDS；`logs/release-ab-20261030/yolo/yolo-input-guard-test.log` |
+| 程序短测 | 64 PASS/6 SKIP，缺固定模型的5项导出和1项发布检查未跑；`logs/release-ab-20261030/yolo/demo-tests.log` |
+
+RV64新档driver/video复测交后续调试，本轮没有重复83层长仿真。
+共享Core的两宽功能证据在main/all对应提交中保留，不把新程序构建称为完整RV32网络执行。
 
 ## 环境与命令
 
@@ -43,7 +57,8 @@ main 的 CoreMark UART 双宽结果单独保存，不把本分支的电脑执行
 本分支应用入口以 `make help` 为准。
 `make yolo-demo-build XLEN=32|64` 编译常驻 UART/模型/整网/显示演示固件。
 软件默认 O3，图计算显式关闭 fast-math 和浮点收缩；RV64 使用无 C/F 指令的软浮点库，
-通过 `RISCV_GNU_SOURCE_ROOT` 指向 GCC/newlib 源码，或提供 `YOLO_SOFTMATH_ARCHIVE`。
+本轮复用`YOLO_SOFTMATH_ARCHIVE`，库SHA256为`819a14079182697a3ea1331886c5dc66239393ba215fe91a370c7a6059c8d467`；
+未重新编译工具链。库缺失时先恢复同一归档，不把默认IMAC/F/D库链接到本核。
 `make yolo-demo-test` 运行现有协议/PC 工具、无 Torch 导出、C 图算子、服务/内存池和视频 C 短测。
 不自动启动整网；缺模型资产的可选导出/发布检查打印 SKIP。
 2026-10-30 提供固定模型资产后，该入口 70 PASS、0 SKIP（协议37、导出13、图算子1、服务12、视频7），
@@ -105,9 +120,9 @@ Cache 容量实验共用上述软件入口。`coremark-platforms`、独立 RT �
 `--icache-bytes` / `--dcache-bytes`，未指定时各为 4096。实际实例参数、固件和时钟写入测量清单。
 批量容量测试使用 `scripts/verilator/run_cache_sweep.py`，命令见[联合优化](understand/OPTIMIZATION.md)。
 
-## CoreMark 口径
+## 共享Core的历史CoreMark对照
 
-`make score` 保留 M0（TB 一周期存储）及 `scripts/benchmark_platforms.json` 定义的平台。
+以下为main/all的历史测量口径，本YOLO分支不提供CoreMark执行入口。M0使用TB一周期存储。
 `core_tcm` 是真实 Core+TCM，`soc_tcm` 增加 ROM/DMA/MMIO，`soc_ddr` 增加 Cache/DDR，
 all 的 `soc_npu` 再增加 YOLO。综合使用相同参数、软件 bundle 和仿真 build receipt。
 RT-Thread 不参加这组测试。

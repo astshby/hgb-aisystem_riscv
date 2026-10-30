@@ -28,6 +28,6 @@ help:
 	@printf '%s\n' 'make check XLEN=32|64' 'SOFTWARE_OPT=O2|O3|Ofast (default O3)'
 ifneq ($(wildcard scripts/make/yolo.mk),)
 	@printf '%s\n' 'make yolo (five domains, convolution + DMA overlap)'
-	@printf '%s\n' 'make yolo-demo-build XLEN=32|64 (UART RGB/SELFTEST firmware)' 'make yolo-demo-test (lightweight software tests)'
+	@printf '%s\n' 'make yolo-demo-build XLEN=32|64 (complete YOLO UART/HDMI firmware)' 'make yolo-demo-test (lightweight software tests)'
 endif
 check: test scoreboard-test riscv-tests soc-test soc-riscv-tests soc-system-test soc-axi-test tcm-bram-test benchmark-smoke

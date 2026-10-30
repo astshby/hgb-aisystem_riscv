@@ -4,12 +4,12 @@
 
 | 用途 | 配置时钟 Core/SYS/DDR-user/外设/NPU，MHz | 视频 |
 |---|---|---|
-| 无 NPU 完整系统 C6 | 100/100/125/60/无 | 无 |
-| YOLO C7 | 90/100/125/60/100 | 独立 148.5 MHz |
-| YOLO Core 后备 C8 | (900/11)/100/125/60/100 | 独立 148.5 MHz |
+| 当前YOLO C10 | 83.806818/102.430556/125/65.848214/92.1875 | 独立148.5 MHz |
+| 历史无NPU C6 | 100/100/125/60/无 | 无 |
+| 历史YOLO C7/C8 | 90或900/11，SYS100/DDR125/外设60/NPU100 | 独立148.5 MHz |
 
-系统 `pango_soc_pll` 保留一颗 GPLL，900 MHz VCO 以 /9、/10 或 /11、/9、/15、/9
-生成 Core/SYS/外设/NPU。DDR-user 125 MHz 仍由 DDR IP 提供，IP 内部的 PLL 另计。
+系统`pango_soc_pll`保留一颗GPLL。当前C10使用125 MHz输入、I/M/F=8/1/59、
+VCO921.875 MHz，输出以11/9/14/10分频生成Core/SYS/外设/NPU；旧C1–C8不变。DDR-user 125 MHz 仍由 DDR IP 提供，IP 内部的 PLL 另计。
 视频用独立 `GTP_PPLL`：27 MHz D18 输入，I=1、M=2、F=33、输出 /12，产生 148.5 MHz。
 厂商原 PPLL/BUFG 模型实测 148.499986 MHz，3000 周期、失锁健康输入恢复和板级复位重锁通过。
 视频 PLL 只由板复位控制；它的 lock 并入整机复位监督，视频 SYS/外设/像素 FIFO 共同复位。
@@ -33,13 +33,13 @@ DDR→PHY 仍有 −0.027 ns setup，缺输入/输出 delay 为 35/73。
 该工程没有装入常驻交互固件。新增视频/YOLO 组合尚未综合布线，没有 bitstream 或板级结果。
 
 当前入口要求 `max_threads=8`，`HGB_PDS_THREADS` 可覆盖；C6 最终时序报告实际使用 4 个进程，
-尚无同输入 1/8 线程加速比。timing-v3 固定 fanout128、retiming 开、资源共享关、布局双输出 LUT 合并关、
-布线权重90及 recovery 优化；place/route 均为 normal。旧 timing-v2 的 64/80 报告按历史参数核验。
+尚无同输入 1/8 线程加速比。当前配对采用timing-v2：fanout64、retiming开、资源共享关、布局双输出LUT合并关、
+布线权重80及recovery优化，place/route均为normal；统一8线程。timing-v3的128/90仍可单独作对照。
 PDS 2025.2 不支持 `place -mode performance` 或 `number_of_router_thread`，不再向新工程传入它们。
 每阶段检查至少 6 GiB 物理和提交余量，约十分钟查看一次，不修改分页或终止无关进程。
 
 YOLO 板级顶层 `pango_200hp_top` 默认 `VIDEO_ENABLE=NPU_ENABLE`。视频 DMA 接真实外部主端3，
-SYS AXI-Lite 控制在 `0x10070000`，UART/MMIO 仍经 60 MHz 外设 CDC；SDA 是开漏。
+SYS AXI-Lite 控制在 `0x10070000`，UART/MMIO在C10经65.848214 MHz外设CDC；SDA 是开漏。
 `mes2l676_200hp_video.fdc` 记录同板参考的 32 个视频相关引脚及真实 27/148.5 MHz 时钟，
 没有编造 I/O delay 或加入整域 false path。VIDEO=0 不实例显示/PPLL，MMIO 完全旁路新分流。
 双宽 full/lite、VIDEO0/1 共 8 组封装展开和 6 项视频暂存测试通过，物理管脚/站点仍需新工程检查。
@@ -54,6 +54,89 @@ C 在电脑执行，没有 RISC-V Core、CPU Cache 或 Flash，DDR 为行为模�
 命令和哈希见 `logs/demo-software-20261029/yolo-full/app320-full-rtl-v2/result.json` 及同目录 `sourceidentity.json`。
 证据与入口见[项目介绍](../PROJECT_INTRO.md#环境与命令)。预载模型 CRC 检查不代表 Flash 冷启动已接通，
 模型 UART 命令已有软件测试，尚无板上约 5 MB 模型全传验收。
+
+
+## 完整程序与原生调试入口
+
+已准备工程为`$PDS_WORK_ROOT/work/release-ab-20261030/yolo-full-c10-r2`，源`45de647`且当时工作树洁净；
+完整UART/HDMI生产程序ID为`6aff928ff969d57d`，真实名称program.elf，O3、115200、HDMI1。
+260份HDL及固件/源文件由manifest逐文件校验；共享Core/TCM/SYS与main的`82cbf7a`逐文件一致。
+RV64完整程序另已构建，ID为`adcd70b68d805fcf`，没有创建第二份RV64物理工程。
+
+从源码重新准备，先按README设置工具变量，提供已生成HMIC_S 1.10 DDR IP，并选全新输出：
+
+```bash
+make yolo-demo-build XLEN=32 YOLO_OUT=build/yolo-board-rv32
+python3 scripts/yolo/firmware.py verify --output build/yolo-board-rv32
+python3 scripts/pango/prepare_yolo_application.py --xlen 32 \
+  --firmware-dir build/yolo-board-rv32 --synthesis-strategy timing-v2 \
+  --ip-dir "$PDS_WORK_ROOT/work/clocks-c5-yolo-20261029/ddr-ip/candidate/ddr3_test" \
+  --output "$PDS_WORK_ROOT/work/yolo-full-c10-new"
+python3 scripts/pango/prepare_yolo_application.py --verify \
+  --output "$PDS_WORK_ROOT/work/yolo-full-c10-new"
+```
+
+Windows PowerShell从本仓库目录运行以下命令；`PDS_HOME`/`PDS_WORK_ROOT`均取Windows路径。
+综合创建新工程，不能指向已有同名.pds：
+
+```powershell
+& .\scripts\pango\run_phase.ps1 -Phase synthesis `
+  -Project "$env:PDS_WORK_ROOT\work\yolo-full-c10-new\yolo-full-c10.pds" `
+  -LogDirectory "$env:PDS_WORK_ROOT\work\yolo-full-c10-new\phase-logs" -PdsHome $env:PDS_HOME
+```
+
+完成综合后，以同一工程生成时序摘要和CDC对象查询。以下WSL命令不会自动启动布局布线：
+
+```bash
+python3 scripts/pango/summarize_benchmark.py "$PDS_WORK_ROOT/work/yolo-full-c10-new" \
+  --native-log "$PDS_WORK_ROOT/work/yolo-full-c10-new/phase-logs/synthesis-yolo-full-c10.log" \
+  --output "$PDS_WORK_ROOT/work/yolo-full-c10-new/synthesis-summary.json"
+python3 scripts/pango/prepare_cdc_audit.py --project "$PDS_WORK_ROOT/work/yolo-full-c10-new" \
+  --timing-summary "$PDS_WORK_ROOT/work/yolo-full-c10-new/synthesis-summary.json" \
+  --output "$PDS_WORK_ROOT/work/yolo-full-c10-new/cdc-audit"
+```
+
+随后在Windows PowerShell运行可追踪的原生查询入口；只读取已完成的synthesize动作，不重新综合：
+
+```powershell
+$env:HGB_PDS_PROJECT="$env:PDS_WORK_ROOT\work\yolo-full-c10-new\yolo-full-c10.pds"
+. .\scripts\pango\wsl_helpers.ps1
+Invoke-PangoLogged -Executable "$env:PDS_HOME\bin\pds_shell.exe" `
+  -Arguments @('-work_dir',"$env:PDS_WORK_ROOT\work\yolo-full-c10-new",'-file',(Resolve-Path .\scripts\pango\query_cdc.tcl).Path) `
+  -Log "$env:PDS_WORK_ROOT\work\yolo-full-c10-new\cdc-query.log"
+```
+
+核验并发布绑定：
+
+```bash
+python3 scripts/pango/prepare_cdc_audit.py --project "$PDS_WORK_ROOT/work/yolo-full-c10-new" \
+  --timing-summary "$PDS_WORK_ROOT/work/yolo-full-c10-new/synthesis-summary.json" \
+  --output "$PDS_WORK_ROOT/work/yolo-full-c10-new/cdc-audit" \
+  --bind-log "$PDS_WORK_ROOT/work/yolo-full-c10-new/cdc-query.log"
+```
+
+先核验40个FIFO、同步级、视频Gray状态计数器及所有域时钟根，再发布`backend_cdc.scf`、
+`backend_sync.lcf`和`cdc-scope-receipt.json`。视频清单已经完成离线对象/故障拒绝测试，
+原生对象绑定仍须本工程综合。像素BRAM映射若改变，核对真实写时钟/读时钟及输出端点，
+不能把整片FIFO或整域置false path。
+
+原生绑定通过后才运行：
+
+```powershell
+& .\scripts\pango\run_phase.ps1 -Phase implementation -ImplementationScript implement_cdc.tcl `
+  -Project "$env:PDS_WORK_ROOT\work\yolo-full-c10-new\yolo-full-c10.pds" `
+  -LogDirectory "$env:PDS_WORK_ROOT\work\yolo-full-c10-new\phase-logs" -PdsHome $env:PDS_HOME
+```
+
+逐阶段确认Windows物理与真实提交余量各≥6 GiB，单PDS、8线程，约十分钟查看一次；
+本轮曾因缓存导致内存门禁拒绝，PDS没有启动，通过自有已结束文件的逐文件缓存回收恢复。
+不改分页、不停止无关进程。验收分别列各域Fmax/WNS、hold/recovery/removal/MPW、CDC/Gray skew、
+DDR PHY、资源和未布通；新HDMI版当前没有布局布线或上板结果。
+
+调试顺序先同一网表/相同固件的normal少量串行布局种子对照，再针对真实长网作局部布局；
+本轮64/80与旧128/90策略分别记录，不混入RTL收益。Core优先ISS→分支方向→ROB恢复→完成广播→memory IQ→ISS反馈，
+当前已加入操作数捕获预览；四路Store hint仍保留，IQ额外一级D不做。DDR125用户域若仍有失败，单独定位三个端点，
+不得将降低Core档位写成DDR PHY或整机时序通过。
 
 ## 历史停止点：TCM重构后布局布线前
 
@@ -95,12 +178,12 @@ Windows PDS 2025.2 ADS，器件 PG2L200H-6IFBB676，HMIC_S 1.10 DDR3 IP。
 `PDS_HOME` 指向 Windows 工具安装。Linux Verilator 通过不代表板上通过。
 
 Core 为 ROB16/int8/mem4、RAS0、OOO0、Tournament1、forward3、MUL0/DIV1。
-C6/C7 是当前演示目标；C1 历史目标 Core/SYS/DDR-user/外设 = 100/80/125/25 MHz。
+C10是当前YOLO调试档；C6/C7保留历史测量；C1 历史目标 Core/SYS/DDR-user/外设 = 100/80/125/25 MHz。
 C5 目标 Core/SYS/DDR-user/外设/NPU = 90/100/125/25/100 MHz，供 YOLO 布局布线；见下节。
-`pango_soc_pll` 为功能域生成时钟，DDR 用户时钟来自 DDR IP；选定加速器使用额外 100 MHz 输出。
+`pango_soc_pll` 为功能域生成时钟，DDR 用户时钟来自 DDR IP；C10选定加速器输出为92.1875 MHz。
 
-`prepare_project.py --core-backend scoreboard --board-clock-profile 6` 暂存无加速器 C6 工程；
-YOLO 使用 `--board-clock-profile 7 --npu-enable`，默认包含视频源码和 `board_video.fdc`。
+`prepare_yolo_application.py --firmware-dir <完整固件目录> --synthesis-strategy timing-v2`
+固定C10、NPU及HDMI，保留真实program.elf和27源身份，并包含`board_video.fdc`。
 `--video-enable 0` 显式生成无显示的加速器候选，并写入 manifest，不能混用显示工程的结果。
 `--npu-enable` / `--mm3-enable` 仍互斥，分支未保留的设备不能选择。
 加速器专用分支从 `branch_profile.json` 读取默认设备，all 默认无设备。
