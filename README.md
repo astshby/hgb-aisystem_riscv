@@ -11,8 +11,10 @@ RV32 优先优化，RV64 验证功能，C 扩展尚未实现。
 输入分频/倍频/反馈分频为10/1/71，输出分频为10/9/13；DDR用户钟由DDR IP提供。
 原C6的100 MHz Core目标和实测报告继续保留，新档需要重新验证物理时序。
 TCM 和 Cache 当前与 Core 同域，SYS 包含总线与 DMA。配置目标与综合、布线测量分别记录。
-基线和 PDS 执行入口共同维护；选定策略为 8 线程、fanout128、布局双输出 LUT 合并关闭、
-布线时序权重90，布局和布线均使用 normal 模式。每次运行前重新检查物理与提交内存余量。
+基线和 PDS 执行入口共同维护；本轮选定 timing-v2：8线程、fanout64、retiming开启、
+算术资源共享关闭、布局双输出LUT合并关闭、布线时序权重80，normal布局/布线、
+GP/route recovery和route_optimize开启。原timing-v3的128/90保留。
+每次运行前重新检查Windows物理与提交内存余量均至少6 GiB。
 
 设置 `RISCV_TOOL_ROOT` 为交叉编译器 bin。`make help` 显示可执行入口：
 
@@ -20,7 +22,7 @@ TCM 和 Cache 当前与 Core 同域，SYS 包含总线与 DMA。配置目标与�
 make check XLEN=32
 make check XLEN=64
 SOFTWARE_OPT=O3 make score COREMARK_PLATFORM_OUT=build/score-O3 \
-  COREMARK_PLATFORM_ARGS='--clocks main60 --iterations 64 --icache-bytes 16384 --dcache-bytes 8192 --dcache-bank-xor-mask 2'
+  COREMARK_PLATFORM_ARGS='--clocks main_margin2 --iterations 64 --jobs 1 --icache-bytes 16384 --dcache-bytes 8192 --dcache-bank-xor-mask 2'
 make coremark-board XLEN=32
 make coremark-board-test
 ```
@@ -28,16 +30,20 @@ make coremark-board-test
 新裸机UART固件回车/P运行performance、V运行validation，返回64位周期/CRC后再次READY；
 电脑用`scripts/coremark/host.py`接收计算。CoreMark双宽真实SoC串口闭环已通过：P/V、CRLF单触发、64位回传、DONE/READY及PC解析。
 2次迭代的短测formal=0，尚无正式十秒或板上成绩；RT终端的历史结果见`all`。
-正式交互固件的C6条件候选`b94580c`已完成唯一一次追加布局布线，
-Core/SYS/DDR-user/外设Fmax为90.6208/100.9082/124.1619/73.0004 MHz，0未布通。
-Core100与DDR125 MHz尚未收敛，本轮停止迭代、不自动升级baseline；旧自动固件的物理记录保留。
-双宽回归368 PASS/8 SKIP，固定64轮三层与双宽UART的周期均不变。
+C9完整交互固件使用`build/coremark-board/rv32-O3-i0-b115200`，生产ID为`ea1773fca42aa7c6`。
+硬件`82cbf7a`的综合估计Core/SYS/DDR-user/外设为83.5307/110.0987/144.7387/93.3476 MHz；
+Core低于所选88.75 MHz，本轮完整布局布线正在运行。旧C6 `b94580c`物理Fmax为
+90.6208/100.9082/124.1619/73.0004 MHz、0未布通，保留为历史记录。
+新旧时钟、策略和RTL均有差异，频率差额不能归因单项修改。
+本轮双宽公共回归合计368 PASS/8 SKIP，786项源SHA起终相同；20项定向验证不重复计入。
+两个可选SoC短测延期，未计入SKIP；新C9分层CoreMark与UART复测交B。
 
 软件默认 `SOFTWARE_OPT=O3`，可选 O2/Ofast。公共配置见
 `scripts/hardware_profile.json`，当前应用范围见 `scripts/branch_profile.json`。
 本次基线测量显式选择 I$16 KiB、D$8 KiB、bank XOR mask2；通用 API 的4/4 KiB默认值保留历史兼容。
-O3/64轮已测 M0 performance/validation 为3.590617/3.570731 CoreMark/MHz；
-真实 TCM 为3.095736/3.081770。两者的存储路径分别记录。
+O3/64轮M0 performance/validation：RV32为3.590617/3.570731，RV64为3.145656/3.133377 CoreMark/MHz。
+真实TCM的旧C6成绩为3.095736/3.081770。B需从当前P2源重建并冻结C9软件bundle；
+旧ELF拒绝C9/C10，不能直接沿用旧档分数。两种存储路径分别记录。
 M0 使用 TB 一周期存储；`core_tcm`、`soc_tcm`、`soc_ddr` 分别测真实 Core+TCM、
 SoC+TCM、SoC+Cache+DDR。CoreMark/MHz 的分母均为 Core 计时区周期。
 RT-Thread已移到`all`，不参加这组CoreMark测量。
@@ -45,10 +51,10 @@ RT-Thread已移到`all`，不参加这组CoreMark测量。
 
 发布分支按`main / yolo / minimind / all`整理。YOLO和MiniMind分别保留对应上板程序；
 `all`保存两套加速器、全部软件与RT-Thread，仅用于联合仿真。历史`baseline-*`提交保留。
-完整YOLO演示的本地交付为`demo/yolo-full-network@8a8f484`：同C程序与真实NPU/总线/UART/显示RTL联合仿真通过，
-另有真实RV32/RV64驱动短测；尚未推送合并到上述发布分支，没有板测结果。
+YOLO用途分支已集成`demo/yolo-full-network@8a8f484`的完整程序：同C程序与真实NPU/总线/UART/显示RTL联合仿真通过，
+另有真实RV32/RV64驱动短测。C10整网复测与上板由A负责，没有板测结果。
 本分支不保留加速器实体源码、专属软件或专属执行入口。
 
 详细配置、数据和待办见[项目介绍](docs/PROJECT_INTRO.md)、
 [系统结构](docs/understand/SOC_SYSTEM.md)、[FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。
-工作区 `2-coremark/record.md` 保存各次镜像、命令和测量记录。
+本地工作区[record.md](../record.md)保存各次镜像、命令和测量记录。
