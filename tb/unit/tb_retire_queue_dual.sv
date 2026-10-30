@@ -43,7 +43,7 @@ module tb_retire_queue_dual;
     initial for (int probe = 0; probe < 5; probe++) probe_id[probe] = '0;
 
     always #5 clk = ~clk;
-    retire_queue dut (.branch_recovery('0), .producer_entries(), .ras_entries(), .ras_head_slot(), .*);
+    retire_queue dut (.branch_recovery('0), .producer_entries(), .probe_live(), .ras_entries(), .ras_head_slot(), .*);
 
     function automatic logic [31:0] random_word;
         random_state ^= random_state << 13;

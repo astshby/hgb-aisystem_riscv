@@ -11,6 +11,8 @@ module tb_scoreboard_completion #(
     logic clk = 0, rst = 1;
     logic [RETIRE_IDX_W-1:0] head_slot;
     logic [SOURCES-1:0] source_valid, source_accept, source_ready;
+    logic [SOURCES-1:0] source_live = '0;
+    logic [1:0] complete_live;
     retire_completion_t source_completion [SOURCES], completion [2];
     logic [1:0] complete_valid, complete_accept, capacity;
     pred_update_t incoming [2], update;

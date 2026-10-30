@@ -27,7 +27,7 @@ module tb_scoreboard_recovery;
     retire_id_t ids [16];
     initial for (int probe = 0; probe < 5; probe++) probe_id[probe] = '0;
     always #5 clk = ~clk;
-    retire_queue #(.RENAMED(1)) dut (.ras_entries(), .ras_head_slot(), .*);
+    retire_queue #(.RENAMED(1)) dut (.probe_live(), .ras_entries(), .ras_head_slot(), .*);
     task automatic idle;
         alloc_valid = 0; alloc_valid_1 = 0; alloc_meta = '0; alloc_meta_1 = '0;
         complete_valid = 0; complete_valid_1 = 0; completion = '0; completion_1 = '0;
