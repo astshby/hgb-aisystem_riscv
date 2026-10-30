@@ -38,7 +38,7 @@ module yolo_video #(
     logic init_done,init_error,reader_running;
     logic [7:0] init_retries,init_writes;
     (* ASYNC_REG="TRUE", PAP_ASYNC_REG=1, syn_allow_retiming=0 *) logic init_done_s1_q,init_done_s2_q,init_error_s1_q,init_error_s2_q;
-    logic [7:0] retry_gray_q,write_gray_q;
+    (* syn_preserve=1, syn_allow_retiming=0 *) logic [7:0] retry_gray_q,write_gray_q;
     (* ASYNC_REG="TRUE", PAP_ASYNC_REG=1, syn_allow_retiming=0 *) logic [7:0] retry_s1_q,retry_s2_q,write_s1_q,write_s2_q;
     function automatic logic [31:0] gray32(input logic [31:0] value);
         logic [31:0] decoded;

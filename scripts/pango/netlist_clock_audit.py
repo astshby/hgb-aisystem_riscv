@@ -6,7 +6,7 @@ the emitted structural VM and clock report; native pin queries separately verify
 that the constrained objects exist. It never infers a domain from a net's name.
 """
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import re
 
 
@@ -73,7 +73,11 @@ class ClockNetlist:
             if len(rows) != 1:
                 raise ValueError(f"clock report missing/duplicate {clock}")
             row = rows[0]
-            if Decimal(row['Period']) != Decimal(spec['periods_ns'][domain]):
+            # 原生报告会把分数周期显示为有限小数；仅按该字段的末位精度核对。
+            # ROUND_HALF_UP 对应半个末位单位的范围，不引入固定比例容差。
+            reported_period = Decimal(row['Period'])
+            expected_period = Decimal(spec['periods_ns'][domain])
+            if expected_period.quantize(reported_period, rounding=ROUND_HALF_UP) != reported_period:
                 raise ValueError(f"clock period differs from measurement {clock}")
             targets = row['Targets'].strip().strip('{}').split()
             if not targets:

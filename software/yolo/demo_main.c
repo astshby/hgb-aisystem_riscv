@@ -9,6 +9,10 @@
 #ifndef YOLO_DEMO_BAUD
 #define YOLO_DEMO_BAUD 115200u
 #endif
+#ifndef HGB_YOLO_FIRMWARE_ID
+#define HGB_YOLO_FIRMWARE_ID "development"
+#endif
+static const char firmware_id[] = HGB_YOLO_FIRMWARE_ID;
 extern int yolo_operator_selftest(void);
 static struct ydm_demo demo;
 static struct yolo_network_service network;
@@ -70,6 +74,8 @@ static void drain(void)
 }
 int main(void)
 {
+    // 保留版本字符串到已初始化DTCM，串口协议与应用计算保持原样。
+    __asm__ volatile("" : : "r"(firmware_id));
     struct hgb_soc_clocks clocks;
     if (hgb_soc_read_clocks(INFO,REG(INFO+0x3c),&clocks)) return 60;
     peripheral_hz=clocks.periph_hz;

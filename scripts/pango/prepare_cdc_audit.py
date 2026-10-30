@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
+from prepare_project import BOARD_CLOCK_PROFILES, timing_input
 
 from measurement_constraints import _fifo_inventory, _path_pattern, _register_pattern
 
@@ -20,7 +21,7 @@ def specification(config):
     domains = config['domains']
     if config['platform'] == 'core_tcm':
         raise ValueError('Core+TCM has no asynchronous FIFO boundary')
-    if config.get('native_board_profile') not in (1, 4, 5, 6, 7, 8):
+    if config.get('native_board_profile') not in BOARD_CLOCK_PROFILES or config.get('native_board_profile') == 0:
         raise ValueError('audit requires a supported independent clock profile')
     periods = {d: Decimal(config['periods_ps'][d]) / 1000 for d in domains}
     root = 'u_soc' if 'ddr' in domains else 'g_soc.u_soc'
@@ -42,6 +43,13 @@ def specification(config):
             fifos.append(dict(path=f'g_npu.u_target.u_cdc.u_{channel}', bits=3,
                               src='npu' if reverse else 'sys', dst='sys' if reverse else 'npu',
                               prunable=False, constant_payload=False))
+    if config.get('video_enable'):
+        for name, src, dst, bits in (('u_config', 'sys', 'video', 3),
+                                    ('u_commit_ack', 'video', 'sys', 3),
+                                    ('u_frame_command', 'video', 'sys', 3),
+                                    ('u_pixels', 'sys', 'video', 12)):
+            fifos.append(dict(path='g_video.u_video.' + name, bits=bits, src=src, dst=dst,
+                              prunable=False, constant_payload=False))
     clocks = {d: 'ddrphy_sysclk' if d == 'ddr' else f'clk_{d}' for d in domains}
     levels = [dict(path=root, signal='irq_sync1_q', second_signal='irq_sync2_q',
                    bits=[0, 1, 2], second_bits=[0, 1, 2], src='periph', dst='core')]
@@ -49,6 +57,17 @@ def specification(config):
         levels += [dict(path=root, signal=signal, second_signal=signal,
                         bits=[0], second_bits=[1], src='ddr', dst=dst)
                    for signal, dst in (('ddr_system_online_q', 'sys'), ('ddr_online_q', 'periph'))]
+    if config.get('video_enable'):
+        for first, second, src, dst, bits, scalar, gray in (
+                ('init_done_s1_q', 'init_done_s2_q', 'periph', 'sys', [0], True, None),
+                ('init_error_s1_q', 'init_error_s2_q', 'periph', 'sys', [0], True, None),
+                ('init_pixel1_q', 'init_pixel2_q', 'periph', 'video', [0], True, None),
+                ('retry_s1_q', 'retry_s2_q', 'periph', 'sys', list(range(2)), False, 'retry_gray_q'),
+                ('write_s1_q', 'write_s2_q', 'periph', 'sys', list(range(6)), False, 'write_gray_q'),
+                ('frame_s1_q', 'frame_s2_q', 'video', 'sys', list(range(32)), False, 'frame_gray_q'),
+                ('underflow_s1_q', 'underflow_s2_q', 'video', 'sys', list(range(32)), False, 'underflow_gray_q')):
+            levels.append(dict(path='g_video.u_video', signal=first, second_signal=second,
+                               bits=bits, second_bits=bits, src=src, dst=dst, scalar=scalar, gray_source=gray))
     return dict(schema=1, platform=config['platform'], clocks=clocks,
                 periods_ns={d: str(p) for d, p in periods.items()}, fifos=fifos, levels=levels,
                 policy='first-stage Gray and stable FIFO payload only; no clock groups or false paths',
@@ -71,6 +90,8 @@ def generate(spec, names):
 def parse_native_queries(text, spec, names):
     if not re.search(r'^CDC_QUERY_COMPLETE\s*$', text, re.M):
         raise ValueError('native CDC query did not complete')
+    if '::tcicmd::' in text:
+        raise ValueError('native CDC pins were deferred; query inside open_design')
     if re.search(r'^(?:E:|ERROR:)|(?:Timing-4003|CommandTiming-0057):', text, re.M):
         raise ValueError('native CDC query contains unresolved objects or errors')
     expected = generate(spec, names)[1]
@@ -203,6 +224,10 @@ def audit_objects(spec, names, netlist, clock_sources):
     # D of Gray and Q of sync stages are native inventory evidence, not exception endpoints.
     required = {n for n in pointer_names if re.search(r'_gray_q\[\d+\](?:/opit_\d+(?:_inv)?)?/(?:CLK|Q)$', n)
                 or re.search(r'_sync[12]_q\[\d+\](?:/opit_\d+(?:_inv)?)?/(?:CLK|D)$', n)}
+    status_sources = [re.compile(r'^' + _path_pattern(level['path']) + r'[./]' +
+                                re.escape(level['gray_source']) + r'\[[0-9]+\](?:/opit_[0-9]+(?:_inv)?)?/(?:CLK|Q)$')
+                      for level in spec['levels'] if level.get('gray_source')]
+    required = {name for name in required if not any(p.fullmatch(name) for p in status_sources)}
     if required != reviewed_pointer_pins:
         raise ValueError(f'unreviewed native FIFO pointer pins: {sorted(required-reviewed_pointer_pins)[:3]}')
     for level in spec['levels']:
@@ -211,8 +236,12 @@ def audit_objects(spec, names, netlist, clock_sources):
                                     (level['second_signal'], level['second_bits'], False)):
             for bit in bits:
                 for pin in ('D', 'CLK'):
-                    selected = checked(_register_pattern(level['path'], signal, pin, bit),
-                                       level['dst'], [bit], signal, True)
+                    pattern = (_register_pattern(level['path'], signal, pin, bit) if not level.get('scalar') else
+                               r'^' + _path_pattern(level['path']) + r'[./]' + re.escape(signal) +
+                               r'(?:\[0\])?(?:[./]opit_[0-9]+(?:_inv)?)?[./]' + pin + '$')
+                    selected = checked(pattern, level['dst'], None if level.get('scalar') else [bit], signal, True)
+                    if level.get('scalar') and len(selected) != 1:
+                        raise ValueError('missing/duplicate scalar synchronizer ' + signal)
                     if pin == 'CLK':
                         syncs.update(name.rsplit('/', 1)[0] for name in selected)
                     elif first:
@@ -224,6 +253,12 @@ def audit_objects(spec, names, netlist, clock_sources):
                                                 trace=[(spec['clocks'][level['src']], 'native clock network')])
                         constraints.append(f'set_max_delay {budget} -datapath_only '
                                            f'-from {object_list(sources)} -to {object_list(selected)}')
+        if level.get('gray_source'):
+            source = checked(_register_pattern(level['path'], level['gray_source'], 'CLK'),
+                             level['src'], level['bits'], level['gray_source'], True)
+            dest = checked(_register_pattern(level['path'], level['signal'], 'D'),
+                           level['dst'], level['bits'], level['signal'], True)
+            constraints.append(f'set_max_skew {budget} -from {object_list(source)} -to {object_list(dest)}')
     return dict(passed_fifos=passed, pruned_fifos=pruned, pruned_receivers=pruned_receivers, pins=proofs,
                 synchronizer_registers=sorted(syncs)), '\n'.join(constraints) + '\n'
 
@@ -237,7 +272,9 @@ def load_inputs(project, summary_file, spec):
     manifest_path = project / spec['input_manifest']
     if sha(manifest_path) != spec['input_manifest_sha256']:
         raise ValueError('staged manifest changed after query preparation')
-    config = json.loads(manifest_path.read_text())['config']
+    input_path, _, config = timing_input(project)
+    if input_path != manifest_path:
+        raise ValueError('native input manifest selection changed')
     summary = json.loads(summary_file.read_text())
     if summary['config'] != config:
         raise ValueError('timing summary configuration mismatch')
@@ -253,7 +290,9 @@ def load_inputs(project, summary_file, spec):
     netlist = ClockNetlist((project / relative_vm).read_text(), config['pds_top'],
                           summary['estimated_timing']['report_timing_clock_summary'], spec,
                           summary['worst_same_domain_path'])
-    pointer_or_level = re.compile(r'/(?:write|read)_(?:gray|sync[12])_q|/(?:irq_sync[12]|ddr_(?:system_)?online)_q')
+    level_names = '|'.join(re.escape(signal) for level in spec['levels']
+                           for signal in (level['signal'], level['second_signal'], level.get('gray_source') or level['signal']))
+    pointer_or_level = re.compile(r'/(?:write|read)_(?:gray|sync[12])_q|/(?:' + level_names + r')(?:\[|/)')
     payload = re.compile('^(?:' + '|'.join(_path_pattern(f['path']) for f in spec['fifos']) + r')[./]payload')
     names = {f'{name}/{pin}' for name, (_, cell) in netlist.cells.items()
              if pointer_or_level.search(name) or payload.match(name) for pin in cell.ports}
@@ -277,13 +316,48 @@ def bind(directory, log, project, summary_file):
     for name in ('bound_cdc.fdc', 'bound_sync.lcf', 'binding.json'):
         if (directory / name).exists():
             raise FileExistsError(directory / name)
+    _, manifest, config = timing_input(project)
+    publish = manifest.get('firmware_manifest_version') == 1
+    if publish:
+        for name in ('backend_cdc.scf', 'backend_sync.lcf', 'cdc-scope-receipt.json'):
+            if (project / name).exists():
+                raise FileExistsError(project / name)
     (directory / 'bound_cdc.fdc').write_text(constraints)
     (directory / 'bound_sync.lcf').write_text(''.join(
         f'define_attribute {{i:{name}}} {{PAP_ASYNC_REG}} {{TRUE}}\n'
         for name in result['synchronizer_registers']))
     (directory / 'binding.json').write_text(json.dumps(result, indent=2)+'\n')
+    if publish:
+        publish_native_binding(project, directory, spec, result, config)
     print(f'PASS native CDC object/clock binding: {len(result["passed_fifos"])} FIFOs, '
           f'{len(result["synchronizer_registers"])} synchronizer registers')
+
+
+def publish_native_binding(project, directory, spec, result, config):
+    """Keep audited native constraints and their synthesized-input identity together."""
+    names = ('backend_cdc.scf', 'backend_sync.lcf', 'cdc-scope-receipt.json')
+    if any((project / name).exists() for name in names):
+        raise FileExistsError('native CDC binding already published')
+    native = f'prj_tasks/syn_1/synthesize/{config["pds_top"]}_syn.vm'
+    report = 'prj_tasks/syn_1/synthesize/report_db/synthesize_'
+    inputs = [spec['input_manifest'], native] + [report + name + '.db' for name in (
+        'report_timing_clock_summary', 'report_timing_path_setup', 'report_clock_network')]
+    hashes = {name: sha(project / name) for name in inputs}
+    constraints = (directory / 'bound_cdc.fdc').read_text()
+    attributes = (directory / 'bound_sync.lcf').read_text()
+    receipt = dict(schema=1, input_manifest=spec['input_manifest'],
+                   input_manifest_sha256=spec['input_manifest_sha256'],
+                   binding_sha256=sha(directory / 'binding.json'),
+                   native_query_log_sha256=result['log_sha256'],
+                   fifos=len(result['passed_fifos']),
+                   synchronizer_registers=len(result['synchronizer_registers']),
+                   max_delay_commands=sum(line.startswith('set_max_delay ') for line in constraints.splitlines()),
+                   max_skew_commands=sum(line.startswith('set_max_skew ') for line in constraints.splitlines()),
+                   status='native objects and clock roots bound; routed effectiveness pending', files=hashes)
+    (project / 'backend_cdc.scf').write_text(constraints)
+    (project / 'backend_sync.lcf').write_text(attributes)
+    receipt['files'].update({name: sha(project / name) for name in names[:2]})
+    (project / 'cdc-scope-receipt.json').write_text(json.dumps(receipt, indent=2)+'\n')
 
 
 def main():
@@ -298,9 +372,8 @@ def main():
             p.error('--timing-summary required for native clock-root verification')
         bind(a.output, a.bind_log, a.project, a.timing_summary)
         return
-    manifest_path = a.project / ('application.json' if (a.project / 'application.json').exists() else 'benchmark.json')
-    manifest = json.loads(manifest_path.read_text())
-    spec = specification(manifest['config'])
+    manifest_path, manifest, config = timing_input(a.project)
+    spec = specification(config)
     spec['schema'] = 3
     spec['input_manifest'] = manifest_path.name
     spec['input_manifest_sha256'] = sha(manifest_path)

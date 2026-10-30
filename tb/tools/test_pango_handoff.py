@@ -33,7 +33,7 @@ class HandoffTests(unittest.TestCase):
         self.ip = self.root / "fake-ip"
         scripts = self.repo / "scripts/pango"
         scripts.mkdir(parents=True)
-        for name in ("prepare_project.py", "check_ip_dq.py", "implement.tcl", "mes2l676_200hp.fdc") + MEMORY_SCRIPTS:
+        for name in ("prepare_project.py", "check_ip_dq.py", "implement.tcl", "implement_cdc.tcl", "mes2l676_200hp.fdc") + MEMORY_SCRIPTS:
             shutil.copyfile(REPO / "scripts/pango" / name, scripts / name)
         (self.repo / "vsrc").mkdir()
         (self.repo / "vsrc/fixture.sv").write_text("module fixture; endmodule\n")

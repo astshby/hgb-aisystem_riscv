@@ -44,12 +44,15 @@ module pango_200hp_top #(
     // 频率发现和 UART 分频必须跟随 PLL。C8 的整数 Hz 元数据四舍五入，
     // 硬件实际 Core 为 900 MHz /11；约束使用精确分数，不以元数据代替 PLL。
     localparam int unsigned HOT_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :
+        (BOARD_CLOCK_PROFILE == 9 ? 88750000 : (BOARD_CLOCK_PROFILE == 10 ? 83806818 :
         (BOARD_CLOCK_PROFILE == 8 ? 81818182 :
-        ((BOARD_CLOCK_PROFILE == 5 || BOARD_CLOCK_PROFILE == 7) ? 90000000 : 100000000));
+        ((BOARD_CLOCK_PROFILE == 5 || BOARD_CLOCK_PROFILE == 7) ? 90000000 : 100000000))));
     localparam int unsigned SYS_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :
-        (BOARD_CLOCK_PROFILE >= 4 ? 100000000 : 80000000);
+        (BOARD_CLOCK_PROFILE == 9 ? 98611111 : (BOARD_CLOCK_PROFILE == 10 ? 102430556 :
+        (BOARD_CLOCK_PROFILE >= 4 ? 100000000 : 80000000)));
     localparam int unsigned PERIPH_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :
-        (BOARD_CLOCK_PROFILE >= 6 ? 60000000 : 25000000);
+        (BOARD_CLOCK_PROFILE == 9 ? 68269231 : (BOARD_CLOCK_PROFILE == 10 ? 65848214 :
+        (BOARD_CLOCK_PROFILE >= 6 ? 60000000 : 25000000)));
     logic [1:0] uart_rx, uart_tx;
     logic [31:0] gpio_in [3], gpio_out [3], gpio_oe [3];
     logic ddr_req_valid, ddr_req_ready, ddr_rsp_valid, ddr_rsp_ready;
@@ -132,7 +135,7 @@ module pango_200hp_top #(
     initial begin
         assert (!MM3_ENABLE) else $fatal(1,"MiniMind unavailable in the YOLO experiment");
         assert (BOARD_CLOCK_PROFILE == 0 || BOARD_CLOCK_PROFILE == 1 ||
-                (BOARD_CLOCK_PROFILE >= 4 && BOARD_CLOCK_PROFILE <= 8))
+                (BOARD_CLOCK_PROFILE >= 4 && BOARD_CLOCK_PROFILE <= 10))
             else $fatal(1, "unsupported board clock profile");
         assert (!(NPU_ENABLE || MM3_ENABLE) || BOARD_CLOCK_PROFILE != 0)
             else $fatal(1, "NPU requires its dedicated system GPLL output");

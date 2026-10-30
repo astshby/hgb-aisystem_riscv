@@ -16,7 +16,7 @@ module tb_soc_system #(
     parameter bit MM3_ENABLE=0,
     parameter int MM3_MAC_LANES=16,
     parameter bit AUTO_FINISH=1,
-    parameter int NPU_PERIOD_PS=10000,
+    parameter real NPU_PERIOD_PS=10000,
     parameter int SOC_PROFILE=soc_config_pkg::SOC_PROFILE_FULL,
     parameter bit ICACHE_ENABLE=1,
     parameter bit DCACHE_ENABLE=1,
@@ -50,6 +50,8 @@ module tb_soc_system #(
             6: case(domain_index) 0,1:return 10000; 2:return 8000; default:return 1000000.0/60.0; endcase
             7: case(domain_index) 0:return 1000000.0/90.0; 1:return 10000; 2:return 8000; default:return 1000000.0/60.0; endcase
             8: case(domain_index) 0:return 110000.0/9.0; 1:return 10000; 2:return 8000; default:return 1000000.0/60.0; endcase
+            9: case(domain_index) 0:return 4000000.0/355.0; 1:return 3600000.0/355.0; 2:return 8000; default:return 5200000.0/355.0; endcase
+            10: case(domain_index) 0:return 88000000.0/7375.0; 1:return 72000000.0/7375.0; 2:return 8000; default:return 112000000.0/7375.0; endcase
             default:return 0;
         endcase
     endfunction
@@ -514,12 +516,21 @@ module tb_soc_system #(
     if (NPU_ENABLE) begin : g_npu
         assign external_req='0;
         logic clk_npu=0, rst_npu;
-        always #(NPU_PERIOD_PS * 0.5ps) clk_npu=~clk_npu;
+        initial begin
+            realtime origin, edge_time;
+            longint unsigned edge_count = 0;
+            origin = $realtime;
+            forever begin
+                edge_count++;
+                edge_time = origin + real'(edge_count) * NPU_PERIOD_PS * 0.5ps;
+                #(edge_time-$realtime); clk_npu=~clk_npu;
+            end
+        end
         soc_reset_controller u_reset (.reset_async,.clk_core(clk_npu),.clk_sys,.clk_ddr,.clk_periph,
             .rst_core(rst_npu),.rst_sys(),.rst_ddr(),.rst_periph(),.rst_sys_local());
         npu_axi_target u_npu (.clk_sys,.rst_sys(dut.rst_sys),.clk_npu,.rst_npu,
             .axi_req(npu_req),.axi_rsp(npu_rsp));
-        initial $display("NPU_HARDWARE enabled=1 period_ps=%0d implementation=128mac mmio_abi=65536",NPU_PERIOD_PS);
+        initial $display("NPU_HARDWARE enabled=1 period_ps=%0.9f implementation=128mac mmio_abi=65536",NPU_PERIOD_PS);
     end else begin : g_no_npu
         assign external_req='0;
         assign npu_rsp='0;

@@ -1,23 +1,52 @@
 // Module: tb_soc_clock_contract
 // Description: Clock-discovery ABI, peripheral timer/UART timing and system-clock SPI cadence.
-module tb_soc_clock_contract;
+module tb_soc_clock_contract #(
+    parameter int CLOCK_PROFILE = 1
+);
     timeunit 1ns;
     timeprecision 1ps;
     import core_config_pkg::*;
     import core_types_pkg::*;
     import bus_types_pkg::*;
     import axi_types_pkg::*;
+    localparam int CORE_HZ = CLOCK_PROFILE == 9 ? 88750000 :
+        (CLOCK_PROFILE == 10 ? 83806818 : 100000000);
+    localparam int SYS_HZ = CLOCK_PROFILE == 9 ? 98611111 :
+        (CLOCK_PROFILE == 10 ? 102430556 : 80000000);
+    localparam int PERIPH_HZ = CLOCK_PROFILE == 9 ? 68269231 :
+        (CLOCK_PROFILE == 10 ? 65848214 : 25000000);
+    localparam real SYS_PERIOD_NS = CLOCK_PROFILE == 9 ? 720.0/71.0 :
+        (CLOCK_PROFILE == 10 ? 576.0/59.0 : 12.5);
+    localparam real PERIPH_PERIOD_NS = CLOCK_PROFILE == 9 ? 1040.0/71.0 :
+        (CLOCK_PROFILE == 10 ? 896.0/59.0 : 40.0);
     logic clk = 0, sys_clk = 0, rst = 1;
-    always #20ns clk = !clk;       // periph 25 MHz
-    always #6.25ns sys_clk = !sys_clk; // sys 80 MHz
+    // 绝对边沿累计保留分数周期，不能每半拍四舍五入后持续漂移。
+    initial begin
+        longint unsigned edge_count = 0;
+        realtime edge_time;
+        forever begin
+            edge_count++;
+            edge_time = real'(edge_count) * PERIPH_PERIOD_NS / 2.0;
+            #(edge_time-$realtime); clk = !clk;
+        end
+    end
+    initial begin
+        longint unsigned edge_count = 0;
+        realtime edge_time;
+        forever begin
+            edge_count++;
+            edge_time = real'(edge_count) * SYS_PERIOD_NS / 2.0;
+            #(edge_time-$realtime); sys_clk = !sys_clk;
+        end
+    end
     axil_req_t axi_req = '0;
     axil_rsp_t axi_rsp;
     logic [1:0] uart_tx;
     logic [31:0] gpio_in [3] = '{default:0};
     logic cache_command_valid;
     mmio_bus #(.CLOCK_HZ(125000000), .CLOCK_INFO_ENABLE(1),
-        .CORE_CLOCK_HZ(100000000), .SYS_CLOCK_HZ(80000000),
-        .DDR_CLOCK_HZ(125000000), .PERIPH_CLOCK_HZ(25000000)) dut (
+        .CORE_CLOCK_HZ(CORE_HZ), .SYS_CLOCK_HZ(SYS_HZ),
+        .DDR_CLOCK_HZ(125000000), .PERIPH_CLOCK_HZ(PERIPH_HZ)) dut (
         .clk, .rst, .ddr_ready(1'b1), .axi_req, .axi_rsp, .uart_rx(2'b11), .uart_tx,
         .gpio_in, .gpio_out(), .gpio_oe(), .irq_software(), .irq_timer(), .irq_external(),
         .cache_command_valid, .cache_command(), .cache_command_ready(1'b1),
@@ -124,11 +153,11 @@ module tb_soc_clock_contract;
         expect_word('h038, {17'b0,soc_config_pkg::SOC_FULL_PRESENT});
         expect_word('h03c, 32'h00010100 | 32'(soc_config_pkg::SOC_PROFILE_FULL));
         expect_word('h050, 32'h0001001f);
-        expect_word('h054, 100000000);
-        expect_word('h058, 80000000);
+        expect_word('h054, CORE_HZ);
+        expect_word('h058, SYS_HZ);
         expect_word('h05c, 125000000);
-        expect_word('h060, 25000000);
-        expect_word('h064, 25000000);
+        expect_word('h060, PERIPH_HZ);
+        expect_word('h064, PERIPH_HZ);
         for (int off = 'h50; off <= 'h64; off += 4)
             write_word(32'h10040000 + 32'(off), 32'hdeadbeef, AXI_SLVERR);
         read_word(32'h10040068, value, AXI_SLVERR);
@@ -139,14 +168,17 @@ module tb_soc_clock_contract;
         read_word(32'h0200bff8, timer_first); first_time = timer_sample_time;
         repeat (31) @(negedge clk);
         read_word(32'h0200bff8, timer_last); last_time = timer_sample_time;
-        if (last_time - first_time != real'(timer_last - timer_first) * 40.0)
+        if (last_time - first_time < real'(timer_last - timer_first) * PERIPH_PERIOD_NS - 0.002 ||
+            last_time - first_time > real'(timer_last - timer_first) * PERIPH_PERIOD_NS + 0.002)
             $fatal(1, "mtime frequency disagrees with periph");
         write_word(32'h1000000c, 25);
         fork
             begin
                 @(negedge uart_tx[0]); uart_start = $realtime;
                 @(posedge uart_tx[0]); uart_end = $realtime;
-                if (uart_end - uart_start != 1000.0) $fatal(1, "UART bit duration %f", uart_end-uart_start);
+                if (uart_end - uart_start < 25.0 * PERIPH_PERIOD_NS - 0.002 ||
+                    uart_end - uart_start > 25.0 * PERIPH_PERIOD_NS + 0.002)
+                    $fatal(1, "UART bit duration %f", uart_end-uart_start);
             end
             begin
                 write_word(32'h10000000, 32'hff);
@@ -160,10 +192,12 @@ module tb_soc_clock_contract;
         @(posedge spi_sck); spi_first = $realtime;
         repeat (7) @(posedge spi_sck);
         spi_last = $realtime;
-        if (spi_last-spi_first != 700.0) $fatal(1, "SPI cadence disagrees with sys");
+        if (spi_last-spi_first < 56.0 * SYS_PERIOD_NS - 0.002 ||
+            spi_last-spi_first > 56.0 * SYS_PERIOD_NS + 0.002)
+            $fatal(1, "SPI cadence disagrees with sys");
         while (!spi_rsp_valid) @(negedge sys_clk);
         if (spi_response.error != BUS_OK || spi_response.rdata != 0) $fatal(1, "SPI result");
-        $display("PASS soc_clock_contract rv%0d ABI/backpressure/readonly/legacy/mtime25MHz/UART1MHz/SPI10MHz", XLEN);
+        $display("PASS soc_clock_contract rv%0d C%0d ABI/backpressure/readonly/legacy core=%0d sys=%0d periph=%0d DDR125 mtime/UART/SPI", XLEN, CLOCK_PROFILE, CORE_HZ, SYS_HZ, PERIPH_HZ);
         $finish;
     end
     initial begin #200us; $fatal(1, "clock-contract timeout"); end

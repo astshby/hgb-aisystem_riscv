@@ -27,7 +27,7 @@ def main():
     parser.add_argument('--icache-bytes',type=int,default=16384)
     parser.add_argument('--dcache-bytes',type=int,default=8192)
     parser.add_argument('--bank-xor-mask',type=int,choices=(0,1,2,3),default=2)
-    parser.add_argument('--clock',choices=('yolo60','yolo60_core81'),default='yolo60')
+    parser.add_argument('--clock',choices=('yolo60','yolo60_core81','yolo_sys'),default='yolo_sys')
     parser.add_argument('--output',type=Path,help='new result directory; existing runs are preserved')
     args=parser.parse_args();os.chdir(ROOT)
     width=args.xlen;opt=optimization()
@@ -48,7 +48,7 @@ def main():
         copy_sources([Path(p) for p in sources],model/'source')
         command=['verilator','--binary','--timing','--assert','-Wall','-Wno-fatal','-j','2','-CFLAGS','-O1',
                  f'-GICACHE_BYTES={args.icache_bytes}',f'-GDCACHE_BYTES={args.dcache_bytes}',
-                 f'-GCLOCK_PROFILE={config["board_clock_profile"]}',
+                 f'-GCLOCK_PROFILE={config["board_clock_profile"]}', f'-GNPU_PERIOD_PS={config["periods_ps"]["npu"]}',
                  *[f'-D{k}={v}' for k,v in config['macros'].items()],'-f','scripts/system_files.f',
                  'tb/common/store_result_monitor.sv','tb/soc/axi_system_memory_model.sv',
                  'tb/soc/spi_flash_model.sv','tb/soc/tb_soc_system.sv','tb/soc/tb_yolo_system.sv',

@@ -6,23 +6,29 @@ from pathlib import Path
 import re
 
 from prepare_benchmark import verify
+from prepare_project import timing_input, TIMING_V3_SYNTHESIS
 from benchmark_config import sha
 from summarize_measurement import read_table, resources, path_family
 
 
-def summarize(root):
-    manifest_name='application.json' if (root/'application.json').exists() else 'benchmark.json'
+def summarize(root, native_log=None):
+    input_path, manifest, config = timing_input(root)
+    manifest_name = input_path.name
     if manifest_name=='application.json':
         from prepare_yolo_application import verify as verify_application
         manifest=verify_application(root)
-    else:
+    elif manifest_name == 'benchmark.json':
         manifest=verify(root)
-    config=manifest['config']
     syn=root/'prj_tasks/syn_1/synthesize'
-    log=root/'native-synthesis.stdout.log'
+    log=Path(native_log) if native_log is not None else root/'native-synthesis.stdout.log'
     text=log.read_text(errors='replace')
     if not re.search(r'^Executing : synthesize[^\r\n]* successfully\.$',text,re.M):
         raise ValueError('missing completed synthesis action')
+    selected = manifest.get('synthesis_strategy')
+    if selected in ('timing-v2', 'timing-v3'):
+        expected = TIMING_V3_SYNTHESIS.replace('-fanout_guide 128', '-fanout_guide 64') if selected == 'timing-v2' else TIMING_V3_SYNTHESIS
+        if ('Executing : '+expected+' successfully.') not in text.splitlines():
+            raise ValueError(f'configured {selected} synthesis did not complete')
     strategy = None
     if (root/'strategy.json').exists():
         from prepare_performance_strategy import verify_strategy
@@ -51,20 +57,23 @@ def summarize(root):
         if clock==row['Capture Clock'] and (clock not in same_domain or float(row['Slack'])<float(same_domain[clock]['Slack'])):
             same_domain[clock]=row
     return dict(config=config,strategy=strategy,status='native synthesis complete; estimated timing, no place/route',
+                input_manifest=manifest_name, firmware_role=manifest.get('firmware_role'),
+                firmware=manifest.get('firmware'), source_commit=manifest.get('source_commit'),
                 resources=resources(report.read_text(errors='replace')),retained_memory_and_ddr=retained,
                 estimated_timing=tables,worst_path_by_family=worst,
                 worst_same_domain_path=same_domain,
                 cross_domain_setup=[r for r in tables['report_timing_setup'] if r['Launch Clock']!=r['Capture Clock']],
                 routed_fmax=None,routed_wns=None,unrouted_nets=None,
-                hashes={str(p.relative_to(root)):sha(p) for p in files})
+                hashes={str(p.relative_to(root)) if p.is_relative_to(root) else str(p):sha(p) for p in files})
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('project',type=Path)
     parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--native-log', type=Path, help='exact run_phase synthesis log; original default remains supported')
     args=parser.parse_args()
-    result=summarize(args.project.resolve())
+    result=summarize(args.project.resolve(), args.native_log.resolve() if args.native_log else None)
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps({k:result[k] for k in ('status','resources','retained_memory_and_ddr')},indent=2))

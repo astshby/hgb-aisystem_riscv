@@ -3,6 +3,7 @@
 module axi_bus_target #(
     parameter bit READ_ONLY = 0,
     parameter bit REGISTER_WRITE_CHECK = 0,
+    parameter bit REGISTER_LOCAL_ADDR = 0,
     parameter int LOCAL_BYTES = core_config_pkg::DBUS_BYTES
 ) (
     input logic clk, rst,
@@ -39,10 +40,34 @@ module axi_bus_target #(
     axi_resp_e local_error;
     logic [255:0] merged_read;
     axi_register_slice u_channels (.clk, .rst, .s_req(axi_req), .s_rsp(axi_rsp), .m_req(q), .m_rsp(p));
-    // beat 起址只在地址接纳或当前 beat 完成时更新，避免每次本地请求重算编号×步长。
-    // 字内偏移和 owner 保持原时序，背压期间请求地址不随外部 AXI 载荷变化。
-    assign read_addr = read_beat_addr_q + 32'(read_offset_q);
-    assign write_addr = write_beat_addr_q + 32'(write_offset_q);
+    // TCM直接用游标寄存器驱动地址译码和BRAM冲突检查；在原握手边沿推进，不增加等待拍。
+    // 保留beat起址用于宽AXI字节选通；非TCM实例继续使用原起址加字内偏移。
+    if (REGISTER_LOCAL_ADDR) begin : g_local_address
+        logic [31:0] read_cursor_q, write_cursor_q;
+        assign read_addr = read_cursor_q;
+        assign write_addr = write_cursor_q;
+        // 游标载荷由read/write_active拥有，不复位无效载荷。
+        always_ff @(posedge clk) begin
+            if (!rst) begin
+                if (q.ar_valid && p.ar_ready) read_cursor_q <= q.ar.addr;
+                if (q.aw_valid && p.aw_ready) write_cursor_q <= q.aw.addr;
+                if (q.r_ready && r_valid_q && !r_q.last)
+                    read_cursor_q <= read_beat_addr_q + (32'd1 << read_q.size);
+                if (pending_q && rsp_valid) begin
+                    if (pending_write_q && !write_end)
+                        write_cursor_q <= write_cursor_q + 32'(write_step);
+                    if (!pending_write_q && !read_end)
+                        read_cursor_q <= read_cursor_q + 32'(read_step);
+                end
+                // 零strobe及坏WLAST也沿既有W beat完成边界推进，保持地址回卷语义。
+                if (write_w_fire && write_beat_q != write_q.len)
+                    write_cursor_q <= write_beat_addr_q + (32'd1 << write_q.size);
+            end
+        end
+    end else begin : g_offset_address
+        assign read_addr = read_beat_addr_q + 32'(read_offset_q);
+        assign write_addr = write_beat_addr_q + 32'(write_offset_q);
+    end
     assign read_bytes = 6'd1 << read_q.size;
     assign write_bytes = 6'd1 << write_q.size;
     assign read_step = read_q.prot[2] ? 6'd4 : 6'(LOCAL_BYTES);

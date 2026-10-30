@@ -17,6 +17,13 @@ CLOCKS = {
     "C6": {"core": 100_000_000, "sys": 100_000_000, "ddr": 125_000_000, "periph": 60_000_000},
     "C7": {"core": 90_000_000, "sys": 100_000_000, "ddr": 125_000_000, "periph": 60_000_000},
     "C8": {"core": 81_818_182, "sys": 100_000_000, "ddr": 125_000_000, "periph": 60_000_000},
+    "C9": {"core": 88_750_000, "sys": 98_611_111, "ddr": 125_000_000, "periph": 68_269_231},
+    "C10": {"core": 83_806_818, "sys": 102_430_556, "ddr": 125_000_000, "periph": 65_848_214},
+}
+# C9/C10 的整数Hz仅供软件元数据；时序周期由精确125MHz输出比计算。
+RELEASE_CLOCK_RATIOS = {
+    "C9": dict(core=(71, 100), sys=(71, 90), ddr=(1, 1), periph=(71, 130)),
+    "C10": dict(core=(59, 88), sys=(59, 72), ddr=(1, 1), periph=(59, 112)),
 }
 DOMAINS = ("core", "sys", "ddr", "periph")
 SCAN_INPUTS = ("scan_shift", "scan_update", "scan_capture", "scan_din")
@@ -94,7 +101,9 @@ def _specification(layer, profile):
     if profile not in CLOCKS:
         raise ValueError("measurement profile must be C1 or C4")
     active = DOMAINS if layer == 2 else ("core",)
-    periods = {d: Decimal(1_000_000_000) / CLOCKS[profile][d] for d in DOMAINS}
+    periods = {d: (Decimal(8) * RELEASE_CLOCK_RATIOS[profile][d][1] /
+                   RELEASE_CLOCK_RATIOS[profile][d][0] if profile in RELEASE_CLOCK_RATIOS
+                   else Decimal(1_000_000_000) / CLOCKS[profile][d]) for d in DOMAINS}
     resets = []
     for domain in active:
         index = DOMAINS.index(domain)
