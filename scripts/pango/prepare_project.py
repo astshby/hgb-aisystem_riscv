@@ -16,6 +16,10 @@ import xml.etree.ElementTree as ET
 GENERATED_SCRIPTS = ("compile.tcl", "synthesize.tcl", "implement.tcl")
 CDC_IMPLEMENTATION_SCRIPTS = ("implement_cdc.tcl",)
 MEMORY_SCRIPTS = ("memory_guard.ps1", "memory_gate.ps1")
+DDR_ROUTE_INPUT = "pnr/ddr3_test.rcf"
+DDR_ROUTE_STAGED = "board_ddr.rcf"
+DDR_ROUTE_NETS = tuple(f"I_ips_ddr_top/u_ddrphy_top/ddrphy_ioclk_gate [{bank}]"
+                       for bank in range(2))
 SYNTHESIZE_COMMANDS = "source compile.tcl\nsynthesize -ads -selected_syn_tool_opt 2\n"
 TIMING_V3_SYNTHESIS = ("synthesize -ads -selected_syn_tool_opt 2 -resource_sharing false "
                        "-fanout_guide 128 -retiming -max_path 100 -nworst 3 "
@@ -64,6 +68,37 @@ def implementation_commands(template, strategy="standard"):
 
 def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def inspect_ddr_route_constraints(path):
+    """Keep the generated HMIC_S priority routes, not arbitrary user routing Tcl."""
+    raw = Path(path).read_bytes()
+    commands = [line.strip() for line in raw.decode("utf-8").splitlines()
+                if line.strip() and not line.lstrip().startswith("#")]
+    expected = [f"def_route -prior_net {{{net}}}" for net in DDR_ROUTE_NETS]
+    if commands != expected:
+        raise ValueError("generated DDR RCF must contain the two reviewed ioclk_gate priority nets")
+    return dict(source=DDR_ROUTE_INPUT, staged=DDR_ROUTE_STAGED,
+                sha256=hashlib.sha256(raw).hexdigest(), priority_nets=list(DDR_ROUTE_NETS))
+
+
+def verify_ddr_route_constraints(root, manifest):
+    """Old frozen projects stay readable; new projects bind bytes and native loading."""
+    version = manifest.get("ddr_route_constraint_version")
+    if version is None:
+        return "legacy: DDR priority routing constraint not verified"
+    if type(version) is not int or version != 1:
+        raise ValueError("unsupported DDR route constraint version")
+    if DDR_ROUTE_STAGED not in manifest["files"]:
+        raise ValueError("DDR route constraint not covered by manifest")
+    identity = inspect_ddr_route_constraints(root / DDR_ROUTE_STAGED)
+    if manifest.get("ddr_route_constraints") != identity:
+        raise ValueError("DDR route constraint identity differs from staging manifest")
+    commands = [line.strip() for line in (root / "compile.tcl").read_text().splitlines()
+                if line.strip().startswith("add_constraint") and ".rcf" in line]
+    if commands != [f"add_constraint {{{DDR_ROUTE_STAGED}}}"]:
+        raise ValueError("compile Tcl must load the frozen DDR route constraint exactly once")
+    return "verified generated DDR priority routes; not external DDR timing signoff"
 
 
 def inspect_firmware(directory, xlen, role="loader", source_root=None):
@@ -537,6 +572,7 @@ def verify_staged_manifest(root, manifest):
         path.relative_to(root)
         if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
             raise ValueError(f"staged byte hash mismatch: {name}")
+    route_evidence = verify_ddr_route_constraints(root, manifest)
     configuration = {key: manifest[key] for key in ("xlen", "mul", "div", "soc_clock_hz")}
     if "schema_version" not in manifest:
         # 旧清单没有覆盖生成 Tcl，不能由历史默认值推断已证实的外设或 TCM 配置。
@@ -544,7 +580,7 @@ def verify_staged_manifest(root, manifest):
                     local_tcm_enable="unknown", soc_presence="unknown",
                     slow_presence="unknown", dma_wide_enable="unknown", ddr_data_bits="unknown",
                     cache_block_enable="unknown", dma_block_enable="unknown", core_issue_width="unknown",
-                    evidence="legacy: generated Tcl/configuration unverified")
+                    evidence="legacy: generated Tcl/configuration unverified; " + route_evidence)
     if type(manifest["schema_version"]) is not int or manifest["schema_version"] not in (1, 2, 3, 4, 5, 6, 7, 8, 9):
         raise ValueError("unsupported staging manifest schema")
     schema = manifest["schema_version"]
@@ -718,7 +754,8 @@ def verify_staged_manifest(root, manifest):
     configuration["evidence"] = (f"schema {schema}: staged hashes and compile parameters verified "
                                  "(input evidence only)" +
                                  ("; legacy DMA configuration unknown" if schema == 1 else "") +
-                                 ("; legacy block/issue configuration unknown" if schema < 3 else ""))
+                                 ("; legacy block/issue configuration unknown" if schema < 3 else "") +
+                                 "; " + route_evidence)
     return configuration
 
 
@@ -869,6 +906,11 @@ def main():
             staged.append((repo / name, Path("firmware/source") / name))
     if any(not source.is_file() for source, _ in staged):
         parser.error("missing generated IP or production loader; generate IP and make loader first")
+    try:
+        ddr_route_constraints = inspect_ddr_route_constraints(ip / DDR_ROUTE_INPUT)
+    except (OSError, UnicodeError, ValueError) as error:
+        parser.error(str(error))
+    staged.append((ip / DDR_ROUTE_INPUT, Path(DDR_ROUTE_STAGED)))
     fdc = (ip / "pnr/ddr_test.fdc").read_text(encoding="utf-8")
     ref = re.search(r"create_clock -name \{ref_clk\}.*?-period \{([\d.]+)\}", fdc)
     generated = next((line for line in fdc.splitlines()
@@ -962,6 +1004,7 @@ def main():
     (root / "board_ddr.fdc").write_bytes(constraints.encode("utf-8"))
     manifest["removed_reference_constraints"] = free_lines
     manifest["files"]["board_ddr.fdc"] = hashlib.sha256((root / "board_ddr.fdc").read_bytes()).hexdigest()
+    manifest.update(ddr_route_constraint_version=1, ddr_route_constraints=ddr_route_constraints)
     if args.board_clock_profile:
         (root / "board_clocks.fdc").write_text(
             board_clock_constraints(args.board_clock_profile, args.npu_enable or args.mm3_enable), encoding="utf-8")
@@ -974,7 +1017,7 @@ def main():
     commands = ["# Offline ADS candidate flow; no JTAG/configuration commands.",
                 "set_arch -family Logos2 -device PG2L200H -package FBB676 -speedgrade -6"]
     commands += [f"add_design {{{path.as_posix()}}}" for path in rtl]
-    commands += ["add_constraint {board_ddr.fdc}"]
+    commands += ["add_constraint {board_ddr.fdc}", f"add_constraint {{{DDR_ROUTE_STAGED}}}"]
     if args.board_clock_profile:
         commands += ["add_constraint {board_clocks.fdc}"]
     if args.video_enable:
