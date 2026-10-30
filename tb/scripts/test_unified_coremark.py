@@ -9,7 +9,7 @@ import os
 
 ROOT=Path(__file__).resolve().parents[2]
 sys.path[:0]=[str(ROOT/'scripts'),str(ROOT/'scripts/pango'),str(ROOT/'scripts/verilator')]
-from benchmark_config import CONFIG, configuration, score
+from benchmark_config import CONFIG, configuration, core_record, score
 from hardware_config import hardware_configuration
 from prepare_benchmark import compile_tcm, constraints
 import run_p2_coremark as p2
@@ -17,6 +17,42 @@ import run_unified_coremark as unified
 
 
 class UnifiedCoreMarkTest(unittest.TestCase):
+    def test_tcm_fractional_receipts_and_old_integer_logs(self):
+        image=dict(mode='performance',iterations=64,scenario='tcm')
+        for clock in ('target','main_margin2','yolo_sys'):
+            config=configuration('core_tcm',clock)
+            core='P2_CORE '+' '.join(f'{k}={v}' for k,v in core_record(config).items())
+            checks='\n'.join(f'{k} : 0x{v:x}' for k,v in p2.EXPECTED['performance'].items())
+            prefix=f'{core}\n{checks}\nIterations : 64\nTotal ticks : 20000000\n[0]crcfinal : 0x1234\nPASS unified-test\n'
+            values=[str(config['periods_ps']['core']),f'{config["periods_ps"]["core"]:.6f}']
+            if clock=='target': values.append('10000')
+            for period in values:
+                text=prefix+f'UNIFIED_TCM core_period_ps={period} itcm_bytes=65536 dtcm_bytes=65536 cache=0 ddr=0\n'
+                self.assertEqual(unified.parse_tcm(text,image,config)['cycles'],20000000)
+            wrong=str(round(config['periods_ps']['core'])+1)
+            text=prefix+f'UNIFIED_TCM core_period_ps={wrong} itcm_bytes=65536 dtcm_bytes=65536 cache=0 ddr=0\n'
+            with self.assertRaisesRegex(ValueError,'clock/memory'):
+                unified.parse_tcm(text,image,config)
+
+    def test_model_build_jobs_are_explicit_and_positive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for width,jobs in ((32,1),(64,3)):
+                config=configuration('core_tcm','main_margin2',width)
+                output=Path(directory)/f'rv{width}'
+                def fake_compile(command,log,cwd,env):
+                    log.write_text('')
+                    (output/('V'+config['sim_top'])).write_bytes(b'test-model')
+                with patch.object(p2,'rtl_sources',return_value={}),patch.object(unified,'run',side_effect=fake_compile) as compile_mock:
+                    _,receipt=unified.build(config,output,jobs)
+                command=compile_mock.call_args.args[0]
+                self.assertEqual(command[command.index('-j')+1],str(jobs))
+                self.assertIn(f'-GCORE_PERIOD_PS={config["periods_ps"]["core"]}',command)
+                self.assertIn(f'-j {jobs}',receipt['command'])
+            invalid=Path(directory)/'invalid'
+            with self.assertRaisesRegex(ValueError,'jobs must be positive'):
+                unified.build(config,invalid,0)
+            self.assertFalse(invalid.exists())
+
     def test_rt_and_benchmark_use_identical_bank_mapping(self):
         for width in (32,64):
             for mask in (0,1,2,3):
