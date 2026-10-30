@@ -21,10 +21,12 @@ export SPLIT_ISSUE_QUEUE INTEGER_QUEUE_ENTRIES MEMORY_QUEUE_ENTRIES LIMITED_INTE
 # Four publication branches share one reviewed Core profile. Optional software
 # targets exist only when that branch retains their make fragment and sources.
 include scripts/make/checks.mk
+include scripts/make/software.mk
 include scripts/make/yolo.mk
 
 .PHONY: help check
 help:
+	@printf '%s\n' 'make software-list|software-doctor|software-prepare|software-build|software-test [XLEN=32|64|both]'
 	@printf '%s\n' 'make check XLEN=32|64' 'SOFTWARE_OPT=O2|O3|Ofast (default O3)'
 ifneq ($(wildcard scripts/make/yolo.mk),)
 	@printf '%s\n' 'make yolo (five domains, convolution + DMA overlap)'

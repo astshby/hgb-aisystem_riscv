@@ -1,5 +1,7 @@
 .PHONY: yolo
 YOLO_OUT ?=
+YDM_NETWORK_MODEL ?= software/yolo/assets/yolox-tiny-320.bin
+export YDM_NETWORK_MODEL
 yolo:
 	python3 scripts/verilator/run_yolo.py --xlen $(XLEN) $(if $(strip $(YOLO_OUT)),--output "$(YOLO_OUT)")
 
@@ -54,4 +56,10 @@ yolo-demo-cosim-full:
 NPU_TEST_OUT ?= build/npu-axi/run-rv$(XLEN)
 npu-test:
 	python3 scripts/verilator/run_npu_tests.py --output $(NPU_TEST_OUT) --xlen $(XLEN)
+
+.PHONY: yolo-assets-rebuild yolo-dataset-test
+yolo-assets-rebuild:
+	python3 scripts/yolo/prepare_assets.py --rebuild
+yolo-dataset-test:
+	python3 scripts/yolo/run_dataset.py
 

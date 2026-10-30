@@ -2,6 +2,9 @@
 # Module: yolo_softmath_build
 # Description: Rebuild the small GCC/newlib software-float dependency set as pure RV64IM; no installed library is linked.
 set -euo pipefail
+if [[ -z "${RISCV_GNU_SOURCE_ROOT:-}" ]]; then
+    exec bash scripts/yolo/build_vendored_softmath.sh "$@"
+fi
 source_root="${RISCV_GNU_SOURCE_ROOT:?set RISCV_GNU_SOURCE_ROOT to the existing riscv-gnu-toolchain source tree}"
 gcc_build="${RISCV_GCC_BUILD_ROOT:-$source_root/build-gcc-newlib-stage2}"
 prefix="${RISCV_TOOL_ROOT:?set RISCV_TOOL_ROOT to the toolchain bin directory}/riscv64-unknown-elf-"

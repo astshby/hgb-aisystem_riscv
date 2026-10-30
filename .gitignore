@@ -23,6 +23,8 @@
 # Python bytecode
 __pycache__/
 *.pyc
+/.venv/
+/software/yolo/.cache/
 
 # MiniMind: preserve sources/configuration/manifests, ignore generated large files.
 /software/minimind3/model/*.safetensors

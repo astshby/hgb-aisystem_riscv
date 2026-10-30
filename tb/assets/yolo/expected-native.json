@@ -1,0 +1,104 @@
+{
+  "source_commit": "cb83b8a06be8d68d93a6e7d288fd300f7090c995",
+  "scope": "fixed original C scalar INT8 outputs; regression reference, not manual ground-truth annotations",
+  "results": [
+    {
+      "case": "dog-320",
+      "boxes": [
+        {
+          "class_id": 2,
+          "score": 0.816977382,
+          "objectness": 0.896787524,
+          "class_probability": 0.911004424,
+          "box_xyxy": [
+            193.683762,
+            31.5392094,
+            289.531433,
+            72.0476608
+          ]
+        },
+        {
+          "class_id": 16,
+          "score": 0.789386213,
+          "objectness": 0.896439731,
+          "class_probability": 0.880579233,
+          "box_xyxy": [
+            53.3513069,
+            88.3097382,
+            130.788956,
+            225.234573
+          ]
+        },
+        {
+          "class_id": 1,
+          "score": 0.777035892,
+          "objectness": 0.955057144,
+          "class_probability": 0.813601494,
+          "box_xyxy": [
+            45.1151199,
+            52.0190468,
+            236.988739,
+            178.090729
+          ]
+        }
+      ],
+      "convolutions": 83,
+      "nodes": 266
+    },
+    {
+      "case": "black-320",
+      "boxes": [],
+      "convolutions": 83,
+      "nodes": 266
+    },
+    {
+      "case": "dog-416",
+      "boxes": [
+        {
+          "class_id": 1,
+          "score": 0.879408777,
+          "objectness": 0.931719005,
+          "class_probability": 0.943856239,
+          "box_xyxy": [
+            67.5085983,
+            70.7315826,
+            303.199829,
+            227.136673
+          ]
+        },
+        {
+          "class_id": 2,
+          "score": 0.805500031,
+          "objectness": 0.886915505,
+          "class_probability": 0.908203781,
+          "box_xyxy": [
+            254.693329,
+            43.7242584,
+            374.790863,
+            91.5306091
+          ]
+        },
+        {
+          "class_id": 16,
+          "score": 0.614228606,
+          "objectness": 0.653970301,
+          "class_probability": 0.939230144,
+          "box_xyxy": [
+            72.0680084,
+            118.233292,
+            170.04274,
+            291.842163
+          ]
+        }
+      ],
+      "convolutions": 83,
+      "nodes": 266
+    },
+    {
+      "case": "black-416",
+      "boxes": [],
+      "convolutions": 83,
+      "nodes": 266
+    }
+  ]
+}
