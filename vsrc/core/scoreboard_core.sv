@@ -3,6 +3,9 @@
 `ifndef CORE_COMPLETION_WAKEUP_ENABLE
 `define CORE_COMPLETION_WAKEUP_ENABLE 1
 `endif
+`ifndef CORE_STORE_HINT_ENABLE
+`define CORE_STORE_HINT_ENABLE 1
+`endif
 module scoreboard_core (
     input logic clk, rst,
     input logic irq_software, irq_timer, irq_external,
@@ -65,7 +68,8 @@ module scoreboard_core (
     localparam int LSU_COMPLETIONS = 2;
     localparam int COMPLETION_SOURCES = 3 + LSU_COMPLETIONS;
     localparam bit COMPLETION_WAKEUP_ENABLE = `CORE_COMPLETION_WAKEUP_ENABLE;
-    localparam int BROADCAST_SOURCES = LSU_HINT_FIRST + LOAD_QUEUE_ENTRIES;
+    localparam bit STORE_HINT_ENABLE = `CORE_STORE_HINT_ENABLE;
+    localparam int BROADCAST_SOURCES = LSU_HINT_FIRST + (STORE_HINT_ENABLE ? LOAD_QUEUE_ENTRIES : 0);
     logic [COMPLETION_SOURCES-1:0] source_valid, source_preview_valid, source_ready, completion_busy;
     // 每个完成源的接受位在年龄仲裁前由 ROB 预检，选中后不再等待动态读。
     logic [COMPLETION_SOURCES-1:0] source_accept, source_live;
@@ -504,7 +508,7 @@ module scoreboard_core (
     end
     // 提示来自未完成的 LQ 槽，槽内已处理存活、取消与完整 ID；此时 ROB 不能退休该 Load。
     // 固定槽标签与数据和端口仲裁并行到达 IQ；恢复仍同拍关闭捕获，不增加执行周期。
-    for (genvar slot = 0; slot < LOAD_QUEUE_ENTRIES; slot++) begin : g_store_slot_broadcast
+    for (genvar slot = 0; slot < (STORE_HINT_ENABLE ? LOAD_QUEUE_ENTRIES : 0); slot++) begin : g_store_slot_broadcast
         assign broadcast[LSU_HINT_FIRST+slot] = '{valid:lsu_store_slot_hint[slot].valid &&
             !selected_redirect.valid,
             id:lsu_store_slot_hint[slot].id, data:lsu_store_slot_hint[slot].data};
@@ -591,7 +595,8 @@ module scoreboard_core (
         assert (ISSUE_WIDTH == 2) else $fatal(1, "scoreboard backend requires ISSUE_WIDTH=2");
         assert (!LIMITED_INTEGER_OOO || SPLIT_ISSUE_QUEUE) else $fatal(1, "limited issue requires split IQ");
         assert (COMPLETION_SOURCES == LSU_RETURN_FIRST && LSU_HINT_FIRST == LSU_RETURN_FIRST+2 &&
-                BROADCAST_SOURCES == LSU_HINT_FIRST+LOAD_QUEUE_ENTRIES) else $fatal(1, "LSU broadcast mapping");
+                BROADCAST_SOURCES == LSU_HINT_FIRST+(STORE_HINT_ENABLE ? LOAD_QUEUE_ENTRIES : 0))
+            else $fatal(1, "LSU broadcast mapping");
         assert (SCHEDULER_FORWARD_MODE inside {IQ_FORWARD_ALL, IQ_FORWARD_BRANCH_COMPLETION,
                 IQ_FORWARD_LSU_CAPTURE, IQ_FORWARD_STORE_CAPTURE})
             else $fatal(1, "scheduler forward mode");
