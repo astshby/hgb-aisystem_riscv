@@ -1,5 +1,8 @@
 // Module: scoreboard_core
 // Description: Dual-issue backend with tagged scheduling, independent completion and precise retirement.
+`ifndef CORE_COMPLETION_WAKEUP_ENABLE
+`define CORE_COMPLETION_WAKEUP_ENABLE 1
+`endif
 module scoreboard_core (
     input logic clk, rst,
     input logic irq_software, irq_timer, irq_external,
@@ -61,10 +64,12 @@ module scoreboard_core (
     // LSQ 本地选择仍按年龄选最老两项，取消/错误/逐槽结果语义不变。
     localparam int LSU_COMPLETIONS = 2;
     localparam int COMPLETION_SOURCES = 3 + LSU_COMPLETIONS;
+    localparam bit COMPLETION_WAKEUP_ENABLE = `CORE_COMPLETION_WAKEUP_ENABLE;
     localparam int BROADCAST_SOURCES = LSU_HINT_FIRST + LOAD_QUEUE_ENTRIES;
     logic [COMPLETION_SOURCES-1:0] source_valid, source_preview_valid, source_ready, completion_busy;
     // 每个完成源的接受位在年龄仲裁前由 ROB 预检，选中后不再等待动态读。
-    logic [COMPLETION_SOURCES-1:0] source_accept;
+    logic [COMPLETION_SOURCES-1:0] source_accept, source_live;
+    logic [1:0] completion_live, operand_completion_valid;
     retire_id_t accept_probe_id [COMPLETION_SOURCES];
     logic [1:0] selected_completion_valid;
     logic [COMPLETION_SOURCES-1:0] completion_input_valid, completion_input_ready;
@@ -457,18 +462,25 @@ module scoreboard_core (
     end
     completion_select #(.SOURCES(COMPLETION_SOURCES)) u_completion_select (
         .rst, .head_slot(completion_head_slot), .source_valid(source_preview_valid),
-        .source_accept, .source_ready, .source_completion(sources),
+        .source_accept, .source_live, .source_ready, .source_completion(sources),
         .complete_valid(selected_completion_valid), .complete_accept(completion_accept),
-        .completion(completed)
+        .complete_live(completion_live), .completion(completed)
     );
     // 接受位已由各源寄存 ID 预检；全局清空仍关闭握手。
     // 同一完整 ID 的第二口不写 ROB、不广播，第一口优先。
     assign completion_valid[0] = selected_completion_valid[0] & completion_accept[0] && !wb_redirect.valid;
     assign completion_valid[1] = selected_completion_valid[1] & completion_accept[1] && !wb_redirect.valid &&
         !(completed[1].id == completed[0].id && completion_valid[0]);
-    // ROB 写入、广播及 IQ/ISS 接纳仍受原有效/清空规则约束，不增加或减少等待拍。
+    // ROB 写入保持完整接受许可；预览仅捕获操作数，不提交任何架构副作用。
+    // 恢复拍 IQ 禁止发射并删除年轻项。存活 consumer 的依赖总比自身老，
+    // 因而不会保留来自被取消年轻 producer 的值；全 flush 仍关闭全部预览。
+    assign operand_completion_valid[0] = COMPLETION_WAKEUP_ENABLE ?
+        selected_completion_valid[0] && completion_live[0] && !wb_redirect.valid : completion_valid[0];
+    assign operand_completion_valid[1] = COMPLETION_WAKEUP_ENABLE ?
+        selected_completion_valid[1] && completion_live[1] && !wb_redirect.valid &&
+        !(completed[1].id == completed[0].id && operand_completion_valid[0]) : completion_valid[1];
     for (genvar portno = 0; portno < 2; portno++) begin : g_broadcast
-        assign broadcast[portno] = '{valid:completion_valid[portno] &&
+        assign broadcast[portno] = '{valid:operand_completion_valid[portno] &&
             !completed[portno].result.exc.valid, id:completed[portno].id, data:completed[portno].result.gpr_data};
     end
     // 执行源入 CMP 时持有完整结果；提前捕获操作数不提前更新 ROB/架构状态。
@@ -506,7 +518,7 @@ module scoreboard_core (
         .alloc_ready(alloc_ready[0]), .alloc_meta(alloc_meta[0]), .alloc_id(alloc_id[0]),
         .alloc_valid_1(decode_q[1].valid && iq_capacity == 2),
         .alloc_ready_1(alloc_ready[1]), .alloc_meta_1(alloc_meta[1]), .alloc_id_1(alloc_id[1]),
-        .probe_id(accept_probe_id), .probe_accept(source_accept),
+        .probe_id(accept_probe_id), .probe_accept(source_accept), .probe_live(source_live),
         .complete_valid(completion_valid[0]), .complete_ready(complete_ready[0]),
         .completion(completed[0]), .complete_reject(completion_reject[0]),
         .complete_valid_1(completion_valid[1]), .complete_ready_1(complete_ready[1]),
@@ -591,6 +603,22 @@ module scoreboard_core (
         assert (!(completion_valid[0] && completion_reject[0]) &&
                 !(completion_valid[1] && completion_reject[1]))
             else $fatal(1, "broadcast of completion rejected by ROB");
+        assert (!recovery.valid || (issue_enqueue_count == 0 && issue_count == 0 &&
+                                    dispatch_count == 0 && issue_fire == 0))
+            else $fatal(1, "operand preview executed during recovery");
+        assert (!broadcast[1].valid || !broadcast[0].valid || broadcast[1].id != broadcast[0].id)
+            else $fatal(1, "duplicate completion operand preview");
+        for (int lane = 0; lane < 2; lane++) if (alloc_fire[lane]) begin
+            // 改名绑定只允许读取更老生产者；恢复时被取消的年轻结果不能喂给存活老项。
+            if (renamed[lane].rs1_dependency.pending)
+                assert (younger_than(renamed[lane].retire_id, renamed[lane].rs1_dependency.id,
+                                    head_slot + RETIRE_IDX_W'(head_advance)))
+                    else $fatal(1, "rs1 producer is not older than consumer");
+            if (renamed[lane].rs2_dependency.pending)
+                assert (younger_than(renamed[lane].retire_id, renamed[lane].rs2_dependency.id,
+                                    head_slot + RETIRE_IDX_W'(head_advance)))
+                    else $fatal(1, "rs2 producer is not older than consumer");
+        end
         // 持续核对被移除的重复硬件资格检查，覆盖 x0 Load、ROB 回卷与分支取消。
         for (int portno = 0; portno < 2; portno++) begin
             if (lsu_store_forward_hint[portno].valid && !selected_redirect.valid)

@@ -8,10 +8,12 @@ module completion_select #(
     input logic [SOURCES-1:0] source_valid,
     // 接受位与年龄仲裁并行计算；选中后只做一次固定来源多路选择。
     input logic [SOURCES-1:0] source_accept,
+    input logic [SOURCES-1:0] source_live,
     output logic [SOURCES-1:0] source_ready,
     input pipeline_pkg::retire_completion_t source_completion [SOURCES],
     output logic [1:0] complete_valid,
     output logic [1:0] complete_accept,
+    output logic [1:0] complete_live,
     output pipeline_pkg::retire_completion_t completion [2]
 );
     import core_config_pkg::*;
@@ -39,6 +41,8 @@ module completion_select #(
         for (int portno = 0; portno < 2; portno++) begin
             complete_valid[portno] = |select[portno];
             complete_accept[portno] = |(select[portno] & source_accept);
+            // 同一固定来源选择并行传递寄存所有权，不经过当拍 branch/killed 许可。
+            complete_live[portno] = |(select[portno] & source_live);
             completion[portno] = '0;
             for (int src = 0; src < SOURCES; src++)
                 completion[portno] |= source_completion[src] &

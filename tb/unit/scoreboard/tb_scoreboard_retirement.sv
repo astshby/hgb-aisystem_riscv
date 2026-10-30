@@ -29,7 +29,7 @@ module tb_scoreboard_retirement;
     int dual_streak, maximum_streak, retired, head_recovery_checks = 0;
     int probe_checks = 0;
     always #5 clk = ~clk;
-    retire_queue #(.RENAMED(1), .REGISTER_RETIRE(1)) dut (.ras_entries(), .ras_head_slot(), .*);
+    retire_queue #(.RENAMED(1), .REGISTER_RETIRE(1)) dut (.probe_live(), .ras_entries(), .ras_head_slot(), .*);
 
     task automatic idle;
         alloc_valid = 0; alloc_valid_1 = 0; alloc_meta = '0; alloc_meta_1 = '0;
