@@ -23,6 +23,7 @@
 # Python bytecode
 __pycache__/
 *.pyc
+/.venv/
 
 # MiniMind: preserve sources/configuration/manifests, ignore generated large files.
 /software/minimind3/model/*.safetensors
