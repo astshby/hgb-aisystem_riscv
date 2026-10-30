@@ -14,16 +14,16 @@
 
 当前分支实际入口由 `make software-list` 列出。RT-Thread 仅在 all；它不参加裸机 CoreMark。
 
-Linux/WSL 需要 Python 3.10 以上、Git、Make、C/C++ 编译器和完整 Verilator 安装。
+Linux/WSL 需要 Python 3.10 以上（含 python3-venv）、Git、Make、C/C++ 编译器和完整 Verilator 安装。
 交叉工具链必须支持 `rv32im_zicsr`/`ilp32` 和 `rv64im_zicsr`/`lp64`；不能使用仅含 Linux ABI 的编译器。
-本机测量使用过 GCC 16.1.0、Verilator 5.044/5.045；更换工具后重新记录版本及结果。
+本轮软件复现使用 GCC 16.1.0、Verilator 5.052、Python 3.10.12；更换工具后重新记录版本及结果。
 先把 `RISCV_TOOL_ROOT` 设置为安装好的 `riscv64-unknown-elf-gcc` 所在目录：
 
 ```bash
 export RISCV_TOOL_ROOT=/path/to/riscv/bin
 python3 -m venv .venv
 source .venv/bin/activate
-python3 -m pip install -r software/requirements.txt
+python3 -m pip install --index-url https://pypi.org/simple -r software/requirements.txt
 make software-list
 make software-doctor
 make software-prepare
