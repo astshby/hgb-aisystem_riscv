@@ -20,10 +20,12 @@ export SPLIT_ISSUE_QUEUE INTEGER_QUEUE_ENTRIES MEMORY_QUEUE_ENTRIES LIMITED_INTE
 
 # Main exposes shared checks, layered CoreMark and the board UART application.
 include scripts/make/checks.mk
+include scripts/make/software.mk
 -include scripts/make/coremark.mk
 
 .PHONY: help check
 help:
+	@printf '%s\n' 'make software-list|software-doctor|software-prepare|software-build|software-test [XLEN=32|64|both]'
 	@printf '%s\n' 'make check XLEN=32|64' 'SOFTWARE_OPT=O2|O3|Ofast (default O3)'
 ifneq ($(wildcard scripts/make/coremark.mk),)
 	@printf '%s\n' 'make score (M0 + runnable CoreMark platforms)'

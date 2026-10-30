@@ -1,6 +1,10 @@
 # hgb-aisystem：四域 RISC-V SoC
 
 本分支保存无 NPU 的 Core/SoC、公共仿真、分层裸机 CoreMark 和上板串口交互程序。
+首次获取使用 `git clone --branch main https://github.com/astshby/hgb-aisystem_riscv.git`。
+程序源码、依赖准备和可执行命令见[软件复现说明](software/README.md)。
+设置 `RISCV_TOOL_ROOT` 后依次运行 `make software-doctor`、`make software-prepare`、
+`make software-build XLEN=both`、`make software-test`；这些入口不需要历史 `build`。
 RT-Thread 的源码、构建入口和专用测试保存在 `all`。
 Core 为 RV32/RV64 IM+Zicsr，双发射、按序双退休；ROB16、int8/mem4、LQ4/SQ4、
 forward3、Tournament1、RAS0、OOO0，正常 ALU/Load/DSP 为 8/10/10 级。
@@ -62,4 +66,5 @@ YOLO用途分支已集成`demo/yolo-full-network@8a8f484`的完整程序：同C�
 
 详细配置、数据和待办见[项目介绍](docs/PROJECT_INTRO.md)、
 [系统结构](docs/understand/SOC_SYSTEM.md)、[FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。
-本地工作区[record.md](../record.md)保存各次镜像、命令和测量记录。
+公开的配置与优化结果见[优化总结](docs/understand/OPTIMIZATION.md)；
+维护者的本地测量登记表不作为克隆后的构建依赖。

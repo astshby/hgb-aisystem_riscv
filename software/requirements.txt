@@ -1,0 +1,2 @@
+# PC UART clients. CoreMark firmware and protocol tests use Python's standard library.
+pyserial==3.5
