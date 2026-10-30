@@ -1,5 +1,15 @@
 # 官方 CoreMark 快照逐字节保留，包括上游已有的行尾空白。
-benchmark/coremark/vendor/coremark/** -whitespace
+benchmark/coremark/vendor/coremark/** -whitespace -text
 
 # Pinned dependency hashes describe upstream bytes, including line endings.
 third_party/yolo_npu128/** -text
+
+# Preserve upstream source bytes and model/test SHA256 values on Windows too.
+third_party/rt-thread/** -text -whitespace
+software/yolo/vendor/** -text -whitespace
+software/yolo/assets/** -text
+software/minimind3/model/** -text
+software/minimind3/c_runtime/assets/** -text
+tb/assets/** -text -whitespace
+*.rgb binary
+*.bin binary
