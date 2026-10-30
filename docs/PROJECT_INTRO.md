@@ -19,6 +19,11 @@ LUT75364、FF60590、DRM38、APM4；四工作域通过，但DDR PHY另有1端点
 I/O缺35输入/73输出delay，整机尚未全部闭合，Core100 MHz也未达到。
 与历史C6相比，策略、时钟、RTL均有变化，不能把差值解释为单项RTL效果。
 
+后续补充限于PDS工具：生成IP的pnr/ddr3_test.rcf现在随新工程冻结为board_ddr.rcf，
+compile.tcl明确加载并校验SHA；I/O分类工具保留原35/73计数，不生成虚构delay或false-path。
+115项工具测试通过，RTL未变；上面的原始物理结果没有RCF，修正入口尚未重新运行PDS。
+main@752af12已由维护者合入PR #16；RCF工具修复走独立PR。按最新要求，本机完成YOLO和文件补充后停止。
+
 双宽公共回归366 PASS/8 SKIP，加独立RV32 M0两项合计368/8；
 786项源SHA起终相同，20项定向验证不重复计入。两个可选SoC短测延期，未计入SKIP。
 RV32 O3/64 M0 P/V为3.590617/3.570731，RV64为3.145656/3.133377 CoreMark/MHz。
