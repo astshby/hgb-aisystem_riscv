@@ -18,7 +18,7 @@ main不保留RT-Thread或NPU，RT仅在all。YOLO独立分支采用C10并由A负
 软件从实际硬件频率寄存器取得UART和计时参数，正式计分需运行至少十秒；尚无板上成绩。
 双宽旧C6短流程已通过，迭代2、500000 baud、formal=0，不替代正式成绩。
 
-硬件82cbf7a、I16/D8/hash2的完整C9综合估计如下；Core低于所选工作档，当前完整布局布线正在运行。
+硬件82cbf7a、I16/D8/hash2的完整C9综合估计如下；综合阶段Core低于所选工作档，后续布线结果单列。
 新旧时钟、综合/物理策略和RTL有差异，不能把差额归因单项修改。
 
 | 域 | 目标MHz | 综合估计Fmax MHz | setup WNS ns |
@@ -33,7 +33,35 @@ main不保留RT-Thread或NPU，RT仅在all。YOLO独立分支采用C10并由A负
 本地摘要为`logs/release-ab-20261030/main-synthesis-summary.json`。
 最差综合路径是ISS操作数经branch、issue许可和early广播返回memory IQ/ISS；
 18级，data11.485 ns，其中logic2.245、估计net9.240 ns，最大扇出64。
-实际布线Fmax、setup/hold、CDC/Gray、DDR PHY、资源、未布通数和I/O覆盖完成后补入。
+### 本轮完整布局布线
+
+唯一一次P&R于2026-10-30 14:06正常退出，原生用时1h33m04s；固件、IP和时钟与上表同一冻结输入。
+
+| 域 | 工作档MHz | 布线Fmax MHz | setup WNS ns |
+|---|---:|---:|---:|
+| Core | 88.75 | 90.3702 | +0.202 |
+| SYS | 98.611111 | 107.5410 | +0.842 |
+| DDR user | 125 | 131.9784 | +0.423 |
+| 外设 | 68.269231 | 78.5252 | +1.913 |
+
+0未布通；LUT75364（含常量/旁路）、FF60590、DRM36K38、APM4。
+slow/fast hold最小+0.054/+0.042 ns，recovery+2.871/+4.823、removal+0.363/+0.222、MPW均+0.035，失败端点均0。
+CDC max-delay最小+3.278/+6.125，Gray skew+6.402/+6.688；同域/第二同步级误例外0。
+DDR PHY的ddrphy_sysclk→phy_dq_sysclk_1仍有1端点setup−0.028 ns，
+实际是phy_wrdata_en_d[0]→DQS group1 TS_CTRL[2]，6.019 ns中线路5.511 ns，占91.6%。
+I/O缺35输入/73输出delay，尚无bitstream/板测；只能确认C9四工作域通过，不能宣布整机全部闭合或Core100 MHz达标。
+
+实际Core最差转为retire generation→LSU选择→store hint broadcast[9]→integer IQ packet CE，
+14级、扇出156、data10.268 ns=logic2.745+net7.523，线路占73.3%。
+报告的100条Core slow路径中77条经过store hint[7–10]，其余最差为head copy→IQ packet D、WNS+0.307 ns。
+七广播候选须与真实TCM效率一起验证；去掉hint后仍有接近的非hint路径，不能据此承诺100 MHz。
+旧90.6208到本轮90.3702 MHz为−0.28%，SYS/DDR/外设能力提高，FF少3463；配置、策略、RTL均不同，不能分摊为某项优化收益。
+DDR用户域已通过125 MHz，原读缓冲候选移后；PHY使能那1条负路径须单独处理，不能靠改DDR用户侧载荷清零逻辑代替。
+
+本轮devmap9m21、place9m46、route1h08m36、opt2m55；工具池峰值12995 MB，route峰4946 MB。
+入口与大阶段双6 GiB门禁通过，运行中提交余量可低于6 GiB，日志保留实际样本；未改分页或停止无关进程。
+原始报告在上述Windows工程，摘要、完整路径和精确命令/哈希在
+logs/release-ab-20261030/main-physical-r1/{physical-receipt.json,actual-worst-paths.txt}。
 
 ### 新工程和原生CDC
 
