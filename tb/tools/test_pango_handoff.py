@@ -17,7 +17,7 @@ import xml.etree.ElementTree as ET
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from scripts.pango.prepare_project import (BOARD_CLOCK_PROFILES, BOARD_CLOCK_RATIOS, GENERATED_SCRIPTS,
-                                           MEMORY_SCRIPTS, SCOREBOARD_CONFIGURATION,
+                                           DDR_ROUTE_NETS, MEMORY_SCRIPTS, SCOREBOARD_CONFIGURATION,
                                            P1_SCOREBOARD_CONFIGURATION, DEFAULT_SCOREBOARD_CONFIGURATION, board_clock_constraints,
                                            compile_command, verify_independent_board_clocks,
                                            verify_staged_manifest)
@@ -93,6 +93,8 @@ class HandoffTests(unittest.TestCase):
             "create_generated_clock -name {ddrphy_sysclk} -multiply_by {5} -divide_by {2}\n"
             "create_clock -name {free_clk} -period {10.0}\n"
             "set_clock_groups -asynchronous -group {free_clk}\n")
+        (self.ip / "pnr/ddr3_test.rcf").write_text("".join(
+            f"def_route -prior_net {{{net}}}\n" for net in DDR_ROUTE_NETS))
         for width in (32, 64):
             firmware = self.repo / f"build/loader/rv{width}"
             firmware.mkdir(parents=True)
@@ -125,6 +127,10 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
         return output, result
 
+    def legacy_route_metadata(self, manifest):
+        # 历史仅含 compile 的测试入口不声称已加载本轮新增的 RCF。
+        del manifest["ddr_route_constraint_version"], manifest["ddr_route_constraints"]
+
     def test_default_entry_selects_measured_core_and_four_clocks(self):
         output, _ = self.stage(backend=None, clock=None)
         manifest = json.loads((output / "manifest.json").read_text())
@@ -135,6 +141,50 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(configuration["board_clock_domains_hz"],
                          {"core": 100000000, "sys": 80000000,
                           "ddr": 125000000, "periph": 25000000})
+
+    def test_generated_ddr_route_bytes_and_native_loading_are_bound(self):
+        output, _ = self.stage()
+        manifest = json.loads((output / "manifest.json").read_text())
+        self.assertEqual((output / "board_ddr.rcf").read_bytes(),
+                         (self.ip / "pnr/ddr3_test.rcf").read_bytes())
+        self.assertEqual(manifest["ddr_route_constraints"]["sha256"],
+                         manifest["files"]["board_ddr.rcf"])
+        self.assertEqual(manifest["ddr_route_constraints"]["priority_nets"], list(DDR_ROUTE_NETS))
+        path = output / "compile.tcl"
+        path.write_text(path.read_text().replace("add_constraint {board_ddr.rcf}\n", ""))
+        manifest["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(ValueError, "must load the frozen DDR"):
+            verify_staged_manifest(output, manifest)
+
+    def test_new_ddr_staging_rejects_missing_or_unreviewed_route_file(self):
+        route = self.ip / "pnr/ddr3_test.rcf"
+        route.unlink()
+        self.stage(success=False)
+        route.write_text("def_route -prior_net {other_net}\n")
+        self.stage(success=False)
+
+    def test_old_frozen_manifest_without_route_metadata_stays_readable(self):
+        output, _ = self.stage()
+        manifest = json.loads((output / "manifest.json").read_text())
+        del manifest["ddr_route_constraint_version"]
+        del manifest["ddr_route_constraints"]
+        del manifest["files"]["board_ddr.rcf"]
+        (output / "board_ddr.rcf").unlink()
+        path = output / "compile.tcl"
+        path.write_text(path.read_text().replace("add_constraint {board_ddr.rcf}\n", ""))
+        manifest["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        self.assertIn("legacy: DDR priority routing constraint not verified",
+                      verify_staged_manifest(output, manifest)["evidence"])
+
+    def test_rehashed_route_metadata_cannot_replace_reviewed_priority_nets(self):
+        output, _ = self.stage()
+        manifest = json.loads((output / "manifest.json").read_text())
+        path = output / "board_ddr.rcf"
+        path.write_text(path.read_text().replace("[0]", "[2]"))
+        manifest["files"]["board_ddr.rcf"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        manifest["ddr_route_constraints"]["sha256"] = manifest["files"]["board_ddr.rcf"]
+        with self.assertRaisesRegex(ValueError, "reviewed ioclk_gate"):
+            verify_staged_manifest(output, manifest)
 
     def test_cache_capacity_is_bound_to_native_compile_and_wrapper(self):
         output, _ = self.stage(backend="scoreboard", clock=1,
@@ -299,6 +349,7 @@ class HandoffTests(unittest.TestCase):
             verify_staged_manifest(output, changed)
         old = copy.deepcopy(manifest)
         old["schema_version"] = 5
+        self.legacy_route_metadata(old)
         del old["core_limited_integer_ooo"], old["core_scheduler_forward_mode"]
         path = output / "compile.tcl"
         path.write_text(compile_command(32, 0, 1, 1, 1, 1, 2, scoreboard=True,
@@ -322,6 +373,7 @@ class HandoffTests(unittest.TestCase):
                 verify_staged_manifest(output, changed)
         old = copy.deepcopy(manifest)
         old["schema_version"] = 6
+        self.legacy_route_metadata(old)
         del old["core_scheduler_forward_mode"]
         path = output / "compile.tcl"
         path.write_text(compile_command(32, 0, 1, 1, 1, 1, 2, scoreboard=True,
@@ -333,6 +385,7 @@ class HandoffTests(unittest.TestCase):
         output, _ = self.stage(backend="scoreboard")
         old = json.loads((output / "manifest.json").read_text())
         old["schema_version"] = 7
+        self.legacy_route_metadata(old)
         for key in ("soc_topology", "core_profile", "board_clock_domains_hz",
                     "clock_relationship", "mtime_clock_domain"):
             del old[key]
@@ -347,6 +400,7 @@ class HandoffTests(unittest.TestCase):
         output, _ = self.stage(backend="scoreboard")
         old = json.loads((output / "manifest.json").read_text())
         old.update(SCOREBOARD_CONFIGURATION, schema_version=4)
+        self.legacy_route_metadata(old)
         path = output / "compile.tcl"
         path.write_text(compile_command(32, 0, 1, 1, 1, 1, 2,
                                         scoreboard=True, soc_system=True) + "\n")
