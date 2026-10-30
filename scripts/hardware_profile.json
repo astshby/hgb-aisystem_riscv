@@ -70,10 +70,80 @@
       "ddr": 8000,
       "periph": 40000,
       "npu": 8000
+    },
+    "main60": {
+      "core": 10000,
+      "sys": 10000,
+      "ddr": 8000,
+      "periph": 16666.666666666668
+    },
+    "yolo60": {
+      "core": 11111.111111111111,
+      "sys": 10000,
+      "ddr": 8000,
+      "periph": 16666.666666666668,
+      "npu": 10000
+    },
+    "yolo60_core81": {
+      "core": 12222.222222222223,
+      "sys": 10000,
+      "ddr": 8000,
+      "periph": 16666.666666666668,
+      "npu": 10000
+    },
+    "main_margin2": {
+      "core": 11267.605633802817,
+      "sys": 10140.845070422536,
+      "ddr": 8000,
+      "periph": 14647.887323943662
+    },
+    "yolo_sys": {
+      "core": 11932.203389830509,
+      "sys": 9762.71186440678,
+      "ddr": 8000,
+      "periph": 15186.440677966102,
+      "npu": 10847.457627118643
     }
   },
   "native_board_profiles": {
     "target": 1,
-    "sys100": 4
+    "sys100": 4,
+    "yolo": 5,
+    "main60": 6,
+    "yolo60": 7,
+    "yolo60_core81": 8,
+    "main_margin2": 9,
+    "yolo_sys": 10
+  },
+  "application_clocks": {
+    "none": "main_margin2",
+    "yolo": "yolo_sys",
+    "minimind": "target"
+  },
+  "pll_profiles": {
+    "main_margin2": {
+      "reference_hz": 125000000,
+      "input_div": 10,
+      "multiply": 1,
+      "feedback_div": 71,
+      "output_div": {
+        "core": 10,
+        "sys": 9,
+        "periph": 13,
+        "npu": 9
+      }
+    },
+    "yolo_sys": {
+      "reference_hz": 125000000,
+      "input_div": 8,
+      "multiply": 1,
+      "feedback_div": 59,
+      "output_div": {
+        "core": 11,
+        "sys": 9,
+        "periph": 14,
+        "npu": 10
+      }
+    }
   }
 }

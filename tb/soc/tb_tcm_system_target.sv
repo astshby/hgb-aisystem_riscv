@@ -1,6 +1,8 @@
 // Module: tb_tcm_system_target
-// Description: Cycle-equivalent AXI TCM routing versus the full decoder under burst and response backpressure.
-module tb_tcm_system_target;
+// Description: AXI TCM permissions, registered write ownership, burst routing and response backpressure.
+module tb_tcm_system_target #(
+    parameter bit COMPARE_REFERENCE = 0
+);
     timeunit 1ns;
     timeprecision 1ps;
     import core_config_pkg::*;
@@ -10,9 +12,9 @@ module tb_tcm_system_target;
     import soc_config_pkg::*;
     logic clk = 0, rst = 1;
     axi_req_t axi_req = '0;
-    axi_rsp_t axi_rsp, reference_rsp;
-    logic [1:0] req_valid, reference_valid, req_ready, rsp_valid, rsp_ready, reference_ready;
-    bus_req_t request [2], reference_request [2];
+    axi_rsp_t axi_rsp;
+    logic [1:0] req_valid, req_ready, rsp_valid, rsp_ready;
+    bus_req_t request [2];
     logic [63:0] rsp_data [2];
     logic [1:0] pending_q;
     int delay_q [2];
@@ -22,15 +24,55 @@ module tb_tcm_system_target;
 
     always #5 clk = ~clk;
     tcm_system_target dut (.*);
-    tcm_system_target_reference reference_target (
-        .clk, .rst, .axi_req, .axi_rsp(reference_rsp), .req_valid(reference_valid),
-        .req_ready, .request(reference_request), .rsp_valid,
-        .rsp_ready(reference_ready), .rsp_data
-    );
+    if (COMPARE_REFERENCE) begin : g_reference
+        axi_rsp_t reference_rsp;
+        logic [1:0] reference_valid, reference_rsp_ready;
+        bus_req_t reference_request [2];
+        tcm_system_target_reference reference_target (
+            .clk, .rst, .axi_req, .axi_rsp(reference_rsp), .req_valid(reference_valid), .req_ready,
+            .request(reference_request), .rsp_valid, .rsp_ready(reference_rsp_ready), .rsp_data
+        );
+        always @(posedge clk) if (!rst) begin
+            assert ({axi_rsp.ar_ready, axi_rsp.aw_ready, axi_rsp.w_ready, axi_rsp.r_valid, axi_rsp.b_valid} ==
+                    {reference_rsp.ar_ready, reference_rsp.aw_ready, reference_rsp.w_ready, reference_rsp.r_valid, reference_rsp.b_valid} &&
+                    req_valid == reference_valid && rsp_ready == reference_rsp_ready)
+                else $fatal(1, "TCM reference handshake mismatch cycle=%0d", cycles);
+            for (int b = 0; b < 2; b++)
+                if (req_valid[b]) begin
+                    assert ({request[b].addr, request[b].size, request[b].write, request[b].execute} ==
+                            {reference_request[b].addr, reference_request[b].size, reference_request[b].write, reference_request[b].execute})
+                        else $fatal(1, "TCM reference local address mismatch cycle=%0d bank=%0d candidate=%h baseline=%h",
+                                    cycles,b,request[b],reference_request[b]);
+                    if (request[b].write)
+                        assert ({request[b].wdata, request[b].wstrb} ==
+                                {reference_request[b].wdata, reference_request[b].wstrb})
+                            else $fatal(1, "TCM reference local write mismatch cycle=%0d bank=%0d",cycles,b);
+                end
+            if (axi_rsp.r_valid) begin
+                assert ({axi_rsp.r.id, axi_rsp.r.resp, axi_rsp.r.last} ==
+                        {reference_rsp.r.id, reference_rsp.r.resp, reference_rsp.r.last})
+                    else $fatal(1, "TCM reference R mismatch cycle=%0d", cycles);
+                // AXI错误应答的数据无效；正常读回逐字比较。
+                if (axi_rsp.r.resp == AXI_OKAY) assert (axi_rsp.r.data == reference_rsp.r.data)
+                    else $fatal(1, "TCM reference read data mismatch cycle=%0d", cycles);
+            end
+            if (axi_rsp.b_valid) assert (axi_rsp.b == reference_rsp.b)
+                else $fatal(1, "TCM reference B mismatch cycle=%0d", cycles);
+        end
+    end
     // 两块独立本地响应模型插入不同反压；不使用 DUT 的地址译码来决定许可。
     for (genvar b = 0; b < 2; b++) begin : g_response
-        assign req_ready[b] = !rst && !pending_q[b] && cycles % (3+b) != 0;
+        assign req_ready[b] = !rst && !pending_q[b] && cycles % (23+b) > 11;
         assign rsp_valid[b] = pending_q[b] && delay_q[b] == 0;
+        bus_req_t held_request_q;
+        logic stalled_q = 0;
+        always @(posedge clk) begin
+            if (!rst && stalled_q)
+                assert (req_valid[b] && request[b] == held_request_q)
+                    else $fatal(1, "local TCM request changed under backpressure bank=%0d", b);
+            stalled_q = !rst && req_valid[b] && !req_ready[b];
+            held_request_q = request[b];
+        end
         always_ff @(posedge clk) begin
             if (rst) begin
                 pending_q[b] <= 0;
@@ -42,6 +84,7 @@ module tb_tcm_system_target;
                 if (delay_q[b] != 0) delay_q[b] <= delay_q[b]-1;
                 if (rsp_valid[b] && rsp_ready[b]) pending_q[b] <= 0;
                 if (req_valid[b] && req_ready[b]) begin
+                    assert (!pending_q[b]) else $fatal(1, "local request ownership overwritten");
                     pending_q[b] <= 1;
                     delay_q[b] <= 2+b;
                     rsp_data[b] <= 64'h5a73c209d41e860f ^ 64'(request[b].addr);
@@ -54,10 +97,6 @@ module tb_tcm_system_target;
     always @(posedge clk) begin
         cycles <= cycles+1;
         if (!rst) begin
-            assert (axi_rsp == reference_rsp && req_valid == reference_valid &&
-                    rsp_ready == reference_ready && request[0] == reference_request[0] &&
-                    request[1] == reference_request[1])
-                else $fatal(1, "TCM routing differs from full-decoder baseline cycle=%0d", cycles);
             assert ($onehot0(req_valid)) else $fatal(1, "TCM request reached two regions");
             checks++;
         end
@@ -105,7 +144,7 @@ module tb_tcm_system_target;
         for (int beat = 0; beat < beats; beat++) begin
             axi_req.w_valid = 1;
             axi_req.w = '{data:{8{32'h91c4e207 ^ 32'(beat)}},
-                          strb:(32'hffffffff >> (32-(1 << size))) << address[4:0],last:beat == beats-1};
+                          strb:(32'hffffffff >> (32-(1 << size))) << ((address + (32'(beat) << size)) % 32),last:beat == beats-1};
             do @(posedge clk); while (!axi_rsp.w_ready);
             @(negedge clk); axi_req.w_valid = 0;
             if (data_first && beat == 0) begin
@@ -148,6 +187,10 @@ module tb_tcm_system_target;
         read_case(32'hffffffff,2,1,0,AXI_SLVERR);
         write_case(ITCM_BASE+ITCM_BYTES,2,1,1,AXI_SLVERR);
         write_case(DTCM_BASE+DTCM_BYTES-4,2,1,0,AXI_OKAY);
+        for (int size = 0; size <= 4; size++) begin
+            write_case(ITCM_BASE+64-(1 << size),size,4,1,AXI_OKAY);
+            write_case(DTCM_BASE+64-(1 << size),size,4,0,AXI_OKAY);
+        end
         write_case(ITCM_BASE+128,5,2,1,AXI_OKAY);
         write_case(DTCM_BASE+128,5,2,0,AXI_OKAY);
         // 同时悬挂读写，检查 AXI scalar 交替许可和 region/response owner 不串扰。
@@ -162,48 +205,4 @@ module tb_tcm_system_target;
         $finish;
     end
     initial begin #2ms; $fatal(1, "TCM system target timeout"); end
-endmodule
-
-// Module: tcm_system_target_reference
-// Description: Full-decoder cycle reference retained from b346de9 before the local TCM decode change.
-module tcm_system_target_reference (
-    input logic clk, rst,
-    input axi_types_pkg::axi_req_t axi_req,
-    output axi_types_pkg::axi_rsp_t axi_rsp,
-    output logic [1:0] req_valid,
-    input logic [1:0] req_ready,
-    output bus_types_pkg::bus_req_t request [2],
-    input logic [1:0] rsp_valid,
-    output logic [1:0] rsp_ready,
-    input logic [63:0] rsp_data [2]
-);
-    timeunit 1ns;
-    timeprecision 1ps;
-    import bus_types_pkg::*;
-    logic v, ready, rv, rr, active_q, bank_q, error_q;
-    bus_req_t r;
-    bus_rsp_t p;
-    bus_target_e target;
-    bus_error_e access_error;
-    logic bank, legal;
-    axi_bus_target u_target (.clk,.rst,.axi_req,.axi_rsp,.req_valid(v),.req_ready(ready),.request(r),
-        .rsp_valid(rv),.rsp_ready(rr),.response(p));
-    address_decode u_decode (.request(r),.target,.error(access_error));
-    assign bank = target == TARGET_DTCM;
-    assign legal = access_error == BUS_OK && (target == TARGET_ITCM || target == TARGET_DTCM);
-    assign ready = !active_q && (!legal || req_ready[bank]);
-    assign rv = active_q && (error_q || rsp_valid[bank_q]);
-    assign p = '{rdata:core_types_pkg::xlen_t'(rsp_data[bank_q]),error:error_q ? BUS_SLVERR : BUS_OK};
-    for (genvar b = 0; b < 2; b++) begin : g_bank
-        assign request[b] = r;
-        assign req_valid[b] = v && !active_q && legal && bank == 1'(b);
-        assign rsp_ready[b] = rr && active_q && !error_q && bank_q == 1'(b);
-    end
-    always_ff @(posedge clk) begin
-        if (rst) begin active_q <= 0; bank_q <= 0; error_q <= 0; end
-        else begin
-            if (v && ready) begin active_q <= 1; bank_q <= bank; error_q <= !legal; end
-            if (rv && rr) active_q <= 0;
-        end
-    end
 endmodule

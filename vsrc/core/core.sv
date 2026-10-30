@@ -450,7 +450,7 @@ module core (
         .retire_ready(!rst), .retire_fire(queue_retire_fire),
         .retire_ready_1(second_retire_ready), .retire_fire_1(queue_retire_fire_1),
         .occupancy(retire_occupancy), .recovering(retire_recovering),
-        .probe_id(legacy_probe_id), .probe_accept()
+        .probe_id(legacy_probe_id), .probe_accept(), .probe_live()
     );
     assign second_retire_ready = !rst && (ISSUE_WIDTH == 2) && !head_result.exc.valid &&
         !(head_meta.kind inside {RET_CSR, RET_SERIAL}) && head_meta_1.kind == RET_EXEC &&

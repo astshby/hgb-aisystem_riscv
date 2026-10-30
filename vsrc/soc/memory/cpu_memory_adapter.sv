@@ -66,8 +66,10 @@ module cpu_memory_adapter #(
     import core_types_pkg::*;
     import bus_types_pkg::*;
     import pipeline_pkg::*;
-    typedef enum logic [1:0] {SLOW, ITCM, DTCM} route_e;
+    typedef enum logic [2:0] {SLOW = 3'b001, ITCM = 3'b010, DTCM = 3'b100} route_e;
     route_e route [2], route_q [2];
+    logic [2:0] incoming_route [2], queued_route [2];
+    bus_req_t incoming_request [2];
     bus_req_t request [2], dc_request [2], if_request;
     bus_rsp_t response [2], dc_response [2];
     logic [1:0] itcm_ok, dtcm_ok;
@@ -81,10 +83,19 @@ module cpu_memory_adapter #(
     logic [1:0] ic_rsp_error;
 
     for (genvar p = 0; p < 2; p++) begin : g_tagged_port
-        tagged_request_queue u_request_queue (
+        assign incoming_request[p] = '{addr:data_request[p].address, write:data_request[p].write,
+            execute:1'b0, size:data_request[p].size,
+            wdata:data_request[p].wdata, wstrb:data_request[p].wstrb};
+        // 资格只依赖地址/访问类型，在原有队列入口译码并同槽寄存。
+        // active、响应反压、Cache维护仍在出队时判断，不能当作静态资格提前固定。
+        tcm_address_decode u_decode (.request(incoming_request[p]),
+            .itcm_ok(itcm_ok[p]), .dtcm_ok(dtcm_ok[p]));
+        assign incoming_route[p] = {dtcm_ok[p], itcm_ok[p], !(itcm_ok[p] || dtcm_ok[p])};
+        assign route[p] = route_e'(queued_route[p]);
+        tagged_request_queue #(.META_WIDTH(3)) u_request_queue (
             .clk, .rst, .in_valid(data_req_valid[p]), .in_ready(data_req_ready[p]),
             .in_request(data_request[p]), .out_valid(req_valid[p]), .out_ready(req_ready[p]),
-            .out_request(buffered_request[p])
+            .out_request(buffered_request[p]), .in_metadata(incoming_route[p]), .out_metadata(queued_route[p])
         );
         assign request[p] = '{addr:buffered_request[p].address, write:buffered_request[p].write,
             execute:1'b0, size:buffered_request[p].size,
@@ -98,13 +109,6 @@ module cpu_memory_adapter #(
     assign rsp_fire = rsp_valid & rsp_ready;
     assign available = ~active_q | rsp_fire;
     for (genvar p = 0; p < 2; p++) begin : g_route
-        // 本地资格直接从请求产生，避免全系统目标编码/外设权限归约进入 TCM ready 链。
-        tcm_address_decode u_decode (.request(request[p]), .itcm_ok(itcm_ok[p]), .dtcm_ok(dtcm_ok[p]));
-        always_comb begin
-            route[p] = SLOW;
-            if (itcm_ok[p]) route[p] = ITCM;
-            else if (dtcm_ok[p]) route[p] = DTCM;
-        end
         always_ff @(posedge clk) begin
             if (rst) begin active_q[p] <= 0; route_q[p] <= SLOW; end
             else begin

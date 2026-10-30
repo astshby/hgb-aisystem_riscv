@@ -5,6 +5,7 @@ module mm3_accel #(
     parameter int unsigned MAC_LANES = mm3_config_pkg::MM3_GEMV_LANES
 ) (
     input logic clk, rst,
+    output logic irq,
     input logic req_valid,
     output logic req_ready,
     input bus_types_pkg::bus_req_t request,
@@ -28,6 +29,8 @@ module mm3_accel #(
     input block_types_pkg::block_b_t wr_rsp
 );
     import bus_types_pkg::*;import block_types_pkg::*;
+    logic legacy_irq;
+    assign irq = complete || error || legacy_irq;
     logic select_ext,owner_valid,owner_ext,accept_slot;
     logic l_req_ready,l_rsp_valid,l_rsp_ready,l_req_valid,legacy_busy;
     bus_rsp_t l_response,e_response;
@@ -72,7 +75,7 @@ module mm3_accel #(
     end
     mmio_endpoint u_ext_mmio(.clk,.rst,.req_valid(e_req_valid),.req_ready(e_req_ready),.request,.rsp_valid(e_rsp_valid),.rsp_ready(e_rsp_ready),.response(e_response),.read_data,.access_error,.access_fire,.write_data,.write_mask);
     mm3_gemv_accel #(.DDR_BYTES(DDR_BYTES),.MAC_LANES(MAC_LANES)) u_gemv(
-        .clk,.rst,.busy_out(legacy_busy),.req_valid(l_req_valid),.req_ready(l_req_ready),.request,.rsp_valid(l_rsp_valid),.rsp_ready(l_rsp_ready),.response(l_response),
+        .clk,.rst,.busy_out(legacy_busy),.irq(legacy_irq),.req_valid(l_req_valid),.req_ready(l_req_ready),.request,.rsp_valid(l_rsp_valid),.rsp_ready(l_rsp_ready),.response(l_response),
         .rd_cmd_valid(crdv[0]),.rd_cmd_ready(crdr[0]),.rd_cmd(crcmd[0]),.rd_valid(crv[0]),.rd_ready(crr[0]),.rd_data(crdata[0]),
         .wr_cmd_valid(cwdv[0]),.wr_cmd_ready(cwdr[0]),.wr_cmd(cwcmd[0]),.wr_valid(cwv[0]),.wr_ready(cwr[0]),.wr_data(cwdata[0]),.wr_rsp_valid(cbv[0]),.wr_rsp_ready(cbr[0]),.wr_rsp(cbdata[0]));
     mm3_ops_engine #(.DDR_BYTES(DDR_BYTES)) u_ops(.clk,.rst,.start(launch),.descriptor_address(descriptor),.expected_op(opcode),.busy(),.done(engine_done),.failed(engine_failed),.error_code(engine_error),.saturated(engine_sat),.underflow(engine_under),

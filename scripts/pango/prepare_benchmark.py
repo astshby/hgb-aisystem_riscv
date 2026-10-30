@@ -26,7 +26,9 @@ def compile_tcm(config):
 def constraints(config):
     lines=['# Runnable TCM configuration; external clocks, no board pin or CDC timing closure claim.']
     for d in config['domains']:
-        lines += [f'create_clock -name {{clk_{d}}} -period {{{config["periods_ps"][d]/1000:g}}} [get_ports {{clk_{d}}}]',
+        period = format(config['periods_ps'][d]/1000,
+                        '.15g' if config.get('native_board_profile', 0) in (9, 10) else 'g')
+        lines += [f'create_clock -name {{clk_{d}}} -period {{{period}}} [get_ports {{clk_{d}}}]',
                   f'set_clock_uncertainty -setup 0.2 [get_clocks {{clk_{d}}}]',
                   f'set_clock_uncertainty -hold 0.05 [get_clocks {{clk_{d}}}]']
     return '\n'.join(lines)+'\n'
@@ -63,7 +65,7 @@ def stage(output, config, bundle, sim_receipt, ip_dir=None):
             inputs=set(board.sources(ROOT,'scripts/pango_files.f')) | set((ROOT/'scripts').glob('*.f'))
             inputs.update(ROOT/'scripts/pango'/name for name in (
                 'prepare_project.py','check_ip_dq.py','mes2l676_200hp.fdc',
-                'implement.tcl','memory_gate.ps1','memory_guard.ps1'))
+                'implement.tcl','implement_cdc.tcl','memory_gate.ps1','memory_guard.ps1'))
             for path in inputs:
                 dest=source/path.relative_to(ROOT)
                 dest.parent.mkdir(parents=True,exist_ok=True)
@@ -74,7 +76,10 @@ def stage(output, config, bundle, sim_receipt, ip_dir=None):
                 shutil.copyfile(bundle/image['directory']/original,loader/dest)
             command=[sys.executable,str(source/'scripts/pango/prepare_project.py'),'--output',str(output),
                      '--ip-dir',str(ip_dir.resolve()),'--core-backend','scoreboard',
-                     '--board-clock-profile',str(config['native_board_profile'])]
+                     '--board-clock-profile',str(config['native_board_profile']),
+                     '--icache-bytes',str(config['memory']['icache_bytes']),
+                     '--dcache-bytes',str(config['memory']['dcache_bytes']),
+                     '--dcache-bank-xor-mask',str(config['memory'].get('dcache_bank_xor_mask',0))]
             if config.get('npu_enable'): command += ['--npu-enable']
             for name,macro in flags.items(): command += ['--'+name,str(m[macro])]
             subprocess.run(command,check=True,cwd=source)
@@ -89,10 +94,10 @@ def stage(output, config, bundle, sim_receipt, ip_dir=None):
             shutil.copyfile(ROOT/p,output/p)
         (output/'benchmark.fdc').write_text(constraints(config))
         commands=['set_arch -family Logos2 -device PG2L200H -package FBB676 -speedgrade -6',
-                  'set_option max_threads 1',*[f'add_design {{{p.as_posix()}}}' for p in rtl],
+                  'set_option max_threads 8',*[f'add_design {{{p.as_posix()}}}' for p in rtl],
                   'add_constraint {benchmark.fdc}',compile_tcm(config)]
         (output/'compile.tcl').write_text('\n'.join(commands)+'\n')
-        for name in ('implement.tcl','memory_gate.ps1','memory_guard.ps1'):
+        for name in ('implement.tcl','implement_cdc.tcl','memory_gate.ps1','memory_guard.ps1'):
             shutil.copyfile(ROOT/'scripts/pango'/name,output/name)
     (output/'firmware').mkdir(exist_ok=True)
     for name in ('imem.hex','dmem.hex','program.elf'):
@@ -112,7 +117,7 @@ def stage(output, config, bundle, sim_receipt, ip_dir=None):
         'set bench_root [file dirname [info script]]\n'
         'puts [exec powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass '
         '-File [file join $bench_root memory_gate.ps1] -LogDirectory [file join $bench_root memory] -Phase synthesis]\n'
-        'source [file join $bench_root compile.tcl]\nset_option max_threads 1\n'
+        'source [file join $bench_root compile.tcl]\nset_option max_threads 8\n'
         'synthesize -ads -selected_syn_tool_opt 2 -max_path 100 -nworst 3 -report_logic_level_distribution -report_exception TRUE\n')
     for name in ('benchmark_config.py','benchmark_platforms.json','hardware_config.py','hardware_profile.json'):
         shutil.copyfile(ROOT/'scripts'/name,output/name)
@@ -132,7 +137,7 @@ def stage(output, config, bundle, sim_receipt, ip_dir=None):
 def verify(root):
     manifest=json.loads((root/'benchmark.json').read_text())
     c=manifest['config']
-    if c!=configuration(c['platform'],c['clock'],c['xlen']): raise ValueError('platform configuration changed')
+    if c!=configuration(c['platform'],c['clock'],c['xlen'],c['memory']['icache_bytes'],c['memory']['dcache_bytes'],c['memory'].get('dcache_bank_xor_mask',0)): raise ValueError('platform configuration changed')
     for name,digest in manifest['files'].items():
         if sha(root/name)!=digest: raise ValueError('modified PDS input: '+name)
     sim=json.loads((root/'simulation-build.json').read_text())
@@ -158,6 +163,9 @@ def main():
     parser.add_argument('--platform',choices=CONFIG['platforms'])
     parser.add_argument('--clock',choices=CONFIG['clock_periods_ps'],default='target')
     parser.add_argument('--bundle',type=Path)
+    parser.add_argument('--icache-bytes',type=int)
+    parser.add_argument('--dcache-bytes',type=int)
+    parser.add_argument('--dcache-bank-xor-mask',type=int,choices=[0,1,2,3],default=0)
     parser.add_argument('--ip-dir',type=Path)
     parser.add_argument('--sim-receipt',type=Path)
     parser.add_argument('--verify',action='store_true')
@@ -166,7 +174,7 @@ def main():
         verify(args.output.resolve()); print('PASS paired PDS inputs'); return
     if not args.platform or not args.bundle or not args.sim_receipt:
         parser.error('--platform, --bundle and --sim-receipt are required for staging')
-    stage(args.output.resolve(),configuration(args.platform,args.clock),args.bundle.resolve(),args.sim_receipt.resolve(),args.ip_dir)
+    stage(args.output.resolve(),configuration(args.platform,args.clock,32,args.icache_bytes,args.dcache_bytes,args.dcache_bank_xor_mask),args.bundle.resolve(),args.sim_receipt.resolve(),args.ip_dir)
 
 
 if __name__=='__main__':

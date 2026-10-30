@@ -1,6 +1,7 @@
 // Module: mmio_bus
 // Description: Peripheral-domain register bus; DMA and Flash engines attach through command mailboxes.
 module mmio_bus #(
+    parameter bit ACCEL_IRQ_ENABLE = 1'b0,
     parameter int unsigned DDR_BYTES = 0,
     parameter int unsigned FLASH_BYTES = 0,
     parameter int unsigned NPU_BYTES = 0,
@@ -37,6 +38,7 @@ module mmio_bus #(
     output logic dma_rsp_ready,
     input bus_types_pkg::bus_rsp_t dma_response,
     input logic dma_irq,
+    input logic [1:0] accelerator_irq = '0,
     output logic flash_req_valid,
     input logic flash_req_ready,
     output bus_types_pkg::bus_req_t flash_request,
@@ -120,8 +122,13 @@ module mmio_bus #(
         .request(device_request[4]), .rsp_valid(device_rsp_valid[4]), .rsp_ready(device_rsp_ready[4]),
         .response(device_response[4]), .irq_software, .irq_timer
     );
-    irq_controller u_irq (
-        .clk, .rst, .sources({dma_irq, gpio_irq, timer_irq, uart_irq}), .irq(irq_external),
+    localparam int IRQ_SOURCES = ACCEL_IRQ_ENABLE ? 9 : 7;
+    logic [IRQ_SOURCES-1:0] interrupt_sources;
+    assign interrupt_sources = ACCEL_IRQ_ENABLE ?
+        IRQ_SOURCES'({accelerator_irq, dma_irq, gpio_irq, timer_irq, uart_irq}) :
+        IRQ_SOURCES'({dma_irq, gpio_irq, timer_irq, uart_irq});
+    irq_controller #(.SOURCES(IRQ_SOURCES)) u_irq (
+        .clk, .rst, .sources(interrupt_sources), .irq(irq_external),
         .req_valid(device_req_valid[5]), .req_ready(device_req_ready[5]), .request(device_request[5]),
         .rsp_valid(device_rsp_valid[5]), .rsp_ready(device_rsp_ready[5]), .response(device_response[5])
     );

@@ -40,7 +40,7 @@ module tb_mm3_accel #(parameter int unsigned MAC_LANES = mm3_config_pkg::MM3_GEM
     logic checking = 0;
     always #5 clk = ~clk;
     always @(posedge clk) cycles <= cycles+1;
-    mm3_gemv_accel #(.DDR_BYTES(8*1024*1024),.MAC_LANES(MAC_LANES)) dut (.busy_out(), .*);
+    mm3_gemv_accel #(.DDR_BYTES(8*1024*1024),.MAC_LANES(MAC_LANES)) dut (.busy_out(), .irq(), .*);
     block_to_axi #(.DDR_BYTES(8*1024*1024)) bridge (.*);
     axi_block_memory_model #(.BYTES(8*1024*1024)) memory (.*);
     function automatic logic [31:0] get32();

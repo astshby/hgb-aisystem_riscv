@@ -1,5 +1,14 @@
 # 项目配置与测量
 
+本 all 分支用于联合仿真，包含两套加速器、三套交互程序及 RT-Thread。共享性能源以18598a6为基点，
+同步C9/C10时钟、CMP载荷分离及操作数完成预览；这些源码调整没有新的综合/布线成绩。
+双核入口为`vsrc/soc/soc_all_system.sv`，使用`make all-system-test XLEN=32|64`执行真实Core小程序。
+YOLO为0x20000000/64KiB、MiniMind为0x20010000/4KiB，PLIC源8/9；两个设备同时实例化，
+不再只是二选一保留源码。MiniMind DDR master与可选显示口在现有external master前独立读写仲裁。
+原始模型软件、单应用回归和完整YOLO程序保留；完整MiniMind/双核模型推理、布局布线及上板未做。
+RT-Thread只在本发布分支保留，不参与裸机CoreMark。MiniMind数学/RAM待修不在本次共享接口修改范围。
+
+
 ## 目录与公共配置
 
 `vsrc/core` 保存共享 Core，`vsrc/soc` 保存 TCM/Cache、AXI、DMA、MMIO 和跨域接口，

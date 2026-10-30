@@ -1,5 +1,17 @@
 # FPGA 适配与综合
 
+本 all 分支仅仿真，不生成第四份物理镜像。双核同挂载使用soc_all_system；板级pango_200hp_top仍是
+单应用壳，不能将其二选一布局布线结果登记为双核结果。无NPU、YOLO、MiniMind的物理调试分别在
+main、yolo、minimind分支进行。已有无NPU物理Core90.6208MHz等结果只对应原b94580c及交互固件，
+新增双核/HDMI/共享Core修改没有P&R数据。MiniMind多写RAM推断问题尚未修复。
+
+联合仿真前检查两个独立窗口、PLIC源8/9、软件MM3_MMIO_BASE与顶层一致；共同复位同时清CDC两端。
+MiniMind和显示在external口的读写owner各独立，突发最多四拍，轮询起点在真实响应完成后转移。
+HDMI是否无欠载须另测带宽竞争；小程序地址/中断/GEMV通过不能代替完整视频模型或物理时序验收。
+C9/C10时钟入口、原生CDC工具、normal种子对照及独立timing-v2/v3脚本均保留，未执行PDS。
+Windows PDS原始产物继续留PDS_WORK_ROOT，仿真日志与固件留主工作区logs/build。
+
+
 ## 配置与入口
 
 Windows PDS 2025.2 ADS，器件 PG2L200H-6IFBB676，HMIC_S 1.10 DDR3 IP。

@@ -4,8 +4,10 @@ module axi_system_fabric #(
     parameter int MASTERS = 4,
     parameter int DDR_BYTES = 0,
     parameter int FLASH_BYTES = 0,
+    parameter bit VIDEO_ENABLE = 1'b0,
     parameter int NPU_BYTES = 0,
-    parameter int TARGETS = 7
+    parameter int MM3_BYTES = 0,
+    parameter int TARGETS = MM3_BYTES != 0 ? 8 : 7
 ) (
     input logic clk, rst,
     input axi_types_pkg::axi_req_t m_req [MASTERS],
@@ -41,6 +43,10 @@ module axi_system_fabric #(
     logic [TARGETS-1:0] owner_valid, owner_ready, owner_pop;
     write_owner_t owner_in [TARGETS], owner_head [TARGETS];
     logic [7:0] write_beat_q [TARGETS];
+    logic [MASTERS-1:0] ar_eligible [TARGETS], aw_eligible [TARGETS];
+    logic [MASTERS-1:0] ar_grant [TARGETS], aw_grant [TARGETS], w_grant [TARGETS];
+    logic [TARGETS-1:0] r_eligible [MASTERS], b_eligible [MASTERS];
+    logic [TARGETS-1:0] r_grant [MASTERS], b_grant [MASTERS];
 
     function automatic logic fits(input logic [31:0] addr, input logic [32:0] limit,
                                   input logic [31:0] base, input int unsigned bytes);
@@ -60,20 +66,31 @@ module axi_system_fabric #(
         if (!a.prot[2] && a.len == 0 && a.size <= 3 &&
             (fits(a.addr, limit, MTIME_BASE, 65536) ||
              fits(a.addr, limit, IRQ_BASE, 4194304) ||
-             fits(a.addr, limit, UART0_BASE, 32'h00070000))) return 4;
+             fits(a.addr, limit, UART0_BASE, VIDEO_ENABLE ? 32'h00080000 : 32'h00070000))) return 4;
         if (!writing && !a.prot[2] && fits(a.addr, limit, FLASH_BASE, FLASH_BYTES)) return 5;
         if (!a.prot[2] && fits(a.addr, limit, NPU_SRAM_BASE, NPU_BYTES)) return 6;
+        if (!a.prot[2] && fits(a.addr, limit, MM3_AXI_BASE, MM3_BYTES)) return 7;
         return 0;
     endfunction
-    function automatic int rotate_master(input owner_t start, input int offset);
-        int sum;
-        sum=int'(start)+offset;
-        return sum>=MASTERS ? sum-MASTERS : sum;
+    // 固定编号并行屏蔽轮询起点之前的请求，前缀归约只选中最先的一项。
+    function automatic logic [MASTERS-1:0] choose_master(
+        input logic [MASTERS-1:0] eligible, input owner_t first);
+        logic [MASTERS-1:0] masked, candidates, grant;
+        for (int i = 0; i < MASTERS; i++) masked[i] = eligible[i] && owner_t'(i) >= first;
+        candidates = |masked ? masked : eligible;
+        for (int i = 0; i < MASTERS; i++)
+            grant[i] = candidates[i] && !(|(candidates & ((MASTERS'(1) << i)-1'b1)));
+        return grant;
     endfunction
-    function automatic int rotate_target(input target_t start, input int offset);
-        int sum;
-        sum=int'(start)+offset;
-        return sum>=TARGETS ? sum-TARGETS : sum;
+    // 固定编号并行屏蔽轮询起点之前的请求，前缀归约只选中最先的一项。
+    function automatic logic [TARGETS-1:0] choose_target(
+        input logic [TARGETS-1:0] eligible, input target_t first);
+        logic [TARGETS-1:0] masked, candidates, grant;
+        for (int i = 0; i < TARGETS; i++) masked[i] = eligible[i] && target_t'(i) >= first;
+        candidates = |masked ? masked : eligible;
+        for (int i = 0; i < TARGETS; i++)
+            grant[i] = candidates[i] && !(|(candidates & ((TARGETS'(1) << i)-1'b1)));
+        return grant;
     endfunction
     for (genvar m = 0; m < MASTERS; m++) begin : g_master
         axi_register_slice u_entry (.clk, .rst, .s_req(m_req[m]), .s_rsp(m_rsp[m]),
@@ -147,8 +164,35 @@ module axi_system_fabric #(
         end
     end
 
+    // 资格只读固定主端/目标，避免旋转索引把宽载荷和 ready 串成优先选择链。
+    // 锁定请求先限制候选，轮询起点和反压期间的 owner 与原协议相同。
+    for (genvar t = 0; t < TARGETS; t++) begin : g_address_grant
+        for (genvar m = 0; m < MASTERS; m++) begin : g_master_candidate
+            assign ar_eligible[t][m] = in_req[m].ar_valid && rd_target[m] == target_t'(t) &&
+                !rd_busy_q[m][in_req[m].ar.id[1:0]] && (!ar_locked_q[t] || ar_owner_q[t] == owner_t'(m));
+            assign aw_eligible[t][m] = in_req[m].aw_valid && wr_target[m] == target_t'(t) &&
+                !wr_busy_q[m][in_req[m].aw.id[1:0]] && route_ready[m] && owner_ready[t] &&
+                (!aw_locked_q[t] || aw_owner_q[t] == owner_t'(m));
+            // W 无 ID，必须同时匹配主端目标队列和目标 owner 队列。
+            assign w_grant[t][m] = owner_valid[t] && owner_head[t].owner == owner_t'(m) &&
+                route_valid[m] && route_head[m] == target_t'(t);
+        end
+        assign ar_grant[t] = choose_master(ar_eligible[t], rd_next_q[t]);
+        assign aw_grant[t] = choose_master(aw_eligible[t], wr_next_q[t]);
+    end
+    for (genvar m = 0; m < MASTERS; m++) begin : g_response_grant
+        for (genvar t = 0; t < TARGETS; t++) begin : g_target_candidate
+            assign r_eligible[m][t] = out_rsp[t].r_valid && out_rsp[t].r.id[3:2] == owner_t'(m) &&
+                (!r_locked_q[m] || r_owner_q[m] == target_t'(t));
+            assign b_eligible[m][t] = out_rsp[t].b_valid && out_rsp[t].b.id[3:2] == owner_t'(m) &&
+                (!b_locked_q[m] || b_owner_q[m] == target_t'(t));
+        end
+        assign r_grant[m] = choose_target(r_eligible[m], r_next_q[m]);
+        assign b_grant[m] = choose_target(b_eligible[m], b_next_q[m]);
+    end
+
     // 仲裁只进入出口 FIFO；即使新主端到达，已经展示给设备的地址/载荷也不会改变。
-    // AW 同时登记主端目标序列和目标 W 所有者。W 无 ID，严格遵守这两份序列。
+    // 独热授权分别归约载荷和窄握手；AW 同拍登记两份 W 顺序，仍可每拍接受。
     always_comb begin
         aw_fire = '0; ar_fire = '0; b_fire = '0; rlast_fire = '0;
         target_aw_fire = '0; target_ar_fire = '0;
@@ -157,72 +201,62 @@ module axi_system_fabric #(
             in_rsp[m] = '0; r_selected[m] = 0; b_selected[m] = 0;
         end
         for (int t = 0; t < TARGETS; t++) begin
-            int write_master;
-            write_master = int'(owner_head[t].owner);
             out_req[t] = '0;
             aw_owner[t] = '0; ar_owner[t] = '0;
-            for (int offset = 0; offset < MASTERS; offset++) begin
-                int m;
-                m = rotate_master(rd_next_q[t],offset);
-                if (!out_req[t].ar_valid && (!ar_locked_q[t] || ar_owner_q[t] == owner_t'(m)) && in_req[m].ar_valid && rd_target[m] == target_t'(t) &&
-                    !rd_busy_q[m][in_req[m].ar.id[1:0]]) begin
-                    out_req[t].ar_valid = 1'b1;
-                    out_req[t].ar = in_req[m].ar;
-                    out_req[t].ar.id = {owner_t'(m), in_req[m].ar.id[1:0]};
-                    in_rsp[m].ar_ready = out_rsp[t].ar_ready;
-                    ar_owner[t] = owner_t'(m);
-                    ar_fire[m] = out_rsp[t].ar_ready;
-                    target_ar_fire[t] = out_rsp[t].ar_ready;
-                end
-                m = rotate_master(wr_next_q[t],offset);
-                if (!out_req[t].aw_valid && (!aw_locked_q[t] || aw_owner_q[t] == owner_t'(m)) && in_req[m].aw_valid && wr_target[m] == target_t'(t) &&
-                    !wr_busy_q[m][in_req[m].aw.id[1:0]] && route_ready[m] && owner_ready[t]) begin
-                    out_req[t].aw_valid = 1'b1;
-                    out_req[t].aw = in_req[m].aw;
-                    out_req[t].aw.id = {owner_t'(m), in_req[m].aw.id[1:0]};
-                    in_rsp[m].aw_ready = out_rsp[t].aw_ready;
-                    aw_owner[t] = owner_t'(m);
-                    aw_fire[m] = out_rsp[t].aw_ready;
-                    target_aw_fire[t] = out_rsp[t].aw_ready;
-                end
+            out_req[t].ar_valid = |ar_grant[t];
+            out_req[t].aw_valid = |aw_grant[t];
+            target_ar_fire[t] = out_req[t].ar_valid && out_rsp[t].ar_ready;
+            target_aw_fire[t] = out_req[t].aw_valid && out_rsp[t].aw_ready;
+            for (int m = 0; m < MASTERS; m++) begin
+                out_req[t].ar |= in_req[m].ar & {$bits(axi_a_t){ar_grant[t][m]}};
+                out_req[t].aw |= in_req[m].aw & {$bits(axi_a_t){aw_grant[t][m]}};
+                ar_owner[t] |= owner_t'(m) & {AXI_MASTER_W{ar_grant[t][m]}};
+                aw_owner[t] |= owner_t'(m) & {AXI_MASTER_W{aw_grant[t][m]}};
+                in_rsp[m].ar_ready |= ar_grant[t][m] && out_rsp[t].ar_ready;
+                in_rsp[m].aw_ready |= aw_grant[t][m] && out_rsp[t].aw_ready;
+                ar_fire[m] |= ar_grant[t][m] && out_rsp[t].ar_ready;
+                aw_fire[m] |= aw_grant[t][m] && out_rsp[t].aw_ready;
+                out_req[t].w_valid |= w_grant[t][m] && in_req[m].w_valid;
+                out_req[t].w |= in_req[m].w & {$bits(axi_w_t){w_grant[t][m]}};
+                in_rsp[m].w_ready |= w_grant[t][m] && out_rsp[t].w_ready;
+                // 以 AWLEN 消耗数据数量，错误 WLAST 留给目标报告，不能偷用下一笔 W。
+                route_pop[m] |= w_grant[t][m] && in_req[m].w_valid && out_rsp[t].w_ready &&
+                    write_beat_q[t] == owner_head[t].len;
             end
-            if (owner_valid[t]) begin
-                if (route_valid[write_master] && route_head[write_master] == target_t'(t)) begin
-                    out_req[t].w_valid = in_req[write_master].w_valid;
-                    out_req[t].w = in_req[write_master].w;
-                    in_rsp[write_master].w_ready = out_rsp[t].w_ready;
-                    // 以 AWLEN 消耗数据数量，错误 WLAST 留给目标报告，不能偷用下一笔 W。
-                    if (in_req[write_master].w_valid && out_rsp[t].w_ready && write_beat_q[t] == owner_head[t].len) begin
-                        owner_pop[t] = 1'b1;
-                        route_pop[write_master] = 1'b1;
-                    end
-                end
-            end
+            out_req[t].ar.id[3:2] = ar_owner[t];
+            out_req[t].aw.id[3:2] = aw_owner[t];
+            owner_pop[t] = out_req[t].w_valid && out_rsp[t].w_ready && write_beat_q[t] == owner_head[t].len;
         end
         for (int m = 0; m < MASTERS; m++) begin
-            for (int offset = 0; offset < TARGETS; offset++) begin
-                int t;
-                t = rotate_target(r_next_q[m],offset);
-                if (!in_rsp[m].r_valid && (!r_locked_q[m] || r_owner_q[m] == target_t'(t)) && out_rsp[t].r_valid && int'(out_rsp[t].r.id[3:2]) == m) begin
-                    in_rsp[m].r_valid = 1'b1; r_selected[m] = target_t'(t);
-                    in_rsp[m].r = out_rsp[t].r;
-                    in_rsp[m].r.id = axi_id_t'(out_rsp[t].r.id[1:0]);
-                    out_req[t].r_ready = in_req[m].r_ready;
-                    rlast_fire[m] = in_req[m].r_ready && out_rsp[t].r.last;
-                end
-                t = rotate_target(b_next_q[m],offset);
-                if (!in_rsp[m].b_valid && (!b_locked_q[m] || b_owner_q[m] == target_t'(t)) && out_rsp[t].b_valid && int'(out_rsp[t].b.id[3:2]) == m) begin
-                    in_rsp[m].b_valid = 1'b1; b_selected[m] = target_t'(t);
-                    in_rsp[m].b = out_rsp[t].b;
-                    in_rsp[m].b.id = axi_id_t'(out_rsp[t].b.id[1:0]);
-                    out_req[t].b_ready = in_req[m].b_ready;
-                    b_fire[m] = in_req[m].b_ready;
-                end
+            in_rsp[m].r_valid = |r_grant[m];
+            in_rsp[m].b_valid = |b_grant[m];
+            rlast_fire[m] = in_req[m].r_ready;
+            b_fire[m] = in_rsp[m].b_valid && in_req[m].b_ready;
+            for (int t = 0; t < TARGETS; t++) begin
+                in_rsp[m].r |= out_rsp[t].r & {$bits(axi_r_t){r_grant[m][t]}};
+                in_rsp[m].b |= out_rsp[t].b & {$bits(axi_b_t){b_grant[m][t]}};
+                r_selected[m] |= target_t'(t) & {3{r_grant[m][t]}};
+                b_selected[m] |= target_t'(t) & {3{b_grant[m][t]}};
+                out_req[t].r_ready |= r_grant[m][t] && in_req[m].r_ready;
+                out_req[t].b_ready |= b_grant[m][t] && in_req[m].b_ready;
             end
+            in_rsp[m].r.id[3:2] = '0;
+            in_rsp[m].b.id[3:2] = '0;
+            rlast_fire[m] &= in_rsp[m].r_valid && in_rsp[m].r.last;
         end
     end
 `ifndef SYNTHESIS
-    initial assert (MASTERS > 0 && MASTERS <= 4 && TARGETS == 7)
+    always_ff @(posedge clk) if (!rst) begin
+        for (int t = 0; t < TARGETS; t++) begin
+            assert ($onehot0(ar_grant[t]) && $onehot0(aw_grant[t]) && $onehot0(w_grant[t]))
+                else $fatal(1, "fabric address/data grants overlap");
+        end
+        for (int m = 0; m < MASTERS; m++) begin
+            assert ($onehot0(r_grant[m]) && $onehot0(b_grant[m]))
+                else $fatal(1, "fabric response grants overlap");
+        end
+    end
+    initial assert (MASTERS > 0 && MASTERS <= 4 && TARGETS == (MM3_BYTES != 0 ? 8 : 7))
         else $fatal(1, "unsupported AXI fabric geometry");
 `endif
 endmodule

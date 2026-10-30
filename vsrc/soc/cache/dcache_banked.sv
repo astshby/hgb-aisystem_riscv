@@ -1,10 +1,14 @@
 // Module: dcache_banked
 // Description: Two disjoint line banks with dual CPU hit paths and shared scalar/block refill ownership.
+`ifndef SOC_DCACHE_BANK_XOR_MASK
+`define SOC_DCACHE_BANK_XOR_MASK 0
+`endif
 module dcache_banked #(
     parameter bit ENABLE = 1,
     parameter int unsigned DDR_BYTES = 0,
     parameter int unsigned CACHE_BYTES = 4096,
     parameter int unsigned LINE_BYTES = 32,
+    parameter int unsigned BANK_XOR_MASK = `SOC_DCACHE_BANK_XOR_MASK,
     parameter bit BLOCK_ENABLE = 0
 ) (
     input logic clk, rst,
@@ -52,6 +56,16 @@ module dcache_banked #(
     import block_types_pkg::*;
     // 每半容量 bank 的索引之上的一位选择 bank：同一行唯一归属，两个 bank 合计原总容量。
     localparam int BANK_BIT = $clog2(CACHE_BYTES/4);
+    localparam int LINE_OFFSET_W = $clog2(LINE_BYTES);
+    localparam int BANK_INDEX_W = BANK_BIT-LINE_OFFSET_W;
+    logic [1:0] request_bank;
+    // 只混合行索引位，同一行仍唯一归属；原地址完整传入 tag 和写回路径。
+    function automatic logic bank_of(input xlen_t addr);
+        return addr[BANK_BIT] ^ ^(addr[LINE_OFFSET_W +: BANK_INDEX_W] & BANK_INDEX_W'(BANK_XOR_MASK));
+    endfunction
+    for (genvar p = 0; p < 2; p++) begin : g_bank_decode
+        assign request_bank[p] = bank_of(request[p].addr);
+    end
     logic [1:0] bank_busy_q, bank_locked_q, bank_owner_q, bank_next_q, selected, found, priority_owner;
     logic [1:0] b_req_valid, b_req_ready, b_rsp_valid, b_rsp_ready, request_fire, response_fire;
     bus_req_t b_request [2], c_request [2];
@@ -91,7 +105,7 @@ module dcache_banked #(
             priority_owner[b] = bank_busy_q[b] ? !bank_owner_q[b] : bank_next_q[b];
             for (int offset = 0; offset < 2; offset++) begin
                 if (!found[b] && req_valid[priority_owner[b] ^ 1'(offset)] &&
-                    request[priority_owner[b] ^ 1'(offset)].addr[BANK_BIT] == 1'(b)) begin
+                    request_bank[priority_owner[b] ^ 1'(offset)] == 1'(b)) begin
                     found[b] = 1;
                     selected[b] = priority_owner[b] ^ 1'(offset);
                 end
@@ -174,6 +188,8 @@ module dcache_banked #(
     );
     block_arbiter #(.CLIENTS(2)) u_block (.*);
 `ifndef SYNTHESIS
+    initial assert (BANK_XOR_MASK < (1 << BANK_INDEX_W))
+        else $fatal(1, "bank XOR must use line index bits below the original bank bit");
     initial assert (CACHE_BYTES >= 8*LINE_BYTES && (CACHE_BYTES & (CACHE_BYTES-1)) == 0)
         else $fatal(1, "banked D-cache needs two power-of-two banks with at least two sets");
 `endif

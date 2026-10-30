@@ -1,52 +1,46 @@
-# hgb-aisystem
+# hgb-aisystem：all 联合仿真
 
-RV32 优先的双发射 Core 与多时钟 SoC。RV64 跟随共享 RTL 做功能和 ISA 验证。
-当前公共基线采用 ROB16、int8/mem4、LQ4/SQ4、forward3、Tournament1、RAS0、OOO0；
-正常 ALU/Load/DSP 路径为 8/10/10 级，C 扩展尚未实现。
+本分支保存最新共享 Core/SoC、YOLO、MiniMind、分层 CoreMark、三套交互程序及唯一一份 RT-Thread。
+`main` 为无 NPU 的 CoreMark 系统，`yolo` 与 `minimind` 分别保存各自硬件与程序；
+本分支只做仿真，不生成第四套 FPGA 物理镜像。
 
-## 四个发布分支
+`soc_all_system` 同时实例化两套加速器。YOLO 控制窗口为 `0x20000000–0x2000ffff`，
+MiniMind 为 `0x20010000–0x20010fff`，PLIC 源 ID 分别为 8、9，原 1–7 号设备不变。
+两核各有独立时钟、CDC 与同步释放复位。MiniMind DDR 主口和可选 HDMI 读取在现有第四主端前
+按突发公平仲裁，读写 owner 独立，保持全局 AXI ID 宽度。下游反压期间保留归属，公共复位同时取消各端旧事务。
 
-| 分支 | 内容 | 常用入口 |
-|---|---|---|
-| main | 无 NPU 四域系统、分层裸机 CoreMark、独立 RT-Thread | `make score`、`make rt-thread` |
-| baseline-yolo | 同一 Core/SoC，加 YOLO 128-MAC 与软件；无 CoreMark/RT | `make yolo` |
-| baseline-minimind | 同一 Core/SoC，加 MiniMind 算子和原作者软件；无 CoreMark/RT | `make minimind` |
-| baseline-all | 上述全部源码，RT-Thread 只有一份；每次选择一种加速器或无加速器 | 上述入口均提供 |
+发布程序均保留：CoreMark 的 READY→P/V→原始64位周期/CRC→DONE/READY；
+YOLO 的上传→整网推理→框和叠框图回传→1080p显示→READY；MiniMind 的常驻模型文本会话。
+YOLO 与 MiniMind 的完整板端运行、Flash/TF 资产装载尚未验收。MiniMind 作者数学/RAM模块保持原样，
+多写 RAM 综合问题仍待作者侧修复；本分支没有完整模型推理或布局布线的新成绩。
 
-本树为 **baseline-all 源码基线**。main 的内容通过 PR 交由维护者合并。
-两种加速器共用 `0x20000000` 设备窗口，分别实例化；`0x10050000` 始终用于 Flash 控制。
-Core/SYS/DDR 用户口/外设目标为 **100/80/125/25 MHz**，加速器独立域目标为 **100 MHz**。
-这些数值是配置目标；综合估计和布局布线结果分别记录。
-
-## 使用
-
-设置 `RISCV_TOOL_ROOT` 为 RISC-V 交叉编译器 bin。外部 FPGA 工具分别由
-`PDS_HOME`、`PDS_WORK_ROOT` 指定。运行 `make help` 查看本分支实际保留的入口。
+先设置 `RISCV_TOOL_ROOT` 为 RISC-V 工具链 bin。常用入口如下：
 
 ```bash
-make check XLEN=32
-make check XLEN=64
-SOFTWARE_OPT=O3 make score COREMARK_PLATFORM_OUT=build/score-O3
+make all-system-lint XLEN=32
+make all-system-lint XLEN=64
+make all-system-test XLEN=32
+make all-system-test XLEN=64
+make soc-test XLEN=32
+make soc-test XLEN=64
+make yolo-demo-test
+make minimind-demo-test
+make coremark-board-test
+make rt-thread-demo-test
 make rt-thread-fetch
 make rt-thread XLEN=32
-make yolo XLEN=32
-make minimind XLEN=32
 ```
 
-`SOFTWARE_OPT=O2|O3|Ofast`，默认 O3。CoreMark、RT-Thread、YOLO、MiniMind 分别编译和运行，
-RT-Thread 不参与 CoreMark。MiniMind 的锁定模型需先按其说明恢复；RT-Thread 使用锁定 v5.2.2。
-旧细粒度测试保留供定位故障，公共验证入口收敛为 `check` 与各应用入口。
+`all-system-test` 使用真实 RV32/RV64 Core、两原始加速器及 AXI/CDC/PLIC，运行小程序检查独立地址、
+完成/错误中断、MiniMind DDR GEMV、公共复位再启动；另测双主口突发、反压、归属和取消。
+它不执行 YOLO/MiniMind 完整模型。`tb_soc_system` 保留原单应用回归，`soc_all_system` 是双核联合入口。
 
-本轮 O3 M0 64 次为 **3.590617/3.570731 CoreMark/MHz**（performance/validation）。
-真实 TCM 的两次短测为 **3.052755/3.035846**；DDR cold/warm 为 **2.381312/2.395887**。
-M0 使用一周期 TB 存储；其他层使用实际 TCM/Cache/总线。每层分母都是 Core 周期，
-不能把 M0 数值套给 DDR 或加速器并发场景。短仿真不满足正式十秒测试时长。
+MiniMind 原单核驱动默认地址保持 `0x20000000`；本分支的联合程序须编译
+`-DMM3_MMIO_BASE=0x20010000u`。`scripts/demo/build_minimind_board.sh` 已默认使用联合地址，
+独立 `minimind` 发布分支仍使用原地址。RT-Thread 不参加裸机 CoreMark 测量。
 
-RT-Thread 双宽通过四域 DDR 系统运行、Timer 切换和 DMA 热代码搬运。
-YOLO 双宽完成卷积核对，并观察到 28 个 MAC 工作沿与独立 DDR DMA 重叠。
-MiniMind 双宽通过五域单层 38 命令、运行库和并发 DMA；尚未完成本轮全模型多 Token 验证。
-本轮四组标准综合完成；MiniMind 出现多写 RAM 推断警告，按维护者决定停止并列为待修，未取得其 Fmax/资源。
-不运行布局布线或上板。
-
-目录、测量和边界见[项目介绍](docs/PROJECT_INTRO.md)，系统结构见[文档索引](docs/README.md)，
-FPGA 流程见[适配说明](docs/fpga/FPGA_ADAPTATION.md)。
+当前无 NPU 已测物理结果来自 `b94580c`：Core/SYS/DDR-user/外设
+90.6208/100.9082/124.1619/73.0004 MHz；新增双核、视频和后续 Core 修改不继承这套物理结果。
+C9/C10 及 8线程、normal、fanout128/route90 与独立64/80对照入口保留为工具配置，
+本分支没有启动 PDS。详细证据与待办见[项目介绍](docs/PROJECT_INTRO.md)、
+[FPGA说明](docs/fpga/FPGA_ADAPTATION.md)和[系统结构](docs/understand/SOC_SYSTEM.md)。

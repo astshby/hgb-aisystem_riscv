@@ -6,7 +6,10 @@ module pango_200hp_top #(
     parameter int unsigned SOC_PROFILE = soc_config_pkg::SOC_PROFILE_FULL,
     parameter int unsigned BOARD_CLOCK_PROFILE = 0,
     parameter bit NPU_ENABLE = 0,
+    parameter bit VIDEO_ENABLE = NPU_ENABLE,
     parameter bit MM3_ENABLE = 0,
+    parameter int unsigned ICACHE_BYTES = 4096,
+    parameter int unsigned DCACHE_BYTES = 4096,
     parameter bit LOCAL_TCM_ENABLE = 1'b0,
     parameter bit DMA_WIDE_ENABLE = 1'b1,
     parameter bit DMA_BLOCK_ENABLE = 1'b1,
@@ -14,9 +17,14 @@ module pango_200hp_top #(
 ) (
     input logic ref_clk_p, ref_clk_n,
     input logic board_reset_n,
+    input logic video_ref_clk,
     input logic uart_rxd,
     output logic uart_txd,
     output logic ddr_ready_led,
+    output logic hdmi_pixel_clk, hdmi_hs, hdmi_vs, hdmi_de,
+    output logic [23:0] hdmi_rgb,
+    output logic hdmi_reset_n, hdmi_scl,
+    inout wire hdmi_sda,
     output logic mem_cs_n, mem_rst_n, mem_ck, mem_ck_n, mem_cke,
     output logic mem_ras_n, mem_cas_n, mem_we_n, mem_odt,
     output logic [14:0] mem_a,
@@ -32,10 +40,19 @@ module pango_200hp_top #(
     logic soc_rst;
     wire hot_clk, sys_clk, periph_clk, npu_clk;
     logic ddr_reset_n, ddr_bridge_rst;
-    localparam int unsigned HOT_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 : 100000000;
+    wire video_clk, video_pll_locked;
+    // 频率发现和 UART 分频必须跟随 PLL。C8 的整数 Hz 元数据四舍五入，
+    // 硬件实际 Core 为 900 MHz /11；约束使用精确分数，不以元数据代替 PLL。
+    localparam int unsigned HOT_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :
+        (BOARD_CLOCK_PROFILE == 9 ? 88750000 : (BOARD_CLOCK_PROFILE == 10 ? 83806818 :
+        (BOARD_CLOCK_PROFILE == 8 ? 81818182 :
+        ((BOARD_CLOCK_PROFILE == 5 || BOARD_CLOCK_PROFILE == 7) ? 90000000 : 100000000))));
     localparam int unsigned SYS_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :
-        (BOARD_CLOCK_PROFILE == 4 ? 100000000 : 80000000);
-    localparam int unsigned PERIPH_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 : 25000000;
+        (BOARD_CLOCK_PROFILE == 9 ? 98611111 : (BOARD_CLOCK_PROFILE == 10 ? 102430556 :
+        (BOARD_CLOCK_PROFILE >= 4 ? 100000000 : 80000000)));
+    localparam int unsigned PERIPH_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :
+        (BOARD_CLOCK_PROFILE == 9 ? 68269231 : (BOARD_CLOCK_PROFILE == 10 ? 65848214 :
+        (BOARD_CLOCK_PROFILE >= 6 ? 60000000 : 25000000)));
     logic [1:0] uart_rx, uart_tx;
     logic [31:0] gpio_in [3], gpio_out [3], gpio_oe [3];
     logic ddr_req_valid, ddr_req_ready, ddr_rsp_valid, ddr_rsp_ready;
@@ -73,7 +90,17 @@ module pango_200hp_top #(
 
     GTP_INBUFDS u_refclk_inbuf (.O(ref_clk), .I(ref_clk_p), .IB(ref_clk_n));
 
-    // Profile 0 保留已记录的同钟平台；C1/C4 使用独立 GPLL，并允许 DDR 校准前启动。
+    if (VIDEO_ENABLE) begin : g_video_clock
+        pango_video_pll u_video_pll (.ref_clk(video_ref_clk), .reset_n(board_reset_n),
+            .clk_pixel(video_clk), .locked(video_pll_locked));
+        assign hdmi_pixel_clk = video_clk;
+    end else begin : g_no_video_clock
+        assign video_clk = 1'b0;
+        assign video_pll_locked = 1'b1;
+        assign hdmi_pixel_clk = 1'b0;
+    end
+
+    // Profile 0 保留已记录的同钟平台；独立域档使用系统 GPLL，允许 DDR 校准前启动。
     // DDR IP 端口名 core_clk 仍表示 DDR 用户钟，勿与 Core 热域 hot_clk 混同。
     generate
         if (BOARD_CLOCK_PROFILE == 0) begin : g_common_clock
@@ -83,7 +110,7 @@ module pango_200hp_top #(
             assign npu_clk = core_clk;
             always_ff @(posedge core_clk or negedge board_reset_n) begin
                 if (!board_reset_n) reset_sync_q <= '0;
-                else reset_sync_q <= {reset_sync_q[0], pll_lock && phy_pll_lock && ddr_init_done};
+                else reset_sync_q <= {reset_sync_q[0], pll_lock && phy_pll_lock && ddr_init_done && video_pll_locked};
             end
             assign soc_rst = !reset_sync_q[1];
             assign ddr_reset_n = board_reset_n;
@@ -94,25 +121,30 @@ module pango_200hp_top #(
                 .ref_clk, .reset_n(board_reset_n), .clk_core(hot_clk), .clk_sys(sys_clk),
                 .clk_periph(periph_clk), .clk_npu(npu_clk), .locked(soc_pll_locked));
             pango_soc_reset u_reset (
-                .ref_clk, .clk_ddr(core_clk), .board_reset_n, .soc_pll_locked,
+                .ref_clk, .clk_ddr(core_clk), .board_reset_n,
+                .soc_pll_locked(soc_pll_locked && video_pll_locked),
                 .ddr_pll_locked(pll_lock), .ddr_phy_locked(phy_pll_lock), .ddr_ready(ddr_init_done),
                 .reset_async(soc_rst), .ddr_reset_n);
             // 与 soc_system 内部 DDR 端口同时异步置位、同域三拍释放，防止只清 FIFO 一侧。
             soc_reset_controller u_bridge_reset (
                 .clk_core(hot_clk), .clk_sys(sys_clk), .clk_ddr(core_clk), .clk_periph(periph_clk),
-                .reset_async(soc_rst), .rst_core(), .rst_sys(), .rst_ddr(ddr_bridge_rst), .rst_periph());
+                .reset_async(soc_rst), .rst_core(), .rst_sys(), .rst_ddr(ddr_bridge_rst), .rst_periph(), .rst_sys_local());
             assign reset_sync_q = '0;
         end
     endgenerate
     initial begin
-        assert (!(NPU_ENABLE && MM3_ENABLE)) else $fatal(1,"select one accelerator");
-        assert (BOARD_CLOCK_PROFILE == 0 || BOARD_CLOCK_PROFILE == 1 || BOARD_CLOCK_PROFILE == 4)
+        assert (!MM3_ENABLE) else $fatal(1,"MiniMind/all use portable simulation tops; no fourth board image");
+        assert (BOARD_CLOCK_PROFILE == 0 || BOARD_CLOCK_PROFILE == 1 ||
+                (BOARD_CLOCK_PROFILE >= 4 && BOARD_CLOCK_PROFILE <= 10))
             else $fatal(1, "unsupported board clock profile");
         assert (!(NPU_ENABLE || MM3_ENABLE) || BOARD_CLOCK_PROFILE != 0)
-            else $fatal(1, "NPU uses its dedicated 100 MHz C1/C4 output");
+            else $fatal(1, "NPU requires its dedicated system GPLL output");
+        assert (!VIDEO_ENABLE || BOARD_CLOCK_PROFILE != 0)
+            else $fatal(1, "video requires the independent scoreboard SoC clocks");
 `ifndef CORE_SCOREBOARD
         assert (BOARD_CLOCK_PROFILE == 0)
             else $fatal(1, "independent domains require soc_system");
+        assert (!VIDEO_ENABLE) else $fatal(1, "video requires soc_system");
 `endif
     end
     assign ddr_ready_led = ddr_init_done && !soc_rst;
@@ -129,28 +161,48 @@ module pango_200hp_top #(
     axi_types_pkg::axi_rsp_t npu_rsp;
     axi_types_pkg::axi_req_t external_req;
     axi_types_pkg::axi_rsp_t external_rsp;
-    if (NPU_ENABLE) begin : g_npu
+    axi_types_pkg::axil_req_t video_req;
+    axi_types_pkg::axil_rsp_t video_rsp;
+    if (VIDEO_ENABLE) begin : g_video
+        logic rst_video, rst_video_sys, rst_video_periph;
+        logic sda_drive_low;
+        // PPLL 失锁走同一个 soc_rst，三个 FIFO 域一起异步置位、各自三拍释放。
+        soc_reset_controller u_reset (.reset_async(soc_rst),.clk_core(video_clk),.clk_sys(sys_clk),
+            .clk_ddr(core_clk),.clk_periph(periph_clk),.rst_core(rst_video),.rst_sys(rst_video_sys),
+            .rst_ddr(),.rst_periph(rst_video_periph),.rst_sys_local());
+        yolo_video #(.PERIPH_HZ(PERIPH_HZ)) u_video (
+            .clk_sys(sys_clk),.rst_sys(rst_video_sys),.clk_periph(periph_clk),.rst_periph(rst_video_periph),
+            .clk_pixel(video_clk),.rst_pixel(rst_video),.control_req(video_req),.control_rsp(video_rsp),
+            .memory_req(external_req),.memory_rsp(external_rsp),.hdmi_sda_in(hdmi_sda),
+            .hdmi_scl,.hdmi_sda_drive_low(sda_drive_low),.hdmi_reset_n,
+            .video_hs(hdmi_hs),.video_vs(hdmi_vs),.video_de(hdmi_de),.video_rgb(hdmi_rgb));
+        assign hdmi_sda = sda_drive_low ? 1'b0 : 1'bz;
+    end else begin : g_no_video
         assign external_req = '0;
+        assign video_rsp = '0;
+        assign hdmi_sda = 1'bz;
+        assign hdmi_scl = 1'b1;
+        assign hdmi_reset_n = 1'b0;
+        assign hdmi_hs = 1'b0;
+        assign hdmi_vs = 1'b0;
+        assign hdmi_de = 1'b0;
+        assign hdmi_rgb = '0;
+    end
+    if (NPU_ENABLE) begin : g_npu
         logic rst_npu, rst_npu_sys;
+        // FIFO两端与SoC共用故障复位事件，各自在目的域同步释放。
         soc_reset_controller u_reset (.reset_async(soc_rst),.clk_core(npu_clk),.clk_sys(sys_clk),
             .clk_ddr(core_clk),.clk_periph(periph_clk),.rst_core(rst_npu),.rst_sys(rst_npu_sys),
-            .rst_ddr(),.rst_periph());
+            .rst_ddr(),.rst_periph(),.rst_sys_local());
         npu_axi_target u_target (.clk_sys(sys_clk),.rst_sys(rst_npu_sys),.clk_npu(npu_clk),.rst_npu,
             .axi_req(npu_req),.axi_rsp(npu_rsp));
-    end else if (MM3_ENABLE) begin : g_mm3
-        logic rst_npu, rst_npu_sys;
-        soc_reset_controller u_reset (.reset_async(soc_rst),.clk_core(npu_clk),.clk_sys(sys_clk),
-            .clk_ddr(core_clk),.clk_periph(periph_clk),.rst_core(rst_npu),.rst_sys(rst_npu_sys),
-            .rst_ddr(),.rst_periph());
-        mm3_axi_subsystem #(.DDR_BYTES(512*1024*1024)) u_target (
-            .clk_sys(sys_clk),.rst_sys(rst_npu_sys),.clk_npu(npu_clk),.rst_npu,
-            .control_req(npu_req),.control_rsp(npu_rsp),.memory_req(external_req),.memory_rsp(external_rsp));
     end else begin : g_no_npu
-        assign external_req = '0;
         assign npu_rsp = '0;
     end
     // C1/C4 的 PLL/复位 RTL 与仿真不代表板上时序验收；Flash 管脚仍待板级接入。
     soc_system #(.ITCM_INIT_FILE(ITCM_INIT_FILE),.DTCM_INIT_FILE(DTCM_INIT_FILE),
+        .VIDEO_ENABLE(VIDEO_ENABLE),
+        .ICACHE_BYTES(ICACHE_BYTES),.DCACHE_BYTES(DCACHE_BYTES),
         .SOC_PROFILE(SOC_PROFILE),.DDR_BYTES(512*1024*1024),.NPU_BYTES((NPU_ENABLE || MM3_ENABLE) ? 65536 : 0),.CLOCK_HZ(125000000),
         .CLOCK_INFO_ENABLE(BOARD_CLOCK_PROFILE != 0), .CORE_CLOCK_HZ(HOT_HZ), .SYS_CLOCK_HZ(SYS_HZ),
         .DDR_CLOCK_HZ(125000000), .PERIPH_CLOCK_HZ(PERIPH_HZ), .UART_DIVISOR((PERIPH_HZ+57600)/115200)) u_soc (
@@ -158,6 +210,7 @@ module pango_200hp_top #(
         .uart_rx,.uart_tx,.gpio_in,.gpio_out,.gpio_oe,
         .flash_cs_n(),.flash_sck(),.flash_mosi(),.flash_miso(1'b0),
         .ddr_req(unified_ddr_req),.ddr_rsp(unified_ddr_rsp),.external_req,.external_rsp,.npu_req,.npu_rsp,
+        .video_req,.video_rsp,
         .commit_valid(),.commit_pc(),.commit_inst(),.commit_rd(),.commit_rd_we(),.commit_rd_data(),
         .commit_exception(),.commit_trace(),.dmem_store_fire(),.dmem_store_addr(),.dmem_store_data(),.dmem_store_strb());
     ddr_axi_target u_ddr_target (.clk(core_clk),.rst(ddr_bridge_rst),.memory_ready(ddr_init_done),
@@ -165,6 +218,13 @@ module pango_200hp_top #(
         .rd_cmd_valid,.rd_cmd_ready,.rd_cmd,.rd_valid,.rd_ready,.rd_data,
         .wr_cmd_valid,.wr_cmd_ready,.wr_cmd,.wr_valid,.wr_ready,.wr_data,.wr_rsp_valid,.wr_rsp_ready,.wr_rsp);
 `else
+    assign hdmi_sda = 1'bz;
+    assign hdmi_scl = 1'b1;
+    assign hdmi_reset_n = 1'b0;
+    assign hdmi_hs = 1'b0;
+    assign hdmi_vs = 1'b0;
+    assign hdmi_de = 1'b0;
+    assign hdmi_rgb = '0;
     soc_top #(.ITCM_INIT_FILE(ITCM_INIT_FILE), .DTCM_INIT_FILE(DTCM_INIT_FILE),
               .SOC_PROFILE(SOC_PROFILE), .LOCAL_TCM_ENABLE(LOCAL_TCM_ENABLE),
               .DDR_BYTES(512 * 1024 * 1024), .DMA_WIDE_ENABLE(DMA_WIDE_ENABLE), .DMA_BLOCK_ENABLE(DMA_BLOCK_ENABLE),

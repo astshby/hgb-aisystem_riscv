@@ -44,9 +44,27 @@ vsrc/soc/cache/dcache.sv
 vsrc/soc/cache/cache_maintenance_controller.sv
 vsrc/soc/bus/bus_pair_arbiter.sv
 vsrc/soc/memory/tcm_dual_bank.sv
+vsrc/soc/memory/tcm_bram.sv
 vsrc/soc/cache/dcache_banked.sv
 vsrc/soc/cache/icache_native.sv
 vsrc/soc/memory/scoreboard_soc_memory.sv
+-f scripts/axi_files.f
+vsrc/soc/bus/axi_to_axil.sv
+vsrc/soc/bus/axil_clock_bridge.sv
+vsrc/soc/bus/axil_to_bus.sv
+vsrc/soc/bus/mmio_bus.sv
+vsrc/soc/memory/tcm_address_decode.sv
+vsrc/soc/memory/cpu_memory_adapter.sv
+vsrc/soc/memory/tcm_system_target.sv
+vsrc/soc/cache/cache_command_cdc.sv
+vsrc/soc/dma/dma_axi_master.sv
+vsrc/soc/dma/dma_command_cdc.sv
+vsrc/soc/flash/spi_flash_reader.sv
+vsrc/soc/flash/flash_axi_target.sv
+vsrc/soc/soc_system.sv
+vsrc/soc/soc_top.sv
+-f scripts/video_files.f
+-f scripts/npu_files.f
 vsrc/soc/mm3/common/mm3_config_pkg.sv
 vsrc/soc/mm3/common/mm3_tables_pkg.sv
 vsrc/soc/mm3/common/mm3_fixed_pkg.sv
@@ -71,20 +89,6 @@ vsrc/soc/mm3/attention/mm3_attention.sv
 vsrc/soc/mm3/gemv/mm3_gemv_accel.sv
 vsrc/soc/mm3/top/mm3_ops_engine.sv
 vsrc/soc/mm3/top/mm3_accel.sv
--f scripts/axi_files.f
 vsrc/soc/mm3/top/mm3_axi_subsystem.sv
-vsrc/soc/bus/axi_to_axil.sv
-vsrc/soc/bus/axil_clock_bridge.sv
-vsrc/soc/bus/axil_to_bus.sv
-vsrc/soc/bus/mmio_bus.sv
-vsrc/soc/memory/tcm_address_decode.sv
-vsrc/soc/memory/cpu_memory_adapter.sv
-vsrc/soc/memory/tcm_system_target.sv
-vsrc/soc/cache/cache_command_cdc.sv
-vsrc/soc/dma/dma_axi_master.sv
-vsrc/soc/dma/dma_command_cdc.sv
-vsrc/soc/flash/spi_flash_reader.sv
-vsrc/soc/flash/flash_axi_target.sv
-vsrc/soc/soc_system.sv
-vsrc/soc/soc_top.sv
--f scripts/npu_files.f
+vsrc/soc/bus/axi_external_arbiter.sv
+vsrc/soc/soc_all_system.sv

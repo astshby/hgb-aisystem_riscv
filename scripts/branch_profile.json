@@ -1,7 +1,12 @@
 {
   "variant": "all",
   "default_accelerator": "none",
-  "accelerators": ["yolo", "minimind"],
+  "accelerators": [
+    "yolo",
+    "minimind"
+  ],
   "coremark": true,
-  "rt_thread": true
+  "rt_thread": true,
+  "simulation_only": true,
+  "simultaneous_accelerators": true
 }

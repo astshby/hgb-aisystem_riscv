@@ -18,7 +18,7 @@ module pango_benchmark_tcm_top #(
     import core_types_pkg::*;
     logic rst_core;
     soc_reset_controller u_reset (.reset_async,.clk_core,.clk_sys(1'b0),.clk_ddr(1'b0),.clk_periph(1'b0),
-        .rst_core,.rst_sys(),.rst_ddr(),.rst_periph());
+        .rst_core,.rst_sys(),.rst_ddr(),.rst_periph(),.rst_sys_local());
     logic commit_valid, commit_rd_we, commit_exception, dmem_store_fire;
     xlen_t commit_pc, commit_rd_data, dmem_store_addr, dmem_store_data;
     logic [31:0] commit_inst;
@@ -39,7 +39,7 @@ module pango_benchmark_tcm_top #(
             .clk_core,.clk_sys,.clk_ddr(1'b0),.clk_periph,.reset_async,.ddr_ready(1'b0),
             .uart_rx({1'b1,uart_rxd}),.uart_tx,.gpio_in,.gpio_out(),.gpio_oe(),
             .flash_cs_n(),.flash_sck(),.flash_mosi(),.flash_miso(1'b0),
-            .ddr_req(),.ddr_rsp('0),.external_req('0),.external_rsp(),.npu_req(),.npu_rsp('0),
+            .ddr_req(),.ddr_rsp('0),.external_req('0),.external_rsp(),.video_req(),.video_rsp('0),.npu_req(),.npu_rsp('0),
             .commit_valid,.commit_pc,.commit_inst,.commit_rd,.commit_rd_we,.commit_rd_data,
             .commit_exception,.commit_trace,.dmem_store_fire,.dmem_store_addr,.dmem_store_data,.dmem_store_strb);
     end else begin : g_core

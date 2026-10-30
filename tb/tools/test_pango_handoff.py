@@ -33,7 +33,7 @@ class HandoffTests(unittest.TestCase):
         self.ip = self.root / "fake-ip"
         scripts = self.repo / "scripts/pango"
         scripts.mkdir(parents=True)
-        for name in ("prepare_project.py", "check_ip_dq.py", "implement.tcl", "mes2l676_200hp.fdc") + MEMORY_SCRIPTS:
+        for name in ("prepare_project.py", "check_ip_dq.py", "implement.tcl", "implement_cdc.tcl", "mes2l676_200hp.fdc") + MEMORY_SCRIPTS:
             shutil.copyfile(REPO / "scripts/pango" / name, scripts / name)
         (self.repo / "vsrc").mkdir()
         (self.repo / "vsrc/fixture.sv").write_text("module fixture; endmodule\n")
@@ -44,12 +44,15 @@ class HandoffTests(unittest.TestCase):
             "module pango_200hp_top #(\n"
             "    parameter int unsigned SOC_PROFILE = 0,\n"
             "    parameter int unsigned BOARD_CLOCK_PROFILE = 0,\n"
+            "    parameter int unsigned ICACHE_BYTES = 4096,\n"
+            "    parameter int unsigned DCACHE_BYTES = 4096,\n"
             "    parameter bit DUMMY = 1'b0\n"
             ");\n"
             "logic core_clk, hot_clk, sys_clk, periph_clk;\n"
-            "localparam int unsigned HOT_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 : 100000000;\n"
+            "localparam int unsigned HOT_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :\n"
+            "    (BOARD_CLOCK_PROFILE == 5 ? 90000000 : 100000000);\n"
             "localparam int unsigned SYS_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :\n"
-            "    (BOARD_CLOCK_PROFILE == 4 ? 100000000 : 80000000);\n"
+            "    (BOARD_CLOCK_PROFILE == 5 ? 100000000 : (BOARD_CLOCK_PROFILE == 4 ? 100000000 : 80000000));\n"
             "localparam int unsigned PERIPH_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 : 25000000;\n"
             "generate\n"
             "if (BOARD_CLOCK_PROFILE == 0) begin : g_common_clock\n"
@@ -61,7 +64,7 @@ class HandoffTests(unittest.TestCase):
             "    pango_soc_reset u_reset ();\n"
             "end\n"
             "endgenerate\n"
-            "`ifdef CORE_SCOREBOARD\nsoc_system #(.CLOCK_HZ(125000000),"
+            "`ifdef CORE_SCOREBOARD\nsoc_system #(.ICACHE_BYTES(ICACHE_BYTES),.DCACHE_BYTES(DCACHE_BYTES),.CLOCK_HZ(125000000),"
             ".CLOCK_INFO_ENABLE(BOARD_CLOCK_PROFILE != 0),.CORE_CLOCK_HZ(HOT_HZ),"
             ".SYS_CLOCK_HZ(SYS_HZ),.PERIPH_CLOCK_HZ(PERIPH_HZ)) u_soc ("
             ".clk_core(hot_clk),.clk_sys(sys_clk),.clk_ddr(core_clk),.clk_periph(periph_clk));\n"
@@ -132,6 +135,30 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(configuration["board_clock_domains_hz"],
                          {"core": 100000000, "sys": 80000000,
                           "ddr": 125000000, "periph": 25000000})
+
+    def test_cache_capacity_is_bound_to_native_compile_and_wrapper(self):
+        output, _ = self.stage(backend="scoreboard", clock=1,
+                               extra=("--icache-bytes", "16384", "--dcache-bytes", "8192"))
+        manifest = json.loads((output / "manifest.json").read_text())
+        configuration = verify_staged_manifest(output, manifest)
+        self.assertEqual((configuration["icache_bytes"], configuration["dcache_bytes"]), (16384, 8192))
+        path = output / "compile.tcl"
+        path.write_text(path.read_text().replace("ICACHE_BYTES 16384", "ICACHE_BYTES 8192"))
+        manifest["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(ValueError, "compile Tcl parameters"):
+            verify_staged_manifest(output, manifest)
+
+    def test_bank_mapping_is_bound_to_native_compile(self):
+        output, _ = self.stage(backend="scoreboard", clock=1,
+                               extra=("--dcache-bank-xor-mask", "1"))
+        manifest = json.loads((output / "manifest.json").read_text())
+        verify_staged_manifest(output, manifest)
+        path = output / "compile.tcl"
+        self.assertIn("SOC_DCACHE_BANK_XOR_MASK=1", path.read_text())
+        path.write_text(path.read_text().replace("SOC_DCACHE_BANK_XOR_MASK=1", "SOC_DCACHE_BANK_XOR_MASK=2"))
+        manifest["files"]["compile.tcl"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(ValueError, "compile Tcl parameters"):
+            verify_staged_manifest(output, manifest)
 
     def test_p1_defaults_match_simulation_profile(self):
         # 两种入口独立读取的参数必须一致，避免 FPGA 与仿真只共用 P1 名称。
@@ -391,8 +418,8 @@ class HandoffTests(unittest.TestCase):
             self.assertIn(f"BOARD_CLOCK_PROFILE {profile}", command)
             self.assertNotIn("LOCAL_TCM_ENABLE", command)
 
-    def test_c1_c4_board_clock_staging(self):
-        for profile in (1, 4):
+    def test_c1_c4_c5_board_clock_staging(self):
+        for profile in (1, 4, 5):
             with self.subTest(profile=profile):
                 output, _ = self.stage(backend="scoreboard", output=self.root / f"board-c{profile}",
                                        extra=("--board-clock-profile", str(profile)))

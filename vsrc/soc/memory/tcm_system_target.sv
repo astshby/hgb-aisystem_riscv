@@ -1,5 +1,5 @@
 // Module: tcm_system_target
-// Description: System AXI access to the same core-domain TCM banks through an independent fourth local port.
+// Description: System AXI access to the same core-domain TCM banks through an independent fourth local port and once-per-beat write precheck.
 module tcm_system_target (
     input logic clk, rst,
     input axi_types_pkg::axi_req_t axi_req,
@@ -15,14 +15,13 @@ module tcm_system_target (
     logic v, ready, rv, rr, active_q, bank_q, error_q;
     bus_req_t r;
     bus_rsp_t p;
-    bus_target_e target;
-    bus_error_e access_error;
-    logic bank, legal;
-    axi_bus_target u_target (.clk,.rst,.axi_req,.axi_rsp,.req_valid(v),.req_ready(ready),.request(r),
+    logic bank, legal, itcm_ok, dtcm_ok;
+    axi_bus_target #(.REGISTER_WRITE_CHECK(1), .REGISTER_LOCAL_ADDR(1)) u_target (.clk,.rst,.axi_req,.axi_rsp,.req_valid(v),.req_ready(ready),.request(r),
         .rsp_valid(rv),.rsp_ready(rr),.response(p));
-    address_decode u_decode (.request(r),.target,.error(access_error));
-    assign bank = target == TARGET_DTCM;
-    assign legal = access_error == BUS_OK && (target == TARGET_ITCM || target == TARGET_DTCM);
+    // 目标已经固定为TCM，只做本地窗口/权限检查，省去全系统目标编码再译回bank。
+    tcm_address_decode u_decode (.request(r), .itcm_ok, .dtcm_ok);
+    assign bank = dtcm_ok;
+    assign legal = itcm_ok || dtcm_ok;
     assign ready = !active_q && (!legal || req_ready[bank]);
     assign rv = active_q && (error_q || rsp_valid[bank_q]);
     assign p = '{rdata:core_types_pkg::xlen_t'(rsp_data[bank_q]),error:error_q ? BUS_SLVERR : BUS_OK};

@@ -2,6 +2,8 @@
 // Description: AXI burst target to scalar device/RAM accesses with independent address/data capture.
 module axi_bus_target #(
     parameter bit READ_ONLY = 0,
+    parameter bit REGISTER_WRITE_CHECK = 0,
+    parameter bit REGISTER_LOCAL_ADDR = 0,
     parameter int LOCAL_BYTES = core_config_pkg::DBUS_BYTES
 ) (
     input logic clk, rst,
@@ -29,7 +31,8 @@ module axi_bus_target #(
     logic r_valid_q, b_valid_q;
     axi_r_t r_q;
     axi_b_t b_q;
-    logic choose_write, choose_read, bad_write, skip_write, local_fire;
+    logic choose_write, choose_read, bad_write, bad_write_raw, skip_write, local_fire;
+    logic write_check_valid_q, bad_write_q;
     logic [31:0] read_beat_addr_q, write_beat_addr_q;
     logic [31:0] read_addr, write_addr, allowed_strb;
     logic [5:0] read_bytes, write_bytes, read_step, write_step;
@@ -37,22 +40,66 @@ module axi_bus_target #(
     axi_resp_e local_error;
     logic [255:0] merged_read;
     axi_register_slice u_channels (.clk, .rst, .s_req(axi_req), .s_rsp(axi_rsp), .m_req(q), .m_rsp(p));
-    // beat 起址只在地址接纳或当前 beat 完成时更新，避免每次本地请求重算编号×步长。
-    // 字内偏移和 owner 保持原时序，背压期间请求地址不随外部 AXI 载荷变化。
-    assign read_addr = read_beat_addr_q + 32'(read_offset_q);
-    assign write_addr = write_beat_addr_q + 32'(write_offset_q);
+    // TCM直接用游标寄存器驱动地址译码和BRAM冲突检查；在原握手边沿推进，不增加等待拍。
+    // 保留beat起址用于宽AXI字节选通；非TCM实例继续使用原起址加字内偏移。
+    if (REGISTER_LOCAL_ADDR) begin : g_local_address
+        logic [31:0] read_cursor_q, write_cursor_q;
+        assign read_addr = read_cursor_q;
+        assign write_addr = write_cursor_q;
+        // 游标载荷由read/write_active拥有，不复位无效载荷。
+        always_ff @(posedge clk) begin
+            if (!rst) begin
+                if (q.ar_valid && p.ar_ready) read_cursor_q <= q.ar.addr;
+                if (q.aw_valid && p.aw_ready) write_cursor_q <= q.aw.addr;
+                if (q.r_ready && r_valid_q && !r_q.last)
+                    read_cursor_q <= read_beat_addr_q + (32'd1 << read_q.size);
+                if (pending_q && rsp_valid) begin
+                    if (pending_write_q && !write_end)
+                        write_cursor_q <= write_cursor_q + 32'(write_step);
+                    if (!pending_write_q && !read_end)
+                        read_cursor_q <= read_cursor_q + 32'(read_step);
+                end
+                // 零strobe及坏WLAST也沿既有W beat完成边界推进，保持地址回卷语义。
+                if (write_w_fire && write_beat_q != write_q.len)
+                    write_cursor_q <= write_beat_addr_q + (32'd1 << write_q.size);
+            end
+        end
+    end else begin : g_offset_address
+        assign read_addr = read_beat_addr_q + 32'(read_offset_q);
+        assign write_addr = write_beat_addr_q + 32'(write_offset_q);
+    end
     assign read_bytes = 6'd1 << read_q.size;
     assign write_bytes = 6'd1 << write_q.size;
     assign read_step = read_q.prot[2] ? 6'd4 : 6'(LOCAL_BYTES);
     assign write_step = 6'(LOCAL_BYTES);
     assign read_end = read_offset_q + read_step >= read_bytes;
     assign write_end = write_offset_q + write_step >= write_bytes;
-    assign allowed_strb = (32'hffffffff >> (32-int'(write_bytes))) << write_q.addr[4:0];
-    assign bad_write = READ_ONLY ||
+    // INCR窄传输的有效字节随当前beat地址移动，跨256位总线字边界后从低lane重新开始。
+    assign allowed_strb = (32'hffffffff >> (32-int'(write_bytes))) << write_beat_addr_q[4:0];
+    assign bad_write_raw = READ_ONLY ||
                        (q.w.last != (write_beat_q == write_q.len)) || |(q.w.strb & ~allowed_strb);
+    // 系统TCM在AXI beat边界预先寄存宽strobe/WLAST检查。
+    // 一个宽beat内的所有本地字共享该结果，避免每次BRAM写都增加一级等待。
+    if (REGISTER_WRITE_CHECK) begin : g_write_check
+        assign bad_write = bad_write_q;
+        always_ff @(posedge clk) begin
+            if (rst) write_check_valid_q <= 0;
+            else begin
+                if (write_active_q && !b_valid_q && q.w_valid && !write_check_valid_q) begin
+                    bad_write_q <= bad_write_raw;
+                    write_check_valid_q <= 1;
+                end
+                if (write_w_fire) write_check_valid_q <= 0;
+            end
+        end
+    end else begin : g_direct_write_check
+        assign bad_write = bad_write_raw;
+        assign write_check_valid_q = 1;
+        assign bad_write_q = 0;
+    end
     assign local_error = response.error == BUS_OK ? AXI_OKAY :
                          response.error == BUS_DECERR ? AXI_DECERR : AXI_SLVERR;
-    assign choose_write = !pending_q && write_active_q && q.w_valid && !b_valid_q &&
+    assign choose_write = !pending_q && write_active_q && q.w_valid && write_check_valid_q && !b_valid_q &&
                           (next_write_q || !read_active_q || r_valid_q);
     assign choose_read = !pending_q && read_active_q && !r_valid_q && !choose_write;
     assign skip_write = choose_write && (bad_write ||

@@ -13,7 +13,8 @@ module npu_mmio128 (
     output logic rsp_valid,
     input  logic rsp_ready,
     output logic [31:0] rsp_rdata,
-    output logic rsp_error
+    output logic rsp_error,
+    output logic irq
 );
     timeunit 1ns;
     timeprecision 1ps;
@@ -73,6 +74,8 @@ module npu_mmio128 (
     // RESET is always legal, including while active or with an unread result.
     // Its response survives; only external reset cancels the bus response.
     assign core_rst = rst || reset_commit_q;
+    // 本地接口补丁：直接导出原 STATUS 的完成/错误电平，计算数据通路保持原样。
+    assign irq = done_q || core_done || (error_view != 0);
     assign error_view = errors_q | (core_cmd_error ? ERR_COMMAND : 0) |
                                   (core_cfg_error ? ERR_CONFIG : 0);
 

@@ -1,15 +1,20 @@
 // Module: tagged_request_queue
-// Description: Two-entry registered tagged request queue with independent upstream readiness.
-module tagged_request_queue (
+// Description: Two-entry registered tagged request and metadata queue with independent upstream readiness.
+module tagged_request_queue #(
+    parameter int META_WIDTH = 1
+) (
     input logic clk, rst,
     input logic in_valid,
     output logic in_ready,
     input scoreboard_pkg::memory_request_t in_request,
+    input logic [META_WIDTH-1:0] in_metadata,
     output logic out_valid,
     input logic out_ready,
-    output scoreboard_pkg::memory_request_t out_request
+    output scoreboard_pkg::memory_request_t out_request,
+    output logic [META_WIDTH-1:0] out_metadata
 );
     scoreboard_pkg::memory_request_t packet_q [2];
+    logic [META_WIDTH-1:0] metadata_q [2];
     logic read_q, write_q;
     logic [1:0] count_q;
     logic push_fire, pop_fire;
@@ -19,6 +24,7 @@ module tagged_request_queue (
     assign in_ready = !rst && count_q < 2;
     assign out_valid = !rst && count_q != 0;
     assign out_request = packet_q[read_q];
+    assign out_metadata = metadata_q[read_q];
     assign push_fire = in_valid && in_ready;
     assign pop_fire = out_valid && out_ready;
 
@@ -35,6 +41,8 @@ module tagged_request_queue (
             endcase
             if (push_fire) begin
                 packet_q[write_q] <= in_request;
+                // 静态资格随请求同槽保存；只改载荷内容，不改变容量和进出握手。
+                metadata_q[write_q] <= in_metadata;
                 write_q <= !write_q;
             end
             if (pop_fire) read_q <= !read_q;

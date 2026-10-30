@@ -1,5 +1,12 @@
 # SoC 系统与程序生命周期
 
+all联合入口soc_all_system同时连接YOLO和MiniMind：YOLO0x20000000/64KiB，MiniMind0x20010000/4KiB；
+PLIC原1–7号不变，两个原生sticky done/error状态经各自输出和两级同步作为8/9号源。控制与数据沿现有
+AXI CDC包装跨域，原算子数学/RAM不改。MiniMind DDR主端与可选视频主端按独立读/写owner公平轮询后
+接现有第四主口，CPU两主口和DMA不变，全局ID宽度不增加。此拓扑只做联合仿真；旧单NPU入口仍用于
+各自小测试，不应把保存全源码或单核二选一误写成双核功能已经通过。
+
+
 ## 结构
 
 ```text

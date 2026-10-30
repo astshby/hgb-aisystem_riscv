@@ -61,7 +61,7 @@ class NpuStagingTest(unittest.TestCase):
                 path=root/'vsrc/cpu'/source; path.parent.mkdir(parents=True,exist_ok=True)
                 path.write_text((ROOT/'vsrc/cpu'/source).read_text())
             pll=root/'vsrc/cpu/pango_soc_pll.sv'
-            pll.write_text(pll.read_text().replace('.STATIC_RATIO3(8)', '.STATIC_RATIO3(10)'))
+            pll.write_text(pll.read_text().replace('.STATIC_RATIO3(NPU_DIV)', '.STATIC_RATIO3(11)'))
             with self.assertRaises(ValueError): verify_npu_board_clocks(root)
 
 

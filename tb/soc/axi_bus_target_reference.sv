@@ -46,7 +46,9 @@ module axi_bus_target_reference #(
     assign write_step = 6'(LOCAL_BYTES);
     assign read_end = read_offset_q + read_step >= read_bytes;
     assign write_end = write_offset_q + write_step >= write_bytes;
-    assign allowed_strb = (32'hffffffff >> (32-int'(write_bytes))) << write_q.addr[4:0];
+    // 参考模型按起始地址与beat编号重算字节位置，不复用DUT的递增地址寄存器。
+    assign allowed_strb = (32'hffffffff >> (32-int'(write_bytes))) <<
+                          ((write_q.addr + (32'(write_beat_q) << write_q.size)) & 32'd31);
     assign bad_write = READ_ONLY ||
                        (q.w.last != (write_beat_q == write_q.len)) || |(q.w.strb & ~allowed_strb);
     assign local_error = response.error == BUS_OK ? AXI_OKAY :

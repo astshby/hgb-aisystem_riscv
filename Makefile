@@ -38,4 +38,11 @@ endif
 ifneq ($(wildcard scripts/make/minimind.mk),)
 	@printf '%s\n' 'make minimind (five domains, runtime + 38-command layer)'
 endif
+.PHONY: all-system-lint all-system-test
+all-system-lint:
+	$(VERILATOR) $(VFLAGS) --lint-only -f scripts/soc_files.f --top-module soc_all_system
+
+all-system-test:
+	python3 scripts/verilator/run_all_system.py --xlen $(XLEN)
+
 check: test scoreboard-test riscv-tests soc-test soc-riscv-tests soc-system-test soc-axi-test benchmark-smoke

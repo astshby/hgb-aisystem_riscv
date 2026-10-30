@@ -18,7 +18,9 @@ EXPECTED = {
     'validation': {'seedcrc': 0x18f2, 'crclist': 0xe3c1, 'crcmatrix': 0x0747, 'crcstate': 0x8d84},
 }
 CLOCKS = {0: [5, 5, 5, 5], 1: [5, 6.25, 4, 20], 2: [4, 5, 6.25, 12.5],
-          3: [5.882, 4.274, 5.376, 13.514], 4: [5, 5, 4, 20]}
+          3: [5.882, 4.274, 5.376, 13.514], 4: [5, 5, 4, 20],
+          6: [5, 5, 4, 25/3], 7: [50/9, 5, 4, 25/3], 8: [55/9, 5, 4, 25/3],
+          9: [400/71, 360/71, 4, 520/71], 10: [352/59, 288/59, 4, 448/59]}
 LAYERS = {'cold': (0, 0), 'warm': (1, 0), 'background': (1, 1)}
 CORE_FIELDS = ('xlen', 'backend', 'issue_width', 'retire_entries', 'split_issue_queue',
                'integer_queue_entries', 'memory_queue_entries', 'limited_integer_ooo',
@@ -61,7 +63,7 @@ def optimization():
 def soc_build_configuration(clock_profile=1, icache_fill_bytes=4):
     if clock_profile not in CLOCKS or icache_fill_bytes not in (4, 8):
         raise ValueError('invalid static SoC clock profile or I-cache install width')
-    hz = [(10**12 + round(half * 2000) // 2) // round(half * 2000) for half in CLOCKS[clock_profile]]
+    hz = [round(10**12 / (half * 2000)) for half in CLOCKS[clock_profile]]
     return dict(zip(('clock_profile', 'icache_fill_bytes', 'metrics_schema', 'clock_info_enable',
                      'core_hz', 'sys_hz', 'ddr_hz', 'periph_hz', 'timer_hz'),
                     (clock_profile, icache_fill_bytes, 2, 1, *hz, hz[3])))
@@ -75,7 +77,7 @@ def validate_soc_config(config, expected_periods_ps=None):
         if len(expected_periods_ps) != 4 or any(p <= 0 for p in expected_periods_ps):
             raise ValueError('four positive clock periods required')
         for domain, period in zip(('core', 'sys', 'ddr', 'periph'), expected_periods_ps):
-            expected[domain + '_hz'] = (10**12 + period // 2) // period
+            expected[domain + '_hz'] = round(10**12 / period)
         expected['timer_hz'] = expected['periph_hz']
     if config != expected:
         raise ValueError('invalid or incomplete compiled SoC configuration')
@@ -324,7 +326,7 @@ def parse_metrics(text, half_periods, require_w=False):
     return result
 
 
-def parse_result(text, mode, iterations, layer, expected_core=None, expected_soc=None, expected_periods_ps=None):
+def parse_result(text, mode, iterations, layer, expected_core=None, expected_soc=None, expected_periods_ps=None, expected_cache=None):
     if re.search(r'%Fatal|%Error|Assertion failed|TIMEOUT', text):
         raise ValueError('simulator failure')
     if not re.search(r'^PASS p2-coremark-', text, re.M):
@@ -373,13 +375,14 @@ def parse_result(text, mode, iterations, layer, expected_core=None, expected_soc
     warm, busy = LAYERS[layer]
     if config is None or tuple(map(int, config.groups())) != (warm, busy, 1-warm, iterations):
         raise ValueError('software cache/background configuration does not match requested layer')
-    clock = re.search(r'^PASS p2-coremark-.* clocks=C([0-4]) core_half_ns=([0-9.]+) sys_half_ns=([0-9.]+) ddr_half_ns=([0-9.]+) periph_half_ns=([0-9.]+)', text, re.M)
+    clock = re.search(r'^PASS p2-coremark-.* clocks=C([0-9]+) core_half_ns=([0-9.]+) sys_half_ns=([0-9.]+) ddr_half_ns=([0-9.]+) periph_half_ns=([0-9.]+)', text, re.M)
     if clock is None:
         raise ValueError('missing complete simulator clock configuration record')
     clock_config = int(clock[1])
     half_periods = [float(value) for value in clock.groups()[1:]]
     expected_halves = CLOCKS[clock_config] if expected_periods_ps is None else [p / 2000 for p in expected_periods_ps]
-    if half_periods != expected_halves:
+    # TB按六位小数输出ns；按相同精度比较，保留分数周期的完整配置用于计分。
+    if half_periods != [round(value, 6) for value in expected_halves]:
         raise ValueError('simulator periods differ from the named clock configuration')
     irq_roi = re.search(r'^P2_IRQ start=(\d+) stop=(\d+) roi=(\d+)', text, re.M)
     if irq_roi is None:
@@ -422,10 +425,13 @@ def parse_result(text, mode, iterations, layer, expected_core=None, expected_soc
     if cache_line is None:
         raise ValueError('missing instantiated cache configuration')
     cache = {key: int(value) for key, value in re.findall(r'(\w+)=(\d+)', cache_line[0])}
-    expected_cache = {'icache_bytes': 4096, 'icache_line_bytes': 32, 'icache_ways': 2,
-                      'dcache_bytes': 4096, 'dcache_line_bytes': 32, 'dcache_ways': 2, 'dcache_banks': 2}
-    if any(cache.get(key) != value for key, value in expected_cache.items()):
+    expected_geometry = {'icache_bytes': 4096, 'icache_line_bytes': 32, 'icache_ways': 2,
+                      'dcache_bytes': 4096, 'dcache_line_bytes': 32, 'dcache_ways': 2, 'dcache_banks': 2,
+                      **({key: expected_cache[key] for key in ('icache_bytes','dcache_bytes')} if expected_cache else {})}
+    if any(cache.get(key) != value for key, value in expected_geometry.items()):
         raise ValueError('actual cache size differs from the frozen benchmark contract')
+    if cache.get('dcache_bank_xor_mask', 0) != (expected_cache or {}).get('dcache_bank_xor_mask', 0):
+        raise ValueError('actual D-cache bank mapping differs from the frozen benchmark contract')
     soc = parse_soc_config(text, expected_soc, expected_periods_ps)
     if soc is not None and (soc['clock_profile'] != clock_config or
                            cache.get('icache_fill_bytes') != soc['icache_fill_bytes']):
@@ -476,7 +482,7 @@ SOFTWARE_SOURCES = [Path(p) for p in (
     *('benchmark/coremark/vendor/coremark/' + name for name in
       ('core_list_join.c', 'core_main.c', 'core_matrix.c', 'core_state.c', 'core_util.c')))]
 SOFTWARE_INPUTS = SOFTWARE_SOURCES + [Path(p) for p in (
-    'benchmark/p2/core_portme.h', 'benchmark/p2/npu_background.h', 'benchmark/coremark/port/core_portme.h',
+    'benchmark/p2/core_portme.h', 'benchmark/coremark/port/core_portme.h',
     'benchmark/p2/link_soc_coremark_ddr.ld', 'software/common/baremetal/benchmark_runtime.h',
     'benchmark/coremark/vendor/coremark/coremark.h', 'benchmark/coremark/vendor/coremark/LICENSE.md',
     'scripts/verilator/verilog_hex_to_mem.py', 'scripts/verilator/run_p2_coremark.py')]

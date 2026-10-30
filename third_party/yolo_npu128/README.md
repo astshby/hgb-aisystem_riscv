@@ -12,3 +12,5 @@ hgb 的适配位于 `vsrc/soc/npu/npu_axi_target.sv`，通过系统 AXI、异步
 
 上游独立 100 MHz 布线和 UART 卷积通过；合体 SoC 重新做仿真、综合和物理验收。
 该接口提供卷积分块，完整 YOLOX 定点图、板端图调度和 RT-Thread 推理仍需接续。
+
+本 all 分支对 npu_mmio128 仅增加 irq 输出，直接连接既有 done/error 状态；计算与 RAM 未修改。manifest.json 同时保存 upstream_files 原始哈希、files 本地哈希和 local_patches 范围。

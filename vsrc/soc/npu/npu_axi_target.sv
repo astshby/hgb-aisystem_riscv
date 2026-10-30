@@ -5,7 +5,8 @@ module npu_axi_target #(
 ) (
     input logic clk_sys, rst_sys, clk_npu, rst_npu,
     input axi_types_pkg::axi_req_t axi_req,
-    output axi_types_pkg::axi_rsp_t axi_rsp
+    output axi_types_pkg::axi_rsp_t axi_rsp,
+    output logic irq
 );
     import core_config_pkg::*;
     import core_types_pkg::*;
@@ -57,6 +58,6 @@ module npu_axi_target #(
         .req_write(request.write), .req_addr(request.addr[15:0]),
         .req_wdata(32'(request.wdata >> (XLEN == 64 && request.addr[2] ? 32 : 0))),
         .req_wstrb(4'(request.wstrb >> (XLEN == 64 && request.addr[2] ? 4 : 0))),
-        .rsp_valid(device_valid), .rsp_ready, .rsp_rdata(device_data), .rsp_error(device_error)
+        .rsp_valid(device_valid), .rsp_ready, .rsp_rdata(device_data), .rsp_error(device_error), .irq
     );
 endmodule

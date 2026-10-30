@@ -108,7 +108,7 @@ module pango_measure_top #(
     assign arch.trace[0] = commit_trace[0];
     assign arch.trace[1] = commit_trace[1];
     soc_reset_controller u_reset (.reset_async, .clk_core, .clk_sys, .clk_ddr, .clk_periph,
-        .rst_core, .rst_sys, .rst_ddr, .rst_periph);
+        .rst_core, .rst_sys, .rst_ddr, .rst_periph, .rst_sys_local());
     if (1) begin : g_scan_core
         pango_measure_scan #(.INPUT_BITS(CORE_INPUT_BITS), .OUTPUT_BITS(CORE_OUTPUT_BITS)) u_scan (
             .clk(clk_core), .rst(rst_core), .shift(scan_shift[0]), .update(scan_update[0]),
@@ -211,6 +211,7 @@ module pango_measure_top #(
             .flash_mosi(sys_observe.flash_mosi), .flash_miso(sys_drive.flash_miso),
             .ddr_req(ddr_observe), .ddr_rsp(ddr_drive.response),
             .external_req(sys_drive.external_request), .external_rsp(sys_observe.external_response),
+            .video_req(), .video_rsp('0),
             .npu_req(sys_observe.npu_request), .npu_rsp(sys_drive.npu_response),
             .commit_valid(arch.commit_valid), .commit_pc(arch.commit_pc), .commit_inst(arch.commit_inst),
             .commit_rd(arch.commit_rd), .commit_rd_we(arch.commit_rd_we), .commit_rd_data(arch.commit_rd_data),

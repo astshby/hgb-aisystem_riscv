@@ -13,16 +13,20 @@ TCL_LIBRARY = ctypes.util.find_library("tcl8.6")
 
 @unittest.skipUnless(TCL_LIBRARY, "libtcl8.6 is required")
 class MemoryFlowTests(unittest.TestCase):
-    def run_flow(self, blocked=""):
+    def run_flow(self, blocked="", entry="implement.tcl", missing=""):
         with tempfile.TemporaryDirectory() as directory:
             project = Path(directory) / "fixture.pds"
             project.touch()
+            for name in ("backend_sync.lcf", "backend_cdc.scf"):
+                if name != missing:
+                    (project.parent / name).write_text("# mocked native-bound constraint\n")
             wrapper = """
 set ::env(HGB_PDS_PROJECT) {@PROJECT@}
 set blocked {@BLOCKED@}
 set events {}
 proc open_project {args} {}
 proc set_option {args} {}
+proc add_constraint {path} {lappend ::events constraint:[file tail $path]}
 proc puts {args} {}
 proc exec {args} {
     set phase [lindex $args end]
@@ -36,7 +40,7 @@ foreach phase {dev_map place route route_optimize report_timing} {
 set failed [catch {source {@IMPLEMENT@}} message]
 list $failed $events
 """.replace("@PROJECT@", str(project)).replace("@BLOCKED@", blocked).replace(
-                "@IMPLEMENT@", str(REPO / "scripts/pango/implement.tcl"))
+                "@IMPLEMENT@", str(REPO / "scripts/pango" / entry))
             library = ctypes.CDLL(TCL_LIBRARY)
             library.Tcl_CreateInterp.restype = ctypes.c_void_p
             library.Tcl_Eval.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
@@ -69,6 +73,28 @@ list $failed $events
                 self.assertIn(f"check:{phase}", result.stdout)
                 for later in phases[index:] + ["report_timing"]:
                     self.assertNotIn(f"run:{later}", result.stdout)
+
+    def test_cdc_constraints_load_before_mapping_and_all_gates(self):
+        result = self.run_flow(entry="implement_cdc.tcl")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("EVENTS constraint:backend_sync.lcf constraint:backend_cdc.scf "
+                      "check:dev_map run:dev_map check:place run:place "
+                      "check:route run:route check:route_optimize run:route_optimize "
+                      "run:report_timing", result.stdout)
+
+    def test_missing_cdc_constraint_prevents_mapping(self):
+        for name in ("backend_sync.lcf", "backend_cdc.scf"):
+            with self.subTest(name=name):
+                result = self.run_flow(entry="implement_cdc.tcl", missing=name)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("run:dev_map", result.stdout)
+
+    def test_cdc_memory_rejection_stops_physical_work(self):
+        for phase in ("dev_map", "place", "route", "route_optimize"):
+            with self.subTest(phase=phase):
+                result = self.run_flow(blocked=phase, entry="implement_cdc.tcl")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn(f"run:{phase}", result.stdout)
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ module tb_mm3_program;
     logic [31:0] wstrb;
     logic [31:0] fault_read_addr = 32'hffffffff, fault_write_addr = 32'hffffffff;
     always #5 clk=~clk;
-    mm3_accel #(.DDR_BYTES(MM3_DDR_BYTES)) dut(.*);
+    mm3_accel #(.DDR_BYTES(MM3_DDR_BYTES)) dut(.irq(),.*);
     block_to_axi #(.DDR_BYTES(MM3_DDR_BYTES)) bridge(.*);
     axi_block_memory_model #(.BYTES(MM3_DDR_BYTES)) memory(.*);
     string image_path,commands_path,ranges_path,control_path,result_path;

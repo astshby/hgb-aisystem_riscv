@@ -6,6 +6,7 @@ module mm3_gemv_accel #(
 ) (
     input logic clk, rst,
     output logic busy_out,
+    output logic irq,
     input logic req_valid,
     output logic req_ready,
     input bus_types_pkg::bus_req_t request,
@@ -69,6 +70,8 @@ module mm3_gemv_accel #(
     logic bad_config, overlap;
     assign busy = state_q != IDLE;
     assign busy_out = busy;
+    // 仅导出既有状态电平，W1C 与算子完成顺序仍由原状态机管理。
+    assign irq = done_q || error_q;
     assign width_bytes = cfg[9] != 0 ? 4 : 2;
     mmio_endpoint u_mmio (.*);
     mm3_reader u_reader (

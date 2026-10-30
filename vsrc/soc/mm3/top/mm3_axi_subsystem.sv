@@ -8,6 +8,7 @@ module mm3_axi_subsystem #(
     input logic clk_sys, rst_sys, clk_npu, rst_npu,
     input axi_types_pkg::axi_req_t control_req,
     output axi_types_pkg::axi_rsp_t control_rsp,
+    output logic irq,
     output axi_types_pkg::axi_req_t memory_req,
     input axi_types_pkg::axi_rsp_t memory_rsp
 );
@@ -54,7 +55,7 @@ module mm3_axi_subsystem #(
         end
     end
     mm3_accel #(.DDR_BYTES(DDR_BYTES), .MAC_LANES(MAC_LANES)) u_accel (
-        .clk(clk_npu), .rst(rst_npu), .req_valid(req_valid && legal), .req_ready(device_ready),
+        .clk(clk_npu), .rst(rst_npu), .irq, .req_valid(req_valid && legal), .req_ready(device_ready),
         .request, .rsp_valid(device_valid), .rsp_ready, .response(device_response),
         .rd_cmd_valid, .rd_cmd_ready, .rd_cmd, .rd_valid, .rd_ready, .rd_data,
         .wr_cmd_valid, .wr_cmd_ready, .wr_cmd, .wr_valid, .wr_ready, .wr_data,

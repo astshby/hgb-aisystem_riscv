@@ -1,8 +1,8 @@
 // Module: irq_controller
-// Description: Seven-source single-context priority controller with claim/complete gateways.
-module irq_controller (
+// Description: Parameterized single-context priority controller with claim/complete gateways.
+module irq_controller #(parameter int SOURCES = 7) (
     input logic clk, rst,
-    input logic [6:0] sources,
+    input logic [SOURCES-1:0] sources,
     output logic irq,
     input logic req_valid,
     output logic req_ready,
@@ -11,9 +11,11 @@ module irq_controller (
     input logic rsp_ready,
     output bus_types_pkg::bus_rsp_t response
 );
-    logic [2:0] priority_q [1:7];
-    logic [2:0] threshold_q, selected, best_priority;
-    logic [7:1] pending_q, service_q, enable_q;
+    localparam int ID_W = $clog2(SOURCES+1);
+    logic [2:0] priority_q [1:SOURCES];
+    logic [2:0] threshold_q, best_priority;
+    logic [ID_W-1:0] selected;
+    logic [SOURCES:1] pending_q, service_q, enable_q;
     logic [31:0] read_data, write_data, write_mask;
     logic access_fire, access_error;
     logic [21:0] offset;
@@ -27,9 +29,9 @@ module irq_controller (
     always_comb begin
         selected = 0;
         best_priority = threshold_q;
-        for (int i = 1; i <= 7; i++)
+        for (int i = 1; i <= SOURCES; i++)
             if (pending_q[i] && enable_q[i] && priority_q[i] > best_priority) begin
-                selected = 3'(i);
+                selected = ID_W'(i);
                 best_priority = priority_q[i];
             end
     end
@@ -37,17 +39,17 @@ module irq_controller (
     always_comb begin
         read_data = '0;
         access_error = 1'b0;
-        if (offset >= 4 && offset <= 28)
-            read_data = {29'b0, priority_q[offset[4:2]]};
+        if (offset >= 4 && offset <= 4*SOURCES)
+            read_data = {29'b0, priority_q[offset[ID_W+1:2]]};
         else case (offset)
             22'h000000: access_error = request.write;
             22'h001000: begin
-                read_data[7:1] = pending_q;
+                read_data[SOURCES:1] = pending_q;
                 access_error = request.write;
             end
-            22'h002000: read_data[7:1] = enable_q;
+            22'h002000: read_data[SOURCES:1] = enable_q;
             22'h200000: read_data = {29'b0, threshold_q};
-            22'h200004: read_data = {29'b0, selected};
+            22'h200004: read_data = 32'(selected);
             default: access_error = 1'b1;
         endcase
     end
@@ -59,9 +61,9 @@ module irq_controller (
             service_q <= '0;
             enable_q <= '0;
             threshold_q <= '0;
-            for (int i = 1; i <= 7; i++) priority_q[i] <= '0;
+            for (int i = 1; i <= SOURCES; i++) priority_q[i] <= '0;
         end else begin
-            for (int i = 1; i <= 7; i++)
+            for (int i = 1; i <= SOURCES; i++)
                 if (sources[i-1] && !service_q[i]) pending_q[i] <= 1'b1;
             if (access_fire) begin
                 if (!request.write && offset == 22'h200004 && selected != 0) begin
@@ -69,14 +71,14 @@ module irq_controller (
                     service_q[selected] <= 1'b1;
                 end
                 if (request.write) begin
-                    if (offset >= 4 && offset <= 28 && write_mask[0])
-                        priority_q[offset[4:2]] <= write_data[2:0];
+                    if (offset >= 4 && offset <= 4*SOURCES && write_mask[0])
+                        priority_q[offset[ID_W+1:2]] <= write_data[2:0];
                     else case (offset)
-                        22'h002000: enable_q <= (enable_q & ~write_mask[7:1]) |
-                                                (write_data[7:1] & write_mask[7:1]);
+                        22'h002000: enable_q <= (enable_q & ~write_mask[SOURCES:1]) |
+                                                (write_data[SOURCES:1] & write_mask[SOURCES:1]);
                         22'h200000: if (write_mask[0]) threshold_q <= write_data[2:0];
-                        22'h200004: if (write_mask[0] && write_data >= 1 && write_data <= 7)
-                            service_q[write_data[2:0]] <= 1'b0;
+                        22'h200004: if (write_mask[0] && write_data >= 1 && write_data <= SOURCES)
+                            service_q[write_data[ID_W-1:0]] <= 1'b0;
                         default: ;
                     endcase
                 end

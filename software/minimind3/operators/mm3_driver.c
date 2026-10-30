@@ -6,7 +6,9 @@
 #include "benchmark_runtime.h"
 #include "../../../tb/cache/cache_maintenance.h"
 #ifndef MM3_MMIO_BASE
+#ifndef MM3_MMIO_BASE
 #define MM3_MMIO_BASE 0x20000000u
+#endif
 #endif
 #define REG(o) (*(volatile uint32_t *)(uintptr_t)(MM3_MMIO_BASE+(o)))
 int mm3_mmio_submit(void *context,const MM3Command *c){
