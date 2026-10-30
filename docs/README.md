@@ -4,6 +4,7 @@
 
 | 文档 | 内容 |
 |---|---|
+| [软件复现入口](../software/README.md) | 程序源码、依赖准备和可执行测试 |
 | [PROJECT_INTRO.md](PROJECT_INTRO.md) | 项目目录、参数、环境、仿真性能、FPGA 性能、功能、未来 |
 | [understand/README.md](understand/README.md) | 五块学习总结：SoC、双发射、DDR/AXI、FPGA、优化 |
 | [fpga/FPGA_ADAPTATION.md](fpga/FPGA_ADAPTATION.md) | PDS 流程、约束、十三轮 Fmax、当前结果和板级边界 |
