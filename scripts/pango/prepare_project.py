@@ -758,6 +758,8 @@ def main():
         parser.error("select one accelerator")
     branch_path = Path(__file__).resolve().parents[1] / "branch_profile.json"
     branch = json.loads(branch_path.read_text()) if branch_path.exists() else {"default_accelerator":"none", "accelerators":["yolo","minimind"]}
+    if branch.get("simulation_only", False):
+        parser.error("all is simulation-only; stage physical projects from main, yolo or minimind")
     if not args.npu_enable and not args.mm3_enable:
         args.npu_enable = branch["default_accelerator"] == "yolo"
         args.mm3_enable = branch["default_accelerator"] == "minimind"
