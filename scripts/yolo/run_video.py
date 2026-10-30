@@ -11,8 +11,11 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0,str(ROOT / 'scripts'))
+from hardware_config import hardware_configuration
 COMMON = ["vsrc/pkg/core_config_pkg.sv", "vsrc/pkg/core_types_pkg.sv",
           "vsrc/pkg/bus_types_pkg.sv", "vsrc/pkg/axi_types_pkg.sv",
           "vsrc/soc/common/rv_fifo.sv", "vsrc/soc/common/async_fifo.sv",
@@ -43,10 +46,12 @@ def main():
     output = args.output.resolve(); output.mkdir(parents=True, exist_ok=True)
     logs = args.log_root.resolve() if args.log_root else output
     logs.mkdir(parents=True, exist_ok=True)
+    config = hardware_configuration('yolo',args.xlen)
     video = [line.strip() for line in (ROOT / "scripts/video_files.f").read_text().splitlines() if line.strip()]
     files = COMMON + video + BENCH
     identities = {name: sha(ROOT / name) for name in files +
-                  ["scripts/video_files.f", "scripts/yolo/run_video.py", "tb/yolo/ms7210_registers.hex"]}
+                  ["scripts/video_files.f", "scripts/yolo/run_video.py", "tb/yolo/ms7210_registers.hex",
+                   "scripts/hardware_config.py", "scripts/hardware_profile.json"]}
     digest = hashlib.sha256(json.dumps([args.xlen, identities], sort_keys=True).encode()).hexdigest()[:16]
     model = output / (f"model-rv{args.xlen}-" + digest)
     snapshot = model / "source"; snapshot.mkdir(parents=True, exist_ok=True)
@@ -57,7 +62,9 @@ def main():
         if not target.exists(): target.write_bytes((ROOT / name).read_bytes())
     command = ["verilator", "--lint-only" if args.lint_only else "--binary",
                "--timing", "--assert", "-Wall", "-Wno-fatal", f"-DCORE_XLEN={args.xlen}",
-               *files, "--top-module", "tb_video"]
+               f'-GSYS_PERIOD_NS={config["periods_ps"]["sys"]/1000}',
+               f'-GPERIPH_PERIOD_NS={config["periods_ps"]["periph"]/1000}',
+               f'-GPERIPH_HZ={config["frequencies_hz"]["periph"]}', *files, "--top-module", "tb_video"]
     binary = model / "Vtb_video"
     if not args.lint_only:
         command += ["-j", str(args.jobs), "--threads", "1", "--output-split", "5000",
@@ -65,7 +72,7 @@ def main():
     receipt = dict(status="PREPARED", xlen=args.xlen, source_sha256=identities, command=command,
                    commit=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
                    branch=subprocess.check_output(["git", "branch", "--show-current"], cwd=ROOT, text=True).strip(),
-                   clocks_hz=dict(sys=100000000, periph=60000000, pixel=148500000),
+                   clocks_hz=dict(sys=config["frequencies_hz"]["sys"], periph=config["frequencies_hz"]["periph"], pixel=148500000),
                    geometry=[1920, 1080], total_raster=[2200, 1125], contains_riscv_core=False,
                    not_run=["FPGA board", "PDS video implementation", "complete RV32 YOLO firmware"])
     (logs / "prepared.json").write_text(json.dumps(receipt, indent=2) + "\n")

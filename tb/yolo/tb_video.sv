@@ -1,17 +1,24 @@
 // Module: tb_video
 // Description: True 1080p frames through randomized/reordered AXI reads, AXI-Lite ownership and the actual MS7210 initialization.
-module tb_video;
+module tb_video #(
+    parameter real SYS_PERIOD_NS=10.0,
+    parameter real PERIPH_PERIOD_NS=1000.0/60.0,
+    parameter int PERIPH_HZ=60000000
+);
     timeunit 1ns;
     timeprecision 1ps;
     import axi_types_pkg::*;
     localparam logic [31:0] A=32'h83000000,B=32'h83800000,V=32'h10070000;
     logic clk_sys=0,clk_periph=0,clk_pixel=0,reset_async=1;
     logic rst_sys,rst_periph,rst_pixel;
-    always #5ns clk_sys=~clk_sys;
+    initial begin
+        realtime origin=0; longint unsigned edge_count=0;
+        forever begin edge_count++; #(origin+real'(edge_count)*SYS_PERIOD_NS/2.0-$realtime);clk_sys=~clk_sys;end
+    end
     initial begin
         realtime origin=1.7ns; longint unsigned edge_count=0;
         #1.7ns;
-        forever begin edge_count++; #(origin+real'(edge_count)*(1s/120000000.0)-$realtime);clk_periph=~clk_periph;end
+        forever begin edge_count++; #(origin+real'(edge_count)*(PERIPH_PERIOD_NS/2.0)-$realtime);clk_periph=~clk_periph;end
     end
     initial begin
         realtime origin=2.3ns; longint unsigned edge_count=0;
@@ -36,7 +43,7 @@ module tb_video;
     logic [23:0] rgb;
     axil_video_split u_split (.clk(clk_sys),.rst(rst_sys),.s_req(cpu_req),.s_rsp(cpu_rsp),
         .video_req,.video_rsp,.periph_req,.periph_rsp);
-    yolo_video #(.I2C_RESET_CYCLES(600),.I2C_SETTLE_CYCLES(600)) dut (
+    yolo_video #(.PERIPH_HZ(PERIPH_HZ),.I2C_RESET_CYCLES(600),.I2C_SETTLE_CYCLES(600)) dut (
         .clk_sys,.rst_sys,.clk_periph,.rst_periph,.clk_pixel,.rst_pixel,
         .control_req(video_req),.control_rsp(video_rsp),.memory_req,.memory_rsp,
         .hdmi_sda_in(sda_in),.hdmi_scl(scl),.hdmi_sda_drive_low(drive_low),.hdmi_reset_n,

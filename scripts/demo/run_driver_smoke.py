@@ -31,7 +31,7 @@ def main():
     output, logs = args.output.resolve(), args.logs.resolve()
     for path in (output, logs):
         path.mkdir(parents=True, exist_ok=False)
-    config = hardware_configuration('yolo', args.xlen, 16384, 8192, 2, clock='yolo60')
+    config = hardware_configuration('yolo', args.xlen, 16384, 8192, 2)
     paths = {str(p.relative_to(ROOT)) for p in sources(ROOT, 'scripts/system_files.f')}
     paths.update(str(p.relative_to(ROOT)) for p in (ROOT / 'scripts').glob('*.f'))
     paths.update(str(p.relative_to(ROOT)) for p in (ROOT / 'tb/common').glob('*.sv*'))
@@ -82,7 +82,8 @@ def main():
     report['software_sha256'] = {name: sha(ROOT / name) for name in firmware}
     model = output / 'model'
     compile_rtl = ['verilator', '--binary', '--timing', '--assert', '-Wall', '-Wno-fatal',
-                   '-j', '1', '--threads', '1', '--output-split', '5000', '--output-split-cfuncs', '100',
+                   '-j', '1', '--threads', '1', f'-GCLOCK_PROFILE={config["board_clock_profile"]}',
+                   f'-GNPU_PERIOD_PS={config["periods_ps"]["npu"]}', '--output-split', '5000', '--output-split-cfuncs', '100',
                    '-CFLAGS', '-O1 -g0', *[f'-D{k}={v}' for k, v in config['macros'].items()],
                    '-f', 'scripts/system_files.f', 'tb/common/store_result_monitor.sv',
                    'tb/soc/axi_system_memory_model.sv', 'tb/soc/spi_flash_model.sv',
