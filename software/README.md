@@ -8,9 +8,11 @@
 | 分支 | 软件 | 测试与数据 |
 |---|---|---|
 | main | 分层 CoreMark、完整串口 CoreMark | 官方算法源码、串口协议与结果解析测试 |
-| yolo | 完整 YOLO 图调度、NPU 驱动、UART/HDMI 服务 | 图算子、驱动、显示测试及固定图片/模型资产 |
+| yolo-debug（暂停发布） | 完整 YOLO 图调度、NPU 驱动、UART/HDMI 服务 | 图算子、驱动、显示测试及固定图片/模型资产 |
 | minimind | 原作者 FP32/整数 C 程序、常驻对话、裸机驱动 | 锁定模型、分词器、算子和八层软件测试 |
 | all | 上述软件和唯一一份 RT-Thread BSP/应用 | 各应用测试与双加速器联合仿真 |
+
+YOLO硬件配置键及源码目录仍叫yolo；分支名现在为yolo-debug，后续验收后才恢复yolo发布名。
 
 当前分支实际入口由 `make software-list` 列出。RT-Thread 仅在 all；它不参加裸机 CoreMark。
 

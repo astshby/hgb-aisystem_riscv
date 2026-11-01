@@ -1,6 +1,11 @@
-# hgb-aisystem：YOLO 演示分支
+# hgb-aisystem：YOLO 调试分支（暂停发布）
 
-克隆本分支：`git clone --branch yolo https://github.com/astshby/hgb-aisystem_riscv.git`。
+维护者于2026-11-01暂停`yolo`发布名称，现有版本保留为`yolo-debug`继续定位启动问题。
+完整SoC尚无有效READY或整网推理板测，不能作为已验收演示。修复并完成验收后再恢复`yolo`。
+代码保留，分支改名不改变已有仿真、物理报告和失败记录的归属。
+
+
+克隆本分支：`git clone --branch yolo-debug https://github.com/astshby/hgb-aisystem_riscv.git`。
 程序、模型和测试集均有版本库入口，见[软件复现说明](software/README.md)和[YOLO 命令](software/yolo/README.md)。
 设置工具链并安装固定 Python 依赖后，执行 `make software-prepare`、
 `make software-build XLEN=both`、`make software-test`，无需旧 build 或 YOLO-accelerate 工作目录。
