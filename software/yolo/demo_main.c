@@ -64,6 +64,20 @@ static int selftest(void *context)
     (void)context;
     return yolo_operator_selftest();
 }
+// 独立诊断固件的启动标记；等待有界，正式YDM包的格式保持原样。
+static void boot_stage(unsigned stage)
+{
+    unsigned hi=(stage>>4)&15u,lo=stage&15u;
+    const uint8_t marker[6]={'B',':',(uint8_t)(hi<10u?'0'+hi:'A'+hi-10u),
+        (uint8_t)(lo<10u?'0'+lo:'A'+lo-10u),'\r','\n'};
+    for (unsigned i=0;i<sizeof(marker);i++) {
+        unsigned poll;
+        for (poll=0;poll<10000u;poll++)
+            if (REG(UART+8)&1u) break;
+        if (poll==10000u) return;
+        REG(UART)=marker[i];
+    }
+}
 static void drain(void)
 {
     uint64_t quiet=now();
@@ -76,21 +90,35 @@ int main(void)
 {
     // 保留版本字符串到已初始化DTCM，串口协议与应用计算保持原样。
     __asm__ volatile("" : : "r"(firmware_id));
+    boot_stage(0x00); // 已进入main，尚未访问DDR。
     struct hgb_soc_clocks clocks;
-    if (hgb_soc_read_clocks(INFO,REG(INFO+0x3c),&clocks)) return 60;
+    if (hgb_soc_read_clocks(INFO,REG(INFO+0x3c),&clocks)) { boot_stage(0xe0); return 60; }
     peripheral_hz=clocks.periph_hz;
     REG(UART+16)=0;
     REG(UART+12)=(peripheral_hz+YOLO_DEMO_BAUD/2u)/YOLO_DEMO_BAUD;
     REG(UART+8)=12;
+    boot_stage(0x01); // 时钟发现和UART配置完成。
+    // 独立TCM/MMIO启动不等待DDR；应用必须先核验校准就绪，再访问帧缓冲。
+    uint64_t ddr_start=now();
+    while (!(REG(INFO+0x44)&1u)) {
+        if (now()-ddr_start>(uint64_t)peripheral_hz*2u) {
+            boot_stage(0xe2);
+            return 62;
+        }
+    }
     /* 只检查预留帧缓冲的两端，上传数据只在完整 CRC 成功后发布。 */
     store(0,0,0x5a); store(0,YDM_FRAME_BYTES-1u,0xa5);
+    boot_stage(0x02); // 帧缓冲写请求完成，下一步清理Cache并回读。
     if (flush(0) || load(0,0)!=0x5a || load(0,YDM_FRAME_BYTES-1u)!=0xa5)
-        return 61;
+        { boot_stage(0xe1); return 61; }
+    boot_stage(0x03); // DDR帧缓冲预检通过。
     struct ydm_io io={get,put,store,load,flush,selftest,0};
     ydm_init(&demo,io);
     yolo_network_service_init(&network);
+    boot_stage(0x04); // 模型工作区和视频控制口初始化完成。
     // Flash/外部启动装载者可预装DDR资产；没有有效包时保留UART模型装载入口。
     (void)yolo_network_service_try_preloaded(&network);
+    boot_stage(0x05); // 预装包检查完成，下一步进入YDM服务。
     ydm_set_network(&demo,yolo_network_service_endpoint(&network));
     ydm_ready(&demo);
     for (;;) {
