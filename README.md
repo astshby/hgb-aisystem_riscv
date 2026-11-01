@@ -1,5 +1,10 @@
 # hgb-aisystem：YOLO 演示分支
 
+当前GitHub可获取基线为`yolo@3780a75`。本分析分支为`diag/yolo-startup-review-20261101`，
+用于核对合并时间线和完整SoC启动问题；原报告的c3905ae/b504824诊断代码尚未上传。
+分支关系和具体定位顺序见[上板状态与源码核对](docs/fpga/YOLO_BRINGUP_STATUS.md)。
+
+
 克隆本分支：`git clone --branch yolo https://github.com/astshby/hgb-aisystem_riscv.git`。
 程序、模型和测试集均有版本库入口，见[软件复现说明](software/README.md)和[YOLO 命令](software/yolo/README.md)。
 设置工具链并安装固定 Python 依赖后，执行 `make software-prepare`、

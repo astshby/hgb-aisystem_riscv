@@ -4,6 +4,56 @@
 
 完整 YOLO 尚未跑通。小型独立 UART/NPU 板测已通过，但完整 SoC 在有效 KEY0 复位后仍无启动日志，模型上传和整网推理均为 0 次。当前定位重点是完整 SoC 的时钟、复位、CPU 启动和首次 MMIO 访问，尚未确认根因。
 
+## 分支基线与源码可用性
+
+2026-11-01对照GitHub实际分支、PR和Git树。当前可获取的YOLO基线为
+`yolo@3780a75b3dbd31cdd5f1d3689b06632b451e1646`；后续分支分析在
+`diag/yolo-startup-review-20261101`进行，未改生产RTL、固件或时钟。
+
+| 北京时间（Git提交时间） | 提交 | 内容 |
+|---|---|---|
+| 10-30 16:13:29 | cb83b8a | C10发布及物理交接基点 |
+| 10-31 00:43:14 | 4153aee，PR21 | all软件交付 |
+| 10-31 00:43:34 | 88b5c14，PR20 | MiniMind软件交付 |
+| 10-31 00:43:50 | dc5dfe5，PR19 | YOLO模型、测试集及可重建依赖 |
+| 10-31 00:44:12 | 51f6472，PR18 | main的CoreMark软件交付 |
+| 11-01 16:54:04 | 9baa9b6 | 上板状态报告的原文档提交 |
+| 11-01 17:24:40 | 3780a75，PR22 | 将该报告squash合入yolo，仅3份文档 |
+
+逐项Git树对比表明：PR18/20/21的发布树与原软件分支完全相同，
+PR19的dc5dfe5与ee9ad5d完全相同，PR22的3780a75与9baa9b6完全相同。
+提交号因squash不同，没有发现这些合并丢文件或倒退代码。
+PR22只增加文档；当前yolo的RTL和软件仍与dc5dfe5相同。
+GitHub查询返回的PR22创建/合并时间字段有先后倒置，本表采用Git提交时间，
+不据该创建时间推断实验发生顺序。
+
+本机对象库和本仓库GitHub提交API均查询不到c3905ae与b504824；
+API返回No commit found。下文所述DDR就绪等待、S/B/T诊断和原位流身份
+属于报告里的另一份本地源码，没有被PR22带入。LED观察草案也只记载为未应用。
+在取得原提交、git bundle或补丁前，无法声称已恢复这些诊断的精确版本或重放板测。
+
+## 当前公开代码的定位顺序
+
+目前已记录的是完整SoC无启动服务、模型上传和整网计算均0次，尚无完整系统加速比。
+独立UART/NPU成功记录不能定位整机启动卡点；以下是对现有源代码的静态检查，未新增板测结论。
+
+1. 先看独立SoC PLL和视频PLL锁定。`pango_200hp_top.sv`将
+   `soc_pll_locked && video_pll_locked`送入复位管理器；视频PLL不锁定会使Core/SYS/外设保持复位。
+2. 再看Core退出复位、ITCM取指和退休。当前`crt0.S`没有报告中的S:0/S:1/S:2/T:；
+   当前异常/退出通路写tohost后停留，不能仅凭UART无字节断言CPU从未执行。
+3. 检查首次SoC时钟寄存器及UART MMIO。`demo_main.c`在READY之前先读取时钟信息；
+   失败时return 60，公开程序未在此分支发送错误串口帧。
+4. 检查首次DDR访问。独立启动允许DDR校准前运行，但`demo_main.c`在READY之前
+   写帧缓冲两端并clean/invalidate Cache，没有先轮询INFO+0x44的DDR在线状态。
+   `ddr_axi_target`对未就绪访问返回DECERR；因此可能在READY之前异常/退出。
+   这是公开基线的具体风险，不等于已确定此次板卡的根因；报告所述c3905ae修复仍缺源码。
+5. 取得原诊断源码后，再把不依赖UART/DDR的时钟、复位、取指/退休观察接到目的分支，
+   先做双宽聚焦验证。完整READY出现后再传模型、测整网推理和HDMI；本轮不重新启动PDS或烧板。
+
+对应源文件为`vsrc/cpu/pango_200hp_top.sv`、`vsrc/cpu/pango_soc_reset.sv`、
+`vsrc/soc/bus/ddr_axi_target.sv`、`vsrc/soc/bus/mmio_bus.sv`、
+`software/common/baremetal/crt0.S`和`software/yolo/demo_main.c`。
+
 ## 代码与测量身份
 
 | 项目 | 身份或状态 |
