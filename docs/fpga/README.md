@@ -1,5 +1,9 @@
 # FPGA 与 PDS
 
+当前 YOLO C10 诊断已完成布线和短时上板，完整系统仍无启动服务；
+最新进度、过温与串口结论见 [YOLO_BRINGUP_STATUS.md](YOLO_BRINGUP_STATUS.md)。
+下列 C6/C7/C8 文字是早期阶段快照，不能替代该报告的最新状态。
+
 Windows PDS 2025.2 ADS、PG2L200H-6IFBB676。当前演示配置为：
 
 | 用途 | 档位 | Core/SYS/DDR-user/外设/NPU，MHz | 视频 |
