@@ -8,6 +8,7 @@
 | [PROJECT_INTRO.md](PROJECT_INTRO.md) | 项目目录、参数、环境、仿真性能、FPGA 性能、功能、未来 |
 | [understand/README.md](understand/README.md) | 五块学习总结：SoC、双发射、DDR/AXI、FPGA、优化 |
 | [fpga/FPGA_ADAPTATION.md](fpga/FPGA_ADAPTATION.md) | PDS 流程、C6 最终布线、视频/驱动与完整 320 应用验证、历史 Fmax |
+| [fpga/YOLO_BRINGUP_STATUS.md](fpga/YOLO_BRINGUP_STATUS.md) | 当前 YOLO 启动诊断、原生时序、板测问题、整改及证据边界 |
 
 工作区根目录还有三份交接文档：
 
