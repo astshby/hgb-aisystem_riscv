@@ -21,6 +21,7 @@ module pango_200hp_top #(
     input logic uart_rxd,
     output logic uart_txd,
     output logic ddr_ready_led,
+    output logic [6:0] boot_debug_led,
     output logic hdmi_pixel_clk, hdmi_hs, hdmi_vs, hdmi_de,
     output logic [23:0] hdmi_rgb,
     output logic hdmi_reset_n, hdmi_scl,
@@ -54,6 +55,8 @@ module pango_200hp_top #(
         (BOARD_CLOCK_PROFILE == 9 ? 68269231 : (BOARD_CLOCK_PROFILE == 10 ? 65848214 :
         (BOARD_CLOCK_PROFILE >= 6 ? 60000000 : 25000000)));
     logic [1:0] uart_rx, uart_tx;
+    logic boot_commit_valid, boot_commit_exception;
+    logic [core_config_pkg::XLEN-1:0] boot_commit_pc;
     logic [31:0] gpio_in [3], gpio_out [3], gpio_oe [3];
     logic ddr_req_valid, ddr_req_ready, ddr_rsp_valid, ddr_rsp_ready;
     bus_req_t ddr_request;
@@ -153,6 +156,11 @@ module pango_200hp_top #(
     assign gpio_in[0] = '0;
     assign gpio_in[1] = '0;
     assign gpio_in[2] = '0;
+    pango_boot_observer #(.PC_WIDTH(core_config_pkg::XLEN)) u_boot_observer (
+        .clk_core(hot_clk), .clk_sys(sys_clk), .clk_periph(periph_clk),
+        .board_reset_n, .reset_async(soc_rst),
+        .commit_valid(boot_commit_valid), .commit_pc(boot_commit_pc),
+        .commit_exception(boot_commit_exception), .uart_tx(uart_txd), .led(boot_debug_led));
 
 `ifdef CORE_SCOREBOARD
     axi_types_pkg::axi_req_t unified_ddr_req;
@@ -211,8 +219,8 @@ module pango_200hp_top #(
         .flash_cs_n(),.flash_sck(),.flash_mosi(),.flash_miso(1'b0),
         .ddr_req(unified_ddr_req),.ddr_rsp(unified_ddr_rsp),.external_req,.external_rsp,.npu_req,.npu_rsp,
         .video_req,.video_rsp,
-        .commit_valid(),.commit_pc(),.commit_inst(),.commit_rd(),.commit_rd_we(),.commit_rd_data(),
-        .commit_exception(),.commit_trace(),.dmem_store_fire(),.dmem_store_addr(),.dmem_store_data(),.dmem_store_strb());
+        .commit_valid(boot_commit_valid),.commit_pc(boot_commit_pc),.commit_inst(),.commit_rd(),.commit_rd_we(),.commit_rd_data(),
+        .commit_exception(boot_commit_exception),.commit_trace(),.dmem_store_fire(),.dmem_store_addr(),.dmem_store_data(),.dmem_store_strb());
     ddr_axi_target u_ddr_target (.clk(core_clk),.rst(ddr_bridge_rst),.memory_ready(ddr_init_done),
         .axi_req(unified_ddr_req),.axi_rsp(unified_ddr_rsp),
         .rd_cmd_valid,.rd_cmd_ready,.rd_cmd,.rd_valid,.rd_ready,.rd_data,
@@ -244,8 +252,8 @@ module pango_200hp_top #(
         .dma_block_wr_cmd_valid, .dma_block_wr_cmd_ready, .dma_block_wr_cmd,
         .dma_block_wr_valid, .dma_block_wr_ready, .dma_block_wr_data,
         .dma_block_wr_rsp_valid, .dma_block_wr_rsp_ready, .dma_block_wr_rsp,
-        .commit_valid(), .commit_pc(), .commit_inst(), .commit_rd(),
-        .commit_rd_we(), .commit_rd_data(), .commit_exception(), .commit_trace(),
+        .commit_valid(boot_commit_valid), .commit_pc(boot_commit_pc), .commit_inst(), .commit_rd(),
+        .commit_rd_we(), .commit_rd_data(), .commit_exception(boot_commit_exception), .commit_trace(),
         .dmem_store_fire(), .dmem_store_addr(), .dmem_store_data(), .dmem_store_strb()
     );
 

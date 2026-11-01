@@ -191,3 +191,7 @@ tcm-bram-test:
 
 soc-irq-cdc-test:
 	bash scripts/verilator/run_soc_irq_cdc.sh $(XLEN)
+
+.PHONY: pango-boot-observer-test
+pango-boot-observer-test:
+	bash scripts/verilator/run_pango_boot_observer.sh $(XLEN)
