@@ -64,6 +64,9 @@ docs/          项目介绍、学习总结与 FPGA 适配说明
 ## 软件与固件
 
 固件源码、模型与测试集均随仓库提交；`build/` 只保存编译产物，删除后可重新生成。
+仓库内置示例图片与模型：`tb/assets/yolo/`（`dog.jpg`、`dog-192x144/320/416.rgb`、
+`black-16x16/320/416.rgb`）与 `software/yolo/assets/`（`yolox-tiny-320.bin`、
+`yolox-tiny-416.bin`、权重哈希与模型锁文件）。
 
 ```bash
 make software-list
@@ -76,6 +79,22 @@ python3 scripts/yolo/firmware.py verify --output build/yolo-board-rv32
 ELF/HEX/TCM 哈希。RV32/RV64 发布镜像 ID 分别为 `6aff928ff969d57d`、`adcd70b68d805fcf`。
 上位机入口为 `scripts/yolo/host.py --port <串口> status|model|upload|detect|read|selftest`。
 详细说明见[软件复现](software/README.md)与[YOLO 命令](software/yolo/README.md)。
+
+## 环境要求
+
+| 用途 | 版本与说明 |
+|---|---|
+| 操作系统 | Windows 11（PDS 仅 Windows 本地运行）+ WSL2 Ubuntu 22.04（固件与 Python 工具） |
+| 仿真器 | Verilator 5.052 |
+| 交叉工具链 | GCC 16.1.0，需支持 `rv32im_zicsr`/`ilp32` 与 `rv64im_zicsr`/`lp64` |
+| 物理实现 | Pango PDS 2025.2 ADS |
+| 器件 | PG2L200H-6IFBB676 |
+| 脚本环境 | Python 3.10 及以上、Git、Make、C/C++ 编译器 |
+| 内存 | 每个 PDS 阶段启动前 Windows 可用物理内存与可用提交内存均不少于 6 GiB |
+
+外部路径统一由环境变量给出：`RISCV_TOOL_ROOT`（交叉编译器 bin）、`PDS_HOME`（PDS 安装目录）、
+`PDS_WORK_ROOT`（原生工程根目录）、`RTTHREAD_ROOT`（仅在 `all` 分支使用）、
+`COREMARK_REPLAY_DIR`（仅在基准复现时使用）。
 
 ## Windows 下的 PDS 适配
 
