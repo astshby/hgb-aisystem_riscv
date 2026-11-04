@@ -205,7 +205,7 @@ module tb_core_ras;
     endtask
     initial begin
         if (!RAS_ENABLE) begin
-            $display("PASS tb_core_ras SKIP RAS disabled"); $finish;
+            $display("SKIP tb_core_ras RAS disabled"); $finish;
         end else begin
             for (scenario = 0; scenario < 6; scenario++) begin
                 @(negedge clk); rst = 1; irq_timer = 0; irq_phase = 0; irq_cycle = 0;

@@ -4,7 +4,9 @@ cd "$(dirname "$0")/../.."
 width="${1:-64}"
 [[ "$width" =~ ^(32|64)$ ]] || exit 2
 export CCACHE_TEMPDIR="$PWD/build/ccache-tmp" CCACHE_DIR="$PWD/build/ccache"
-mkdir -p "$CCACHE_TEMPDIR" "$CCACHE_DIR" logs/p0
+scoreboard_log_root="${SCOREBOARD_LOG_ROOT:-logs/p0}"
+scoreboard_build_root="${SCOREBOARD_BUILD_ROOT:-build/verilator}"
+mkdir -p "$CCACHE_TEMPDIR" "$CCACHE_DIR" "$scoreboard_log_root"
 tests=("$@")
 tests=("${tests[@]:1}")
 [[ ${#tests[@]} -gt 0 ]] || tests=(contracts rename operands operands_wide operands_issue broadcast_priority broadcast_priority_split broadcast_slots broadcast_slots_split split_iq split_iq_small integer_ooo integer_select issue_merge issue_merge_ordered forward_modes issue recovery retirement completion completion_wide completion_queue completion_cancel lsu lsu_slots lsu_forward lsu_admit metrics scheduler_metrics core events)
@@ -45,8 +47,8 @@ for test in "${tests[@]}"; do
         top=tb_scoreboard_operands
         extra_options+=(-GBROADCAST_PORTS=7 -GISSUE_BYPASS=1)
     fi
-    out="build/verilator/p0-$test-rv$width$suffix"
-    log="logs/p0/$test-rv$width$suffix"
+    out="$scoreboard_build_root/p0-$test-rv$width$suffix"
+    log="$scoreboard_log_root/$test-rv$width$suffix"
     extra_sources=()
     if [[ "$test" == lsu || "$test" == lsu_slots || "$test" == lsu_forward || "$test" == lsu_admit ]]; then
         extra_sources+=(tb/common/lsu_age_checker.sv)
@@ -57,7 +59,7 @@ for test in "${tests[@]}"; do
         extra_sources+=(build/p1-reference/load_store_queue_reference.sv tb/unit/scoreboard/lsq_equivalence_checker.sv)
     fi
     mkdir -p "$out"
-    verilator -Wall -Wno-fatal --assert --timing --binary -j 2 -CFLAGS -O1 \
+    verilator -Wall -Wno-fatal --assert --timing --binary -j 1 -CFLAGS -O1 \
         -DCORE_XLEN="$width" "${core_microarch_flags[@]}" \
         -DCORE_MUL_IMPL=0 -DCORE_DIV_IMPL=1 \
         -Mdir "$out" -f scripts/rtl_files.f tb/common/rv_asm_pkg.sv "${extra_sources[@]}" \
@@ -70,5 +72,8 @@ for test in "${tests[@]}"; do
     "$out/V$top" >"$log.run.log" 2>&1 || {
         tail -n 50 "$log.run.log"; exit 1;
     }
+    if rg -q '(%Fatal|%Error|Assertion failed)' "$log.run.log"; then
+        tail -n 50 "$log.run.log"; exit 1;
+    fi
     rg "^PASS $top " "$log.run.log"
 done
