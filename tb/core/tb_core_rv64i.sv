@@ -58,7 +58,7 @@ module tb_core_rv64i;
 
     initial begin
         if (XLEN != 64) begin
-            $display("PASS tb_core_rv64i SKIP RV%0d", XLEN);
+            $display("SKIP tb_core_rv64i RV%0d", XLEN);
             $finish;
         end
         for (idx = 0; idx < 128; idx = idx + 1)
