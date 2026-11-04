@@ -214,7 +214,9 @@ module scoreboard_core (
             fetch_pop_count = fetched[0].valid ? (fetched[1].valid && !d1_redirect[0].valid ? 2'd2 : 2'd1) : 2'd0;
         for (int lane = 0; lane < 2; lane++) begin
             decode_intake[lane] = decoded[lane];
-            decode_intake[lane].valid = int'(fetch_pop_count) > lane;
+            // 保留0/1/2条前缀有效位，避免窄计数转为有符号int后被综合误折叠。
+            decode_intake[lane].valid = (lane == 0) ?
+                (fetch_pop_count != 2'd0) : (fetch_pop_count == 2'd2);
             // 训练上下文保持取指快照；执行控制已知道此 JAL 的实际方向，不再次恢复。
             if (d1_redirect[lane].valid) begin
                 decode_intake[lane].pred.taken = 1'b1;
@@ -525,8 +527,8 @@ module scoreboard_core (
     assign retire_ready[1] = !rst && !head_results[0].exc.valid && !head_results[1].exc.valid &&
         !(head_metadata[0].kind inside {RET_CSR, RET_SERIAL}) &&
         !(head_metadata[1].kind inside {RET_CSR, RET_SERIAL}) &&
-        (int'(training_capacity) >= int'(head_metadata[0].kind == RET_BRANCH) +
-                                   int'(head_metadata[1].kind == RET_BRANCH));
+        (training_capacity >= 2'(2'(head_metadata[0].kind == RET_BRANCH) +
+                          2'(head_metadata[1].kind == RET_BRANCH)));
     for (genvar lane = 0; lane < 2; lane++) begin : g_retire
         commit_control u_commit (
             .retire_fire(retire_fire[lane]), .head_meta(head_metadata[lane]), .head_result(head_results[lane]),

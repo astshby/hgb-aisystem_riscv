@@ -68,7 +68,7 @@ module scoreboard_queue #(
     assign occupancy = count_q;
     // 容量只由已寄存占用确定，切断执行 ready 到双分配的组合链；队列吸收短暂反压。
     always_comb begin
-        available = DEPTH - int'(count_q);
+        available = DEPTH - count_q;
         push_capacity = 0;
         if (!rst && !flush && !recovery.valid)
             push_capacity = available >= 2 ? 2'd2 : 2'(available);
@@ -87,7 +87,7 @@ module scoreboard_queue #(
             packet_d[slot] = capture(packet_q[slot], 1'b0, 1'b0);
         survivors = '0;
         for (int age = 0; age < DEPTH; age++) begin
-            if (age < int'(count_q) &&
+            if ((count_q > COUNT_W'(age)) &&
                 !younger_than(packet_q[PTR_W'(read_q + PTR_W'(age))].retire_id, recovery.id, head_slot))
                 survivors = survivors + COUNT_W'(1);
         end
@@ -122,7 +122,7 @@ module scoreboard_queue #(
     initial assert (DEPTH >= 2 && (DEPTH & (DEPTH - 1)) == 0)
         else $fatal(1, "scoreboard depth must be a power of two");
     always_ff @(posedge clk) if (!rst && !flush) begin
-        assert (push_count <= push_capacity && int'(pop_count) <= int'(count_q) && pop_count <= 2)
+        assert (push_count <= push_capacity && pop_count <= count_q && pop_count <= 2)
             else $fatal(1, "scoreboard queue overflow/underflow");
         assert (pop_count == 0 || operands_ready[0]) else $fatal(1, "unready first issue");
         assert (pop_count != 2 || operands_ready[1]) else $fatal(1, "unready second issue");

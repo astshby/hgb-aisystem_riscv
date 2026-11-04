@@ -58,7 +58,7 @@ module ras #(
                 if (old.count < COUNT_W'(DEPTH)) next_state.count = old.count + 1'b1;
             end
             RAS_POP: if (old.count != '0) begin
-                for (int i = 1; i < int'(DEPTH); i++)
+                for (int i = 1; i < DEPTH; i++)
                     next_state.entries[i-1] = old.entries[i];
                 next_state.entries[DEPTH-1] = '0;
                 next_state.count = old.count - 1'b1;
