@@ -1,5 +1,23 @@
 # hgb-aisystem：四域 RISC-V SoC
 
+后续以现有工程维护、启动排错和必要的紫光适配为主，优先保证功能与上板。
+`rhbyv-cpu-forlinux` 继续独立开发并适配 Zynq-7020，逐项吸收本仓库已验证的经验。
+两个仓库分别维护 Core、软件和厂商工程，不自动同步整目录。
+
+启动路径的窄计数比较与取指 FIFO 容量进位已修复。可在新克隆中运行：
+
+```bash
+make boot-count-test XLEN=32
+make boot-count-test XLEN=64
+python3 -m unittest tb.scripts.test_scoreboard_runner
+```
+
+每宽度检查九个用例：FIFO 深度 2/4/8、ROM→ITCM、ISS 双出双入、整数/访存 IQ、
+恢复和退休。入口使用单线程编译，在 `logs/boot-count/` 保存命令、源哈希和运行结果。
+Python 的四项测试另查入口的退出码和致命错误判定，不执行 RTL。
+完整回归分别执行下方的 `make test`、`riscv-tests` 和 benchmark 入口。
+修复后的 PDS 网表和板上启动仍需重新验收，不能沿用旧位流的时序作为修复结果。
+
 本分支保存无 NPU 的 Core/SoC、公共仿真、分层裸机 CoreMark 和上板串口交互程序。
 首次获取使用 `git clone --branch main https://github.com/astshby/hgb-aisystem_riscv.git`。
 程序源码、依赖准备和可执行命令见[软件复现说明](software/README.md)。
