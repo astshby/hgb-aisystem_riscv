@@ -25,7 +25,8 @@ module fetch_queue #(
     assign second_tail = tail_q + PTR_W'(1);
     assign occupancy = count_q;
     assign push_ready = !rst && !flush &&
-                        (count_q + COUNT_W'(2) <= COUNT_W'(DEPTH) + COUNT_W'(pop_count));
+                        ({1'b0, count_q} + (COUNT_W+1)'(2) <=
+                         (COUNT_W+1)'(DEPTH) + (COUNT_W+1)'(pop_count));
     assign accepted = push_ready ? push_count : 2'd0;
     always_comb begin
         out_packet = entries_q[head_q];
