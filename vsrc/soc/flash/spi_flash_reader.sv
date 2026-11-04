@@ -39,7 +39,7 @@ module spi_flash_reader (
         end else begin
             if (rsp_valid && rsp_ready) rsp_valid <= 0;
             if (req_valid && req_ready) begin
-                if (request.write || request.execute || (!address_four_bytes && request.addr[27:24] != 0) || int'(request.size) > $clog2(DBUS_BYTES)) begin
+                if (request.write || request.execute || (!address_four_bytes && request.addr[27:24] != 0) || (request.size > 2'($clog2(DBUS_BYTES)))) begin
                     rsp_valid <= 1; response <= '{rdata:'0,error:BUS_SLVERR};
                 end else begin
                     state_q <= HEADER; spi_cs_n <= 0; spi_sck <= 0;
