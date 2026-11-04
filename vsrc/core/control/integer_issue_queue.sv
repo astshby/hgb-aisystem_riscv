@@ -212,7 +212,7 @@ module integer_issue_queue #(
             end
             if (!recovery.valid) begin
                 for (int lane = 0; lane < 2; lane++) begin
-                    if (lane < int'(push_count)) begin
+                    if (push_count > 2'(lane)) begin
                         valid_q[free_slot[lane]] <= 1;
                         packet_q[free_slot[lane]] <= captured[lane];
                     end
