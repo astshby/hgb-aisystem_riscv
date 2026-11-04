@@ -114,7 +114,7 @@ module split_scoreboard_queue #(
         push_capacity = 0;
         for (int lane = 0; lane < 2; lane++) begin
             demand[push_memory[lane]]++;
-            if (demand[0] <= int'(bank_capacity[0]) && demand[1] <= int'(bank_capacity[1]) &&
+            if ((bank_capacity[0] >= 2'(demand[0])) && (bank_capacity[1] >= 2'(demand[1])) &&
                 (lane == 0 || push_capacity == 1))
                 push_capacity = 2'(lane + 1);
         end
@@ -127,7 +127,7 @@ module split_scoreboard_queue #(
             for (int lane = 0; lane < 2; lane++) bank_push[b][lane] = '0;
         end
         for (int lane = 0; lane < 2; lane++) begin
-            if (lane < int'(push_count)) begin
+            if (push_count > 2'(lane)) begin
                 bank_push[push_memory[lane]][bank_push_count[push_memory[lane]][0]] = dispatch_captured[lane];
                 bank_push_count[push_memory[lane]]++;
             end
@@ -187,13 +187,13 @@ module split_scoreboard_queue #(
         bank_pop_count[0] = 0;
         bank_pop_count[1] = 0;
         for (int lane = 0; lane < 2; lane++)
-            if (lane < int'(pop_count)) bank_pop_count[selected_memory[lane]]++;
+            if (pop_count > 2'(lane)) bank_pop_count[selected_memory[lane]]++;
     end
 `ifndef SYNTHESIS
     always_ff @(posedge clk) if (!rst && !flush) begin
         assert (push_count <= push_capacity) else $fatal(1, "split IQ allocation overflow");
         for (int lane = 0; lane < 2; lane++)
-            if (lane < int'(push_count))
+            if (push_count > 2'(lane))
                 assert (push_memory[lane] == (schedule_class(push_packet[lane]) == SCHED_MEMORY))
                     else $fatal(1, "split IQ decode/renamed class mismatch");
         assert (pop_count <= 2 && (pop_count == 0 || operands_ready[0]) &&

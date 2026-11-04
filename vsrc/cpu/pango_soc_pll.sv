@@ -20,21 +20,30 @@ module pango_soc_pll #(
     // 未启用候选：main 贴边 I/M/F=9/5/13，VCO8125/9，输出 /10、/9、/13；
     // YOLO 偏 NPU I/M/F=8/1/43，VCO671.875，输出 /8、/7、/11、/7。
     localparam bit HIGH_VCO = CLOCK_PROFILE >= 5;
-    localparam int unsigned INPUT_DIV = CLOCK_PROFILE == 9 ? 10 : (CLOCK_PROFILE == 10 ? 8 : 5);
+    // C11 为 C10 的各输出分频加倍档（VCO 相同），用于板级半速验证。
+    // C12 在 C11 基础上再翻倍（约 C10 的四分之一），用于更宽时序余量下的板级正确性验证。
+    localparam bit C12_PROFILE = CLOCK_PROFILE == 12;
+    localparam bit DEEP_DIV_PROFILE = CLOCK_PROFILE == 10 || CLOCK_PROFILE == 11 || C12_PROFILE;
+    localparam int unsigned INPUT_DIV = CLOCK_PROFILE == 9 ? 10 :
+        (DEEP_DIV_PROFILE ? 8 : 5);
     localparam int unsigned MULTIPLY = CLOCK_PROFILE >= 9 ? 1 : 4;
     localparam real VCO_RATIOF = CLOCK_PROFILE == 9 ? 71.0 :
-        (CLOCK_PROFILE == 10 ? 59.0 : (HIGH_VCO ? 9.0 : 8.0));
+        (DEEP_DIV_PROFILE ? 59.0 : (HIGH_VCO ? 9.0 : 8.0));
     localparam int unsigned VCO_DUTY = CLOCK_PROFILE == 9 ? 71 :
-        (CLOCK_PROFILE == 10 ? 59 : (HIGH_VCO ? 9 : 8));
+        (DEEP_DIV_PROFILE ? 59 : (HIGH_VCO ? 9 : 8));
     localparam int unsigned CORE_DIV = CLOCK_PROFILE == 9 ? 10 :
-        (CLOCK_PROFILE == 10 || CLOCK_PROFILE == 8) ? 11 :
-        ((CLOCK_PROFILE == 5 || CLOCK_PROFILE == 7) ? 10 : (HIGH_VCO ? 9 : 8));
+        (CLOCK_PROFILE == 11 ? 22 : (C12_PROFILE ? 44 :
+        ((CLOCK_PROFILE == 10 || CLOCK_PROFILE == 8) ? 11 :
+        ((CLOCK_PROFILE == 5 || CLOCK_PROFILE == 7) ? 10 : (HIGH_VCO ? 9 : 8)))));
     localparam real CORE_RATIO = real'(CORE_DIV);
     localparam int unsigned CORE_DUTY = CORE_DIV;
-    localparam int unsigned SYS_DIV = CLOCK_PROFILE == 1 ? 10 : (HIGH_VCO ? 9 : 8);
+    localparam int unsigned SYS_DIV = CLOCK_PROFILE == 1 ? 10 :
+        (CLOCK_PROFILE == 11 ? 18 : (C12_PROFILE ? 36 : (HIGH_VCO ? 9 : 8)));
     localparam int unsigned PERIPH_DIV = CLOCK_PROFILE == 9 ? 13 :
-        (CLOCK_PROFILE == 10 ? 14 : (CLOCK_PROFILE >= 6 ? 15 : (HIGH_VCO ? 36 : 32)));
-    localparam int unsigned NPU_DIV = CLOCK_PROFILE == 10 ? 10 : (HIGH_VCO ? 9 : 8);
+        (CLOCK_PROFILE == 10 ? 14 : (CLOCK_PROFILE == 11 ? 28 : (C12_PROFILE ? 56 :
+        (CLOCK_PROFILE >= 6 ? 15 : (HIGH_VCO ? 36 : 32)))));
+    localparam int unsigned NPU_DIV = CLOCK_PROFILE == 10 ? 10 :
+        (CLOCK_PROFILE == 11 ? 20 : (C12_PROFILE ? 40 : (HIGH_VCO ? 9 : 8)));
     wire pll_core, pll_sys, pll_periph, pll_npu;
 
     // 125 / 5 = 25 MHz PFD；25 * 4 * 8/9 = 800/900 MHz VCO。
@@ -75,7 +84,7 @@ module pango_soc_pll #(
     end
 
     initial begin
-        assert (CLOCK_PROFILE == 1 || (CLOCK_PROFILE >= 4 && CLOCK_PROFILE <= 10))
-            else $fatal(1, "pango_soc_pll supports C1 and C4-C10 only");
+        assert (CLOCK_PROFILE == 1 || (CLOCK_PROFILE >= 4 && CLOCK_PROFILE <= 12))
+            else $fatal(1, "pango_soc_pll supports C1 and C4-C12 only");
     end
 endmodule

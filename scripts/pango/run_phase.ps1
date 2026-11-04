@@ -6,7 +6,11 @@ param(
     [Parameter(Mandatory=$true)][ValidateSet('synthesis', 'implementation')][string]$Phase,
     [string]$PdsHome = $env:PDS_HOME,
     [ValidateSet('implement_cdc.tcl', 'implement.tcl')]
-    [string]$ImplementationScript = 'implement_cdc.tcl'
+    [string]$ImplementationScript = 'implement_cdc.tcl',
+    # 诊断专用：显式传入非 C10 档（8/9/11/12）才放宽交互固件的档位断言，
+    # 并把档位写进相位回执；默认 0 时生产断言保持原样。
+    [ValidateSet(0, 8, 9, 11, 12)]
+    [int]$DiagnosticClockProfile = 0
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'wsl_helpers.ps1')
@@ -39,8 +43,13 @@ function Assert-InteractiveInputs {
             $manifest.firmware.build_config.baud -ne 115200 -or
             $manifest.firmware.build_config.application -cne 'yolox-tiny-full-network' -or
             @($manifest.firmware.source_sha256.PSObject.Properties).Count -ne 27 -or
-            -not $manifest.npu_enable -or -not $manifest.video_enable -or $manifest.board_clock_profile -ne 10))) {
+            -not $manifest.npu_enable -or -not $manifest.video_enable -or
+            -not ($manifest.board_clock_profile -eq 10 -or
+                  ($DiagnosticClockProfile -ne 0 -and $manifest.board_clock_profile -eq $DiagnosticClockProfile))))) {
         throw 'Invalid production interactive firmware identity.'
+    }
+    if ($DiagnosticClockProfile -ne 0) {
+        Write-Output "PASS diagnostic clock profile: C$DiagnosticClockProfile (production identity remains C10)"
     }
     Assert-InputHashes $projectRoot $manifest.files
     if ($Phase -eq 'implementation') {
@@ -99,6 +108,8 @@ if (Test-Path -LiteralPath $inputManifestPath) {
             source_commit = $inputManifest.source_commit; source_branch = $inputManifest.source_branch
             firmware_role = $inputManifest.firmware_role; firmware_id = $inputManifest.firmware.firmware_id
             xlen = $inputManifest.xlen; synthesis_strategy = $inputManifest.synthesis_strategy
+            # 0 表示生产档位（C10）；非零记录本次诊断降频，便于回溯位流来源。
+            diagnostic_clock_profile = $DiagnosticClockProfile
             started_utc = [DateTime]::UtcNow.ToString('o')
         } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $receiptPath -Encoding UTF8
     }

@@ -43,17 +43,42 @@ module pango_200hp_top #(
     wire video_clk, video_pll_locked;
     // 频率发现和 UART 分频必须跟随 PLL。C8 的整数 Hz 元数据四舍五入，
     // 硬件实际 Core 为 900 MHz /11；约束使用精确分数，不以元数据代替 PLL。
+    // C11 为板级半速诊断档：VCO 921.875 MHz，Core/SYS/外设/NPU 分频加倍。
+    // C12 在 C11 基础上再翻倍，用于更宽时序余量下的板级正确性验证。
     localparam int unsigned HOT_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :
         (BOARD_CLOCK_PROFILE == 9 ? 88750000 : (BOARD_CLOCK_PROFILE == 10 ? 83806818 :
+        (BOARD_CLOCK_PROFILE == 11 ? 41903409 :
+        (BOARD_CLOCK_PROFILE == 12 ? 20951704 :
         (BOARD_CLOCK_PROFILE == 8 ? 81818182 :
-        ((BOARD_CLOCK_PROFILE == 5 || BOARD_CLOCK_PROFILE == 7) ? 90000000 : 100000000))));
+        ((BOARD_CLOCK_PROFILE == 5 || BOARD_CLOCK_PROFILE == 7) ? 90000000 : 100000000))))));
     localparam int unsigned SYS_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :
         (BOARD_CLOCK_PROFILE == 9 ? 98611111 : (BOARD_CLOCK_PROFILE == 10 ? 102430556 :
-        (BOARD_CLOCK_PROFILE >= 4 ? 100000000 : 80000000)));
+        (BOARD_CLOCK_PROFILE == 11 ? 51215277 :
+        (BOARD_CLOCK_PROFILE == 12 ? 25607638 :
+        (BOARD_CLOCK_PROFILE >= 4 ? 100000000 : 80000000)))));
     localparam int unsigned PERIPH_HZ = BOARD_CLOCK_PROFILE == 0 ? 125000000 :
         (BOARD_CLOCK_PROFILE == 9 ? 68269231 : (BOARD_CLOCK_PROFILE == 10 ? 65848214 :
-        (BOARD_CLOCK_PROFILE >= 6 ? 60000000 : 25000000)));
+        (BOARD_CLOCK_PROFILE == 11 ? 32924107 :
+        (BOARD_CLOCK_PROFILE == 12 ? 16462053 :
+        (BOARD_CLOCK_PROFILE >= 6 ? 60000000 : 25000000)))));
     logic [1:0] uart_rx, uart_tx;
+    // 启动前序捕获只在首个提交异常后接管板级 UART TX；正常启动仍由应用固件驱动。
+    logic trace_tx, trace_takeover;
+    logic commit_valid, commit_exception;
+    logic [core_config_pkg::XLEN-1:0] commit_pc, commit_next_pc;
+    logic [31:0] commit_inst;
+    pipeline_pkg::retire_trace_t commit_trace_w [2];
+    logic fetch_req_valid;
+    logic [core_config_pkg::XLEN-1:0] fetch_req_addr;
+    logic [1:0] dbg_alloc_fire, dbg_issue_fire, dbg_completion_valid, dbg_retire_fire;
+    logic dbg_redirect_valid;
+    logic [4:0] dbg_rob_occupancy;
+    logic [3:0] dbg_head_state, dbg_pipe_state;
+    logic [31:0] dbg_first_rsp;
+    logic dbg_first_rsp_error;
+    logic dbg_fetch_fire, dbg_rsp_fire, dbg_frontend_redirect, dbg_decode_valid;
+    logic [1:0] dbg_push_count, dbg_pop_count;
+    logic [7:0] dbg_queue_occupancy, dbg_iq_occupancy;
     logic [31:0] gpio_in [3], gpio_out [3], gpio_oe [3];
     logic ddr_req_valid, ddr_req_ready, ddr_rsp_valid, ddr_rsp_ready;
     bus_req_t ddr_request;
@@ -135,7 +160,7 @@ module pango_200hp_top #(
     initial begin
         assert (!MM3_ENABLE) else $fatal(1,"MiniMind unavailable in the YOLO experiment");
         assert (BOARD_CLOCK_PROFILE == 0 || BOARD_CLOCK_PROFILE == 1 ||
-                (BOARD_CLOCK_PROFILE >= 4 && BOARD_CLOCK_PROFILE <= 10))
+                (BOARD_CLOCK_PROFILE >= 4 && BOARD_CLOCK_PROFILE <= 12))
             else $fatal(1, "unsupported board clock profile");
         assert (!(NPU_ENABLE || MM3_ENABLE) || BOARD_CLOCK_PROFILE != 0)
             else $fatal(1, "NPU requires its dedicated system GPLL output");
@@ -149,7 +174,7 @@ module pango_200hp_top #(
     end
     assign ddr_ready_led = ddr_init_done && !soc_rst;
     assign uart_rx = {1'b1, uart_rxd};
-    assign uart_txd = uart_tx[0];
+    assign uart_txd = trace_takeover ? trace_tx : uart_tx[0];
     assign gpio_in[0] = '0;
     assign gpio_in[1] = '0;
     assign gpio_in[2] = '0;
@@ -211,8 +236,15 @@ module pango_200hp_top #(
         .flash_cs_n(),.flash_sck(),.flash_mosi(),.flash_miso(1'b0),
         .ddr_req(unified_ddr_req),.ddr_rsp(unified_ddr_rsp),.external_req,.external_rsp,.npu_req,.npu_rsp,
         .video_req,.video_rsp,
-        .commit_valid(),.commit_pc(),.commit_inst(),.commit_rd(),.commit_rd_we(),.commit_rd_data(),
-        .commit_exception(),.commit_trace(),.dmem_store_fire(),.dmem_store_addr(),.dmem_store_data(),.dmem_store_strb());
+        .commit_valid,.commit_pc,.commit_inst,.commit_rd(),.commit_rd_we(),.commit_rd_data(),
+        .commit_exception,.commit_trace(commit_trace_w),.dmem_store_fire(),.dmem_store_addr(),.dmem_store_data(),.dmem_store_strb(),
+        .fetch_req_valid,.fetch_req_addr,
+        .dbg_alloc_fire,.dbg_issue_fire,.dbg_completion_valid,.dbg_retire_fire,.dbg_redirect_valid,
+        .dbg_rob_occupancy,.dbg_head_state,.dbg_pipe_state,.dbg_first_rsp,.dbg_first_rsp_error,
+        .dbg_fetch_fire,.dbg_rsp_fire,.dbg_frontend_redirect,.dbg_decode_valid,
+        .dbg_push_count,.dbg_pop_count,.dbg_queue_occupancy,.dbg_iq_occupancy);
+    // 提交后继 PC 直接取自标量提交口；异常提交的后继为 mtvec，可区分陷入目标。
+    assign commit_next_pc = commit_trace_w[0].next_pc;
     ddr_axi_target u_ddr_target (.clk(core_clk),.rst(ddr_bridge_rst),.memory_ready(ddr_init_done),
         .axi_req(unified_ddr_req),.axi_rsp(unified_ddr_rsp),
         .rd_cmd_valid,.rd_cmd_ready,.rd_cmd,.rd_valid,.rd_ready,.rd_data,
@@ -225,6 +257,34 @@ module pango_200hp_top #(
     assign hdmi_vs = 1'b0;
     assign hdmi_de = 1'b0;
     assign hdmi_rgb = '0;
+    // 旧后端不提供标量提交口，保持板级 UART 直通并停用前序捕获。
+    assign trace_tx = 1'b1;
+    assign trace_takeover = 1'b0;
+    assign commit_valid = 1'b0;
+    assign commit_exception = 1'b0;
+    assign commit_pc = '0;
+    assign commit_next_pc = '0;
+    assign commit_inst = '0;
+    assign fetch_req_valid = 1'b0;
+    assign fetch_req_addr = '0;
+    assign dbg_alloc_fire = '0;
+    assign dbg_issue_fire = '0;
+    assign dbg_completion_valid = '0;
+    assign dbg_retire_fire = '0;
+    assign dbg_redirect_valid = 1'b0;
+    assign dbg_rob_occupancy = '0;
+    assign dbg_head_state = '0;
+    assign dbg_pipe_state = '0;
+    assign dbg_first_rsp = '0;
+    assign dbg_first_rsp_error = 1'b0;
+    assign dbg_fetch_fire = 1'b0;
+    assign dbg_rsp_fire = 1'b0;
+    assign dbg_frontend_redirect = 1'b0;
+    assign dbg_decode_valid = 1'b0;
+    assign dbg_push_count = '0;
+    assign dbg_pop_count = '0;
+    assign dbg_queue_occupancy = '0;
+    assign dbg_iq_occupancy = '0;
     soc_top #(.ITCM_INIT_FILE(ITCM_INIT_FILE), .DTCM_INIT_FILE(DTCM_INIT_FILE),
               .SOC_PROFILE(SOC_PROFILE), .LOCAL_TCM_ENABLE(LOCAL_TCM_ENABLE),
               .DDR_BYTES(512 * 1024 * 1024), .DMA_WIDE_ENABLE(DMA_WIDE_ENABLE), .DMA_BLOCK_ENABLE(DMA_BLOCK_ENABLE),
@@ -269,6 +329,16 @@ module pango_200hp_top #(
         .wr_rsp_valid, .wr_rsp_ready, .wr_rsp
     );
 `endif
+    // 前序捕获只观察标量提交口，不反馈取指、复位或总线；异常前的四行用于区分失败路径。
+    pango_boot_trace #(.CLOCK_HZ(HOT_HZ), .PC_WIDTH(core_config_pkg::XLEN)) u_boot_trace (
+        .clk_core(hot_clk), .board_reset_n, .reset_async(soc_rst),
+        .commit_valid, .commit_exception, .commit_pc, .commit_next_pc, .commit_inst,
+        .fetch_valid(fetch_req_valid), .fetch_addr(fetch_req_addr),
+        .dbg_alloc_fire, .dbg_issue_fire, .dbg_completion_valid, .dbg_retire_fire, .dbg_redirect_valid,
+        .dbg_rob_occupancy, .dbg_head_state, .dbg_pipe_state, .dbg_first_rsp, .dbg_first_rsp_error,
+        .dbg_fetch_fire, .dbg_rsp_fire, .dbg_frontend_redirect, .dbg_decode_valid,
+        .dbg_push_count, .dbg_pop_count, .dbg_queue_occupancy, .dbg_iq_occupancy,
+        .tx(trace_tx), .takeover(trace_takeover));
     pango_block_bridge #(.DDR_BYTES(512 * 1024 * 1024)) u_ddr_bridge (
         .clk(core_clk), .rst(ddr_bridge_rst),
         .rd_cmd_valid, .rd_cmd_ready, .rd_cmd, .rd_valid, .rd_ready, .rd_data,

@@ -276,7 +276,8 @@ module core (
                 .fetch_fire(fetch_event_fire), .fetch_second(fetch_event_second),
                 .out_packet(fetch_packet), .out_packet_1(fetch_packet_1), .pop_count(fetch_pop_count),
                 .imem_req_valid, .imem_req_addr, .imem_req_ready, .imem_rsp_valid,
-                .imem_rsp_data, .imem_rsp_error, .imem_rsp_error_1, .imem_rsp_ready, .busy(fetch_pair_busy)
+                .imem_rsp_data, .imem_rsp_error, .imem_rsp_error_1, .imem_rsp_ready, .busy(fetch_pair_busy),
+                .debug_push_count(), .debug_occupancy()
             );
         end
     endgenerate

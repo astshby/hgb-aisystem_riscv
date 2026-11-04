@@ -18,6 +18,9 @@ module tb_fetch_response_capacity #(
     logic [63:0] imem_rsp_data;
     if_d1_t out_packet, out_packet_1;
     logic [1:0] pop_count = 0;
+    // 只读观测端口：本台不检查，仅为 .* 连接提供声明。
+    logic [1:0] debug_push_count;
+    logic [$clog2(FETCH_QUEUE_DEPTH+1)-1:0] debug_occupancy;
     xlen_t target_pc, error_addr;
     int checks = 0, pairs = 0, requests = 0, responses = 0;
     fetch_pair_stage dut (.*);

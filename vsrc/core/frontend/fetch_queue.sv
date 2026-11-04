@@ -25,7 +25,7 @@ module fetch_queue #(
     assign second_tail = tail_q + PTR_W'(1);
     assign occupancy = count_q;
     assign push_ready = !rst && !flush &&
-                        (int'(count_q) + 2 <= int'(DEPTH) + int'(pop_count));
+                        (count_q + COUNT_W'(2) <= COUNT_W'(DEPTH) + COUNT_W'(pop_count));
     assign accepted = push_ready ? push_count : 2'd0;
     always_comb begin
         out_packet = entries_q[head_q];
@@ -53,7 +53,7 @@ module fetch_queue #(
     initial assert (DEPTH >= 2 && (DEPTH & (DEPTH-1)) == 0)
         else $fatal(1, "fetch_queue requires power-of-two depth >= 2");
     always_ff @(posedge clk) if (!rst && !flush) begin
-        assert (push_count <= 2 && pop_count <= 2 && int'(pop_count) <= int'(count_q))
+        assert (push_count <= 2 && pop_count <= 2 && pop_count <= count_q)
             else $fatal(1, "fetch_queue invalid prefix transfer");
     end
 `endif

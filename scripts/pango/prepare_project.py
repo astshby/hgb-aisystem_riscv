@@ -16,6 +16,7 @@ import xml.etree.ElementTree as ET
 GENERATED_SCRIPTS = ("compile.tcl", "synthesize.tcl", "implement.tcl")
 CDC_IMPLEMENTATION_SCRIPTS = ("implement_cdc.tcl",)
 MEMORY_SCRIPTS = ("memory_guard.ps1", "memory_gate.ps1")
+BITSTREAM_SCRIPTS = ("gen_bitstream.tcl",)
 DDR_ROUTE_INPUT = "pnr/ddr3_test.rcf"
 DDR_ROUTE_STAGED = "board_ddr.rcf"
 DDR_ROUTE_NETS = tuple(f"I_ips_ddr_top/u_ddrphy_top/ddrphy_ioclk_gate [{bank}]"
@@ -247,6 +248,11 @@ BOARD_CLOCK_PROFILES = {
         "ddr": 125000000, "periph": 68269231},
     10: {"name": "C10", "core": 83806818, "sys": 102430556,
          "ddr": 125000000, "periph": 65848214},
+    # C11/C12 为诊断降频档：与 C10 同 VCO，各输出分频依次加倍。
+    11: {"name": "C11", "core": 41903409, "sys": 51215277,
+         "ddr": 125000000, "periph": 32924107},
+    12: {"name": "C12", "core": 20951704, "sys": 25607638,
+         "ddr": 125000000, "periph": 16462053},
 }
 # 相对 125 MHz ref_clk 的 GTP_GPLL 输出比；与 pango_soc_pll 的 STATIC_RATIO* 对齐。
 # C5 的 GPLL 分频是 900/10、900/9、900/36，折算到 ref_clk 即 18/25、4/5、1/5。
@@ -259,12 +265,18 @@ BOARD_CLOCK_RATIOS = {
     8: {"core": (36, 55), "sys": (4, 5), "periph": (12, 25)},
     9: {"core": (71, 100), "sys": (71, 90), "periph": (71, 130), "npu": (71, 90)},
     10: {"core": (59, 88), "sys": (59, 72), "periph": (59, 112), "npu": (59, 80)},
+    11: {"core": (59, 176), "sys": (59, 144), "periph": (59, 224), "npu": (59, 160)},
+    12: {"core": (59, 352), "sys": (59, 288), "periph": (59, 448), "npu": (59, 320)},
 }
 BOARD_PLL_PARAMETERS = {
     9: dict(reference_hz=125000000, input_div=10, multiply=1, feedback_div=71,
             output_div=dict(core=10, sys=9, periph=13, npu=9)),
     10: dict(reference_hz=125000000, input_div=8, multiply=1, feedback_div=59,
              output_div=dict(core=11, sys=9, periph=14, npu=10)),
+    11: dict(reference_hz=125000000, input_div=8, multiply=1, feedback_div=59,
+             output_div=dict(core=22, sys=18, periph=28, npu=20)),
+    12: dict(reference_hz=125000000, input_div=8, multiply=1, feedback_div=59,
+             output_div=dict(core=44, sys=36, periph=56, npu=40)),
 }
 
 
@@ -287,7 +299,7 @@ def board_clock_periods(profile, clocks):
 
 
 def board_clock_relationship(profile):
-    vco = 887.5 if profile == 9 else (921.875 if profile == 10 else (900 if profile >= 5 else 800))
+    vco = 887.5 if profile == 9 else (921.875 if profile >= 10 else (900 if profile >= 5 else 800))
     return f'independent_gpll_{vco}mhz_vco'
 
 
@@ -357,6 +369,17 @@ def verify_independent_board_clocks(wrapper, profile):
                            '(BOARD_CLOCK_PROFILE>=4?100000000:80000000)))',)
     formulas['PERIPH_HZ'] += ('(BOARD_CLOCK_PROFILE==9?68269231:(BOARD_CLOCK_PROFILE==10?65848214:'
                               '(BOARD_CLOCK_PROFILE>=6?60000000:25000000)))',)
+    # C11 半速与 C12 四分之一诊断档：与 C10 同 VCO，分频逐级加倍。
+    formulas['HOT_HZ'] += ('(BOARD_CLOCK_PROFILE==9?88750000:(BOARD_CLOCK_PROFILE==10?83806818:'
+                           '(BOARD_CLOCK_PROFILE==11?41903409:(BOARD_CLOCK_PROFILE==12?20951704:'
+                           '(BOARD_CLOCK_PROFILE==8?81818182:'
+                           '((BOARD_CLOCK_PROFILE==5||BOARD_CLOCK_PROFILE==7)?90000000:100000000))))))',)
+    formulas['SYS_HZ'] += ('(BOARD_CLOCK_PROFILE==9?98611111:(BOARD_CLOCK_PROFILE==10?102430556:'
+                           '(BOARD_CLOCK_PROFILE==11?51215277:(BOARD_CLOCK_PROFILE==12?25607638:'
+                           '(BOARD_CLOCK_PROFILE>=4?100000000:80000000)))))',)
+    formulas['PERIPH_HZ'] += ('(BOARD_CLOCK_PROFILE==9?68269231:(BOARD_CLOCK_PROFILE==10?65848214:'
+                              '(BOARD_CLOCK_PROFILE==11?32924107:(BOARD_CLOCK_PROFILE==12?16462053:'
+                              '(BOARD_CLOCK_PROFILE>=6?60000000:25000000)))))',)
     for name, choices in formulas.items():
         allowed = choices[-1:] if profile >= 9 else (choices[1:] if profile >= 6 else choices)
         if not any(f"{name}=BOARD_CLOCK_PROFILE==0?125000000:{formula};" in compact for formula in allowed):
@@ -400,7 +423,9 @@ def verify_npu_board_clocks(root):
               (wrapper, r'\.NPU_BYTES\((?:NPU_ENABLE|\(NPU_ENABLE\s*\|\|\s*MM3_ENABLE\))\s*\?\s*65536\s*:\s*0\)'),
               (pll, r'\.STATIC_RATIO3\(NPU_DIV\)'),
               (pll, r'HIGH_VCO\s*=\s*CLOCK_PROFILE\s*>=\s*5'),
-              (pll, r'NPU_DIV\s*=\s*(?:CLOCK_PROFILE\s*==\s*10\s*\?\s*10\s*:\s*\()?HIGH_VCO\s*\?\s*9\s*:\s*8'),
+              (pll, r'NPU_DIV\s*=\s*(?:CLOCK_PROFILE\s*==\s*10\s*\?\s*10\s*:\s*\()?'
+                    r'(?:CLOCK_PROFILE\s*==\s*11\s*\?\s*20\s*:\s*\()?'
+                    r'(?:C12_PROFILE\s*\?\s*40\s*:\s*\()?HIGH_VCO\s*\?\s*9\s*:\s*8'),
               (pll, r'\.CLKOUT3\(pll_npu\)'),
               (pll, r'if\s*\(NPU_ENABLE\).*?\.CLKIN\(pll_npu\),\s*\.CLKOUT\(clk_npu\)'))
     if any(not re.search(pattern, text, re.S) for text, pattern in checks):
@@ -458,7 +483,7 @@ def project_configuration(manifest):
     profile = manifest["board_clock_profile"]
     clocks = dict(manifest["board_clock_domains_hz"])
     names = {1: "target", 4: "sys100", 5: "yolo", 6: "main60", 7: "yolo60", 8: "yolo60_core81",
-             9: "main_margin2", 10: "yolo_sys"}
+             9: "main_margin2", 10: "yolo_sys", 11: "yolo_half", 12: "yolo_quarter"}
     keys = dict(CORE_ISSUE_WIDTH="core_issue_width", CORE_RETIRE_ENTRIES="core_retire_entries",
                 CORE_SPLIT_ISSUE_QUEUE="core_split_issue_queue", CORE_ISSUE_QUEUE_ENTRIES="core_issue_queue_entries",
                 CORE_MEMORY_QUEUE_ENTRIES="core_memory_queue_entries", CORE_LOAD_QUEUE_ENTRIES="core_load_queue_entries",
@@ -801,7 +826,11 @@ def main():
     parser.add_argument("--predictor-mode", type=int, choices=(0, 1), default=None)
     parser.add_argument("--ras-enable", type=int, choices=(0, 1), default=None)
     parser.add_argument("--board-clock-profile", type=int, choices=tuple(BOARD_CLOCK_PROFILES), default=None,
-                        help="0=common; C1-C8 historical; C9=main_margin2, C10=yolo_sys; DDR125 remains IP-owned")
+                        help="0=common; C1-C8 historical; C9=main_margin2, C10=yolo_sys; "
+                             "C11/C12 diagnostic step-downs; DDR125 remains IP-owned")
+    parser.add_argument("--diagnostic-clock-profile", type=int, choices=(0, 8, 9, 11, 12), default=0,
+                        help="diagnostic-only: allow a non-C10 clock profile for interactive firmware; "
+                             "the production identity assertion stays at C10 when this is 0")
     parser.add_argument("--npu-enable", action="store_true", help="attach pinned 128-MAC NPU on dedicated 100 MHz clock")
     parser.add_argument("--mm3-enable", action="store_true", help="attach MiniMind on dedicated 100 MHz clock")
     parser.add_argument('--video-enable',type=int,choices=(0,1),default=None,
@@ -882,8 +911,12 @@ def main():
                     str(repo / "scripts/pango/mes2l676_200hp.fdc")], check=True)
     if args.firmware_role == 'yolo-interactive' and (
             args.firmware_dir is None or args.core_backend != 'scoreboard' or not args.npu_enable or
-            not args.video_enable or args.board_clock_profile != 10):
-        parser.error('YOLO interactive firmware requires explicit program, NPU/HDMI, scoreboard and C10')
+            not args.video_enable or
+            not (args.board_clock_profile == 10 or
+                 (args.diagnostic_clock_profile != 0 and
+                  args.board_clock_profile == args.diagnostic_clock_profile))):
+        parser.error('YOLO interactive firmware requires explicit program, NPU/HDMI, scoreboard and C10 '
+                     'or an explicitly declared diagnostic clock profile')
     firmware = args.firmware_dir.resolve() if args.firmware_dir else repo / f"build/loader/rv{args.xlen}"
     try:
         firmware_identity = inspect_firmware(firmware, args.xlen, args.firmware_role, repo)
@@ -1035,11 +1068,11 @@ def main():
     for name in ('implement.tcl', *CDC_IMPLEMENTATION_SCRIPTS):
         template = (repo / 'scripts/pango' / name).read_text()
         (root / name).write_text(implementation_commands(template, args.synthesis_strategy))
-    for name in MEMORY_SCRIPTS:
+    for name in MEMORY_SCRIPTS + BITSTREAM_SCRIPTS:
         shutil.copyfile(repo / "scripts/pango" / name, root / name)
     manifest["memory_guard_version"] = 1
     manifest["cdc_implementation_version"] = 1
-    for name in GENERATED_SCRIPTS + MEMORY_SCRIPTS + CDC_IMPLEMENTATION_SCRIPTS:
+    for name in GENERATED_SCRIPTS + MEMORY_SCRIPTS + CDC_IMPLEMENTATION_SCRIPTS + BITSTREAM_SCRIPTS:
         manifest["files"][name] = hashlib.sha256((root / name).read_bytes()).hexdigest()
     verify_staged_manifest(root, manifest)
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

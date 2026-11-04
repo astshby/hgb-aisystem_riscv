@@ -48,7 +48,21 @@ module soc_system #(
     output pipeline_pkg::retire_trace_t commit_trace [2],
     output logic dmem_store_fire,
     output logic [core_config_pkg::XLEN-1:0] dmem_store_addr, dmem_store_data,
-    output logic [core_config_pkg::DBUS_BYTES-1:0] dmem_store_strb
+    output logic [core_config_pkg::DBUS_BYTES-1:0] dmem_store_strb,
+    // 取指请求口只读镜像，供板级启动观察器记录首个取指地址；不参与任何译码或握手。
+    output logic fetch_req_valid,
+    output logic [core_config_pkg::XLEN-1:0] fetch_req_addr,
+    // 后端口只读观测：分配/完成/退休/重定向计数与队头状态，供板级启动帧使用。
+    output logic [1:0] dbg_alloc_fire, dbg_issue_fire, dbg_completion_valid, dbg_retire_fire,
+    output logic dbg_redirect_valid,
+    output logic [4:0] dbg_rob_occupancy,
+    output logic [3:0] dbg_head_state, dbg_pipe_state,
+    output logic [31:0] dbg_first_rsp,
+    output logic dbg_first_rsp_error,
+    // 取指段只读观测：请求沿、应答沿、入队/出队条数与队列占用。
+    output logic dbg_fetch_fire, dbg_rsp_fire, dbg_frontend_redirect, dbg_decode_valid,
+    output logic [1:0] dbg_push_count, dbg_pop_count,
+    output logic [7:0] dbg_queue_occupancy, dbg_iq_occupancy
 );
     import core_config_pkg::*;
     import core_types_pkg::*;
@@ -82,6 +96,24 @@ module soc_system #(
     irq_register u_irq (.clk(clk_core),.rst(rst_core),.device_pending(irq_sync2_q),.core_pending);
     logic imem_req_valid, imem_req_ready, imem_rsp_valid, imem_rsp_ready, imem_rsp_error, imem_rsp_error_1;
     xlen_t imem_req_addr;
+    assign fetch_req_valid = imem_req_valid;
+    assign fetch_req_addr = imem_req_addr;
+    // 首个取指应答原样锁存：区分“取回的是 LUI”与“取回 0/错误”。
+    logic [31:0] first_rsp_q;
+    logic first_rsp_valid_q, first_rsp_error_q;
+    always_ff @(posedge clk_core) begin
+        if (rst_core) begin
+            first_rsp_valid_q <= 1'b0;
+            first_rsp_q <= '0;
+            first_rsp_error_q <= 1'b0;
+        end else if (imem_rsp_valid && imem_rsp_ready && !first_rsp_valid_q) begin
+            first_rsp_valid_q <= 1'b1;
+            first_rsp_q <= imem_rsp_data[31:0];
+            first_rsp_error_q <= imem_rsp_error;
+        end
+    end
+    assign dbg_first_rsp = first_rsp_q;
+    assign dbg_first_rsp_error = first_rsp_error_q;
     logic [63:0] imem_rsp_data;
     logic [1:0] data_req_valid, data_req_ready, data_rsp_valid, data_rsp_ready;
     scoreboard_pkg::memory_request_t tagged_request [2];
@@ -94,7 +126,11 @@ module soc_system #(
         .mem_req_valid(data_req_valid),.mem_req_ready(data_req_ready),.mem_request(tagged_request),
         .mem_rsp_valid(data_rsp_valid),.mem_rsp_ready(data_rsp_ready),.mem_response(tagged_response),
         .commit_valid,.commit_pc,.commit_inst,.commit_rd,.commit_rd_we,.commit_rd_data,
-        .commit_exception,.commit_trace,.fence_i_commit,.issue_fire());
+        .commit_exception,.commit_trace,.fence_i_commit,.issue_fire(dbg_issue_fire),
+        .dbg_alloc_fire,.dbg_completion_valid,.dbg_retire_fire,.dbg_redirect_valid,
+        .dbg_rob_occupancy,.dbg_head_state,.dbg_pipe_state,
+        .dbg_fetch_fire,.dbg_rsp_fire,.dbg_frontend_redirect,.dbg_decode_valid,
+        .dbg_push_count,.dbg_pop_count,.dbg_queue_occupancy,.dbg_iq_occupancy);
     assign dmem_store_fire = data_req_valid[0] && data_req_ready[0] && tagged_request[0].write;
     assign dmem_store_addr = tagged_request[0].address;
     assign dmem_store_data = tagged_request[0].wdata;

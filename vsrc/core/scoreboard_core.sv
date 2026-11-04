@@ -29,7 +29,17 @@ module scoreboard_core (
     output core_types_pkg::xlen_t commit_rd_data,
     output logic commit_exception, fence_i_commit,
     output pipeline_pkg::retire_trace_t commit_trace [2],
-    output logic [1:0] issue_fire
+    output logic [1:0] issue_fire,
+    // 只读后端口观测：不参与任何译码、仲裁或握手，仅供板级启动观察器计数。
+    output logic [1:0] dbg_alloc_fire, dbg_completion_valid, dbg_retire_fire,
+    output logic dbg_redirect_valid,
+    output logic [4:0] dbg_rob_occupancy,
+    output logic [3:0] dbg_head_state,
+    output logic [3:0] dbg_pipe_state,
+    // 取指到序点之间的只读计数：请求/应答/入队/出队与队列占用，定位取指结果在哪一级消失。
+    output logic dbg_fetch_fire, dbg_rsp_fire, dbg_frontend_redirect, dbg_decode_valid,
+    output logic [1:0] dbg_push_count, dbg_pop_count,
+    output logic [7:0] dbg_queue_occupancy, dbg_iq_occupancy
 );
     import core_config_pkg::*;
     import core_types_pkg::*;
@@ -195,7 +205,8 @@ module scoreboard_core (
         .lookup_pc, .lookup_pc_1, .fetch_fire, .fetch_second,
         .out_packet(fetched[0]), .out_packet_1(fetched[1]), .pop_count(fetch_pop_count),
         .imem_req_valid, .imem_req_addr, .imem_req_ready, .imem_rsp_valid,
-        .imem_rsp_data, .imem_rsp_error, .imem_rsp_error_1, .imem_rsp_ready, .busy(fetch_busy)
+        .imem_rsp_data, .imem_rsp_error, .imem_rsp_error_1, .imem_rsp_ready, .busy(fetch_busy),
+        .debug_push_count(dbg_push_count), .debug_occupancy(dbg_queue_occupancy)
     );
     for (genvar lane = 0; lane < 2; lane++) begin : g_decode
         // 类型容量只读静态译码字段，不能经 RAT 的当拍分配旁路返回 alloc_ready。
@@ -223,7 +234,8 @@ module scoreboard_core (
             fetch_pop_count = fetched[0].valid ? (fetched[1].valid && !d1_redirect[0].valid ? 2'd2 : 2'd1) : 2'd0;
         for (int lane = 0; lane < 2; lane++) begin
             decode_intake[lane] = decoded[lane];
-            decode_intake[lane].valid = int'(fetch_pop_count) > lane;
+            decode_intake[lane].valid = (lane == 0) ?
+                (fetch_pop_count != 2'd0) : (fetch_pop_count == 2'd2);
             // 训练上下文保持取指快照；执行控制已知道此 JAL 的实际方向，不再次恢复。
             if (d1_redirect[lane].valid) begin
                 decode_intake[lane].pred.taken = 1'b1;
@@ -541,8 +553,8 @@ module scoreboard_core (
     assign retire_ready[1] = !rst && !head_results[0].exc.valid && !head_results[1].exc.valid &&
         !(head_metadata[0].kind inside {RET_CSR, RET_SERIAL}) &&
         !(head_metadata[1].kind inside {RET_CSR, RET_SERIAL}) &&
-        (int'(training_capacity) >= int'(head_metadata[0].kind == RET_BRANCH) +
-                                   int'(head_metadata[1].kind == RET_BRANCH));
+        (training_capacity >= 2'(2'(head_metadata[0].kind == RET_BRANCH) +
+                          2'(head_metadata[1].kind == RET_BRANCH)));
     for (genvar lane = 0; lane < 2; lane++) begin : g_retire
         commit_control u_commit (
             .retire_fire(retire_fire[lane]), .head_meta(head_metadata[lane]), .head_result(head_results[lane]),
@@ -590,6 +602,21 @@ module scoreboard_core (
         .trap_enter, .mret_commit, .trap_pc, .trap_cause, .trap_tval,
         .retire_valid(normal_retire), .execution_cancel, .redirect(wb_redirect)
     );
+    // 观测口直接取现有状态，绝不反压原逻辑；板级帧只做计数和快照。
+    assign dbg_alloc_fire = alloc_fire;
+    assign dbg_completion_valid = completion_valid;
+    assign dbg_retire_fire = retire_fire;
+    assign dbg_redirect_valid = wb_redirect.valid;
+    assign dbg_rob_occupancy = rob_occupancy;
+    assign dbg_head_state = {head_valid[0], head_complete[0], checkpoint_ready, decode_q[0].valid};
+    assign dbg_pipe_state = {rob_recovering, lsu_busy, (iq_capacity != 0), fetch_busy};
+    // 取指段观测同样只读：应答沿由存储适配器的握手直接得到，出队数取自译码弹出前缀。
+    assign dbg_fetch_fire = fetch_fire;
+    assign dbg_rsp_fire = imem_rsp_valid && imem_rsp_ready;
+    assign dbg_frontend_redirect = frontend_redirect.valid;
+    assign dbg_decode_valid = decode_q[0].valid;
+    assign dbg_pop_count = fetch_pop_count;
+    assign dbg_iq_occupancy = 8'(iq_occupancy);
 `ifndef SYNTHESIS
     initial begin
         assert (ISSUE_WIDTH == 2) else $fatal(1, "scoreboard backend requires ISSUE_WIDTH=2");

@@ -14,7 +14,10 @@ module fetch_pair_stage (
     input logic [63:0] imem_rsp_data,
     input logic imem_rsp_error, imem_rsp_error_1,
     output logic imem_rsp_ready,
-    output logic busy
+    output logic busy,
+    // 只读观测：入队条数与队列占用，供板级启动帧定位取指与译码之间的断点。
+    output logic [1:0] debug_push_count,
+    output logic [$clog2(core_config_pkg::FETCH_QUEUE_DEPTH+1)-1:0] debug_occupancy
 );
     import core_config_pkg::*;
     import core_types_pkg::*;
@@ -42,6 +45,8 @@ module fetch_pair_stage (
     assign fetch_fire = imem_req_valid && imem_req_ready;
     assign fetch_second = request_second;
     assign busy = request_q.valid || occupancy != 0;
+    assign debug_push_count = push_count;
+    assign debug_occupancy = occupancy;
 
     // 每word保留自己的错误归属；低word故障不再提供其后指令，高word故障不污染低word。
     always_comb begin

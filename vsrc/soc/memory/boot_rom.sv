@@ -1,5 +1,5 @@
 // Module: boot_rom
-// Description: Registered reset trampoline from ROM to the preloaded ITCM image.
+// Description: Registered reset trampoline with a repeating JALR tail into the preloaded ITCM image.
 module boot_rom (
     input logic clk, rst,
     input logic req_valid,
@@ -18,14 +18,12 @@ module boot_rom (
     xlen_t rom_word;
 
     // 当前只负责跳转；镜像预加载由仿真/FPGA 初始化完成，不假装具备下载器。
+    // word 0 之外的每个字都重复 JALR：第二次取指字丢失或被重复时，下一条仍是跳转，
+    // 用已装载的 x5 进入 ITCM，不会沿 ROM 顺序滑到 0x4000 才以取指错误暴露故障。
     always_comb begin
-        rom_word = XLEN'(32'h00000013);
-        if (XLEN == 64)
-            rom_word = XLEN'({32'h00000013, 32'h00000013});
+        rom_word = (XLEN == 64) ? XLEN'({BOOT_JUMP, BOOT_JUMP}) : XLEN'(BOOT_JUMP);
         if ((request.addr >> $clog2(DBUS_BYTES)) == 0)
             rom_word = (XLEN == 64) ? XLEN'({BOOT_JUMP, BOOT_LUI}) : XLEN'(BOOT_LUI);
-        else if (XLEN == 32 && (request.addr >> 2) == 1)
-            rom_word = XLEN'(BOOT_JUMP);
     end
     assign req_ready = !rsp_valid || rsp_ready;
 
