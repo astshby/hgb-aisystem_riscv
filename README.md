@@ -1,5 +1,28 @@
 # hgb-aisystem：MiniMind
 
+## 分支获取与启动回归
+
+一次完整 `git clone` 会取回 main、yolo、minimind、all 的远端分支；默认只检出一个。
+`git branch -a` 查看全部分支，`git switch minimind` 切换到本应用。首次从唯一的
+origin 同名分支切换时，Git 会建立本地跟踪分支；不要使用 `--single-branch` 限制获取范围。
+
+```bash
+make boot-count-test XLEN=32
+make boot-count-test XLEN=64
+python3 -m unittest tb.scripts.test_scoreboard_runner
+```
+
+继承 main PR #33 的修复：显式检查 FIFO 深度 2/4/8、ROM→ITCM、ISS 双出双入、
+整数/访存 IQ、恢复与退休；每宽度九个用例。修正 PASS 后仍有致命错误时的判定、
+三处 SKIP 输出，以及独立 SoC 启动脚本在空构建目录中的输出目录创建。
+编译使用单线程，`logs/boot-count/` 保存命令与源/日志哈希。
+独立启动可通过 `P2_LOG_ROOT` 和 `P2_BUILD_ROOT` 分离日志和模型，避免不同分支互相覆盖。
+
+这组测试覆盖公共 Core/SoC 启动；本分支的专属程序、NPU 和模型验证使用下方原有入口。
+生产 RTL、原固件、模型及默认时钟保持本分支配置。后续 hgb 偶尔继续紫光适配，
+rhbyv 独立推进 Zynq-7020，逐项吸收已验证经验。
+
+
 克隆：`git clone --branch minimind https://github.com/astshby/hgb-aisystem_riscv.git`。
 程序与锁定整数模型随 Git 保存，见[软件复现说明](software/README.md)。设置工具链与 Python 依赖后，
 依次执行 `make software-prepare`、`make software-build XLEN=both`、`make software-test`。

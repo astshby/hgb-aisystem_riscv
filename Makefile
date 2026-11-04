@@ -26,6 +26,7 @@ include scripts/make/software.mk
 
 .PHONY: help check
 help:
+	@printf '%s\n' 'make boot-count-test XLEN=32|64 (FIFO/ROM/ISS/IQ/recovery/retirement; one compile job)'
 	@printf '%s\n' 'make software-list|software-doctor|software-prepare|software-build|software-test [XLEN=32|64|both]'
 	@printf '%s\n' 'make check XLEN=32|64' 'SOFTWARE_OPT=O2|O3|Ofast (default O3)'
 ifneq ($(wildcard scripts/make/coremark.mk),)

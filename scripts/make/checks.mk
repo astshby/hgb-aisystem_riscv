@@ -192,3 +192,8 @@ soc-irq-cdc-test:
 .PHONY: board-boot-test
 board-boot-test:
 	bash scripts/verilator/run_scoreboard.sh $(XLEN) boot_prefix
+
+# 启动修复的完整计数回归：FIFO深度2/4/8、ISS、整数/访存IQ与退休。
+.PHONY: boot-count-test
+boot-count-test:
+	bash scripts/verilator/run_boot_count.sh $(XLEN)
