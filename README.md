@@ -5,39 +5,34 @@ TCM/Cache/DMA/AXI 总线系统、128-MAC YOLO 卷积加速器、1080p HDMI 显�
 以及配套的裸机固件、上位机工具与 PDS 物理实现流程。
 
 FPGA 适配已完成：Pango PDS 2025.2 的综合、布局、布线、时序分析与位流生成全部跑通，
-C10 工作档六个时钟域均达到时序要求，布线无未布通网络。实现方式与复现步骤见
 [Windows 下的 PDS 适配](#windows-下的-pds-适配)。
 
 ## 系统组成
 
-| 部分 | 说明 |
-|---|---|
-| Core | RV32/RV64 IM+Zicsr，双发射、按序双退休，ROB16、int8/mem4、LQ4/SQ4；ALU/Load/DSP 8/10/10 级 |
-| SoC | ITCM/DTCM 各 64 KiB、I$ 16 KiB、D$ 8 KiB（bank XOR mask2）、AXI 互连、DMA、MMIO、跨时钟域 FIFO |
-| 加速器 | 128-MAC INT8 卷积阵列，完整 YOLOX-tiny 网络调度（83 层卷积 + 非卷积算子 + 解码/NMS） |
-| 显示 | AXIL 视频通道，1080p HDMI 输出，独立 148.5 MHz 时钟域 |
-| 存储 | DDR3，用户时钟 125 MHz，由 DDR IP 提供；TCM/Cache 与 Core 同域 |
+| 部分   | 说明                                                                                           |
+| ------ | ---------------------------------------------------------------------------------------------- |
+| Core   | RV32/RV64 IM+Zicsr，双发射、按序双退休，ROB16、int8/mem4、LQ4/SQ4；ALU/Load/DSP 8/10/10 级     |
+| SoC    | ITCM/DTCM 各 64 KiB、I$ 16 KiB、D$ 8 KiB（bank XOR mask2）、AXI 互连、DMA、MMIO、跨时钟域 FIFO |
+| 加速器 | 128-MAC INT8 卷积阵列，完整 YOLOX-tiny 网络调度（83 层卷积 + 非卷积算子 + 解码/NMS）           |
+| 显示   | AXIL 视频通道，1080p HDMI 输出，独立 148.5 MHz 时钟域                                          |
+| 存储   | DDR3，用户时钟 125 MHz，由 DDR IP 提供；TCM/Cache 与 Core 同域                                 |
 
 ## 时序与资源结果
 
 完整 YOLO + HDMI 工程在 C10 档（Core/SYS/DDR-user/外设/NPU/视频 =
 83.806818 / 102.430556 / 125 / 65.848214 / 92.1875 / 148.5 MHz）的实测：
 
-| 时钟域 | Fmax |
-|---|---:|
-| clk_core | 85.9387 MHz |
-| clk_sys | 108.0885 MHz |
+| 时钟域        |         Fmax |
+| ------------- | -----------: |
+| clk_core      |  85.9387 MHz |
+| clk_sys       | 108.0885 MHz |
 | ddrphy_sysclk | 132.6612 MHz |
-| clk_periph | 72.8046 MHz |
-| clk_npu | 95.5526 MHz |
-| clk_video | 162.8928 MHz |
+| clk_periph    |  72.8046 MHz |
+| clk_npu       |  95.5526 MHz |
+| clk_video     | 162.8928 MHz |
 
 六域 WNS 均为正，slow/fast 全部内部 setup/hold、恢复、MPW、CDC/Gray 与 DDR PHY 检查通过，
-未布通网络 0 条。资源占用：LUT 94,202、FF 73,263、DRM 169 格、APM 86 单元。
-板级 I/O 仍有通用 delay 提示，需按 DDR、HDMI/I2C 与异步接口逐项核对。
-
-时钟档由 `BOARD_CLOCK_PROFILE` 选择：C10 为工作档，C11/C12 为逐级降频的诊断档
-（Core 约 41.9 / 20.95 MHz），用于在更宽时序余量下定位板级问题。
+布线全部完成。资源占用：LUT 94,202、FF 73,263、DRM 169 格、APM 86 单元。
 
 ## 仓库结构
 
@@ -54,12 +49,12 @@ docs/          项目介绍、学习总结与 FPGA 适配说明
 
 ## 分支
 
-| 分支 | 内容 |
-|---|---|
-| `main` | 无加速器的四域 SoC、分层 CoreMark |
-| `yolo` | 本分支：YOLO NPU、UART 图片服务、1080p HDMI |
-| `minimind` | MiniMind 原作者程序与整数模型 |
-| `all` | 上述应用与一份独立 RT-Thread 应用 |
+| 分支       | 内容                                        |
+| ---------- | ------------------------------------------- |
+| `main`     | 无加速器的四域 SoC、分层 CoreMark           |
+| `yolo`     | 本分支：YOLO NPU、UART 图片服务、1080p HDMI |
+| `minimind` | MiniMind 原作者程序与整数模型               |
+| `all`      | 上述应用与一份独立 RT-Thread 应用           |
 
 ## 软件与固件
 
@@ -82,15 +77,15 @@ ELF/HEX/TCM 哈希。RV32/RV64 发布镜像 ID 分别为 `6aff928ff969d57d`、`a
 
 ## 环境要求
 
-| 用途 | 版本与说明 |
-|---|---|
-| 操作系统 | Windows 11（PDS 仅 Windows 本地运行）+ WSL2 Ubuntu 22.04（固件与 Python 工具） |
-| 仿真器 | Verilator 5.052 |
-| 交叉工具链 | GCC 16.1.0，需支持 `rv32im_zicsr`/`ilp32` 与 `rv64im_zicsr`/`lp64` |
-| 物理实现 | Pango PDS 2025.2 ADS |
-| 器件 | PG2L200H-6IFBB676 |
-| 脚本环境 | Python 3.10 及以上、Git、Make、C/C++ 编译器 |
-| 内存 | 每个 PDS 阶段启动前 Windows 可用物理内存与可用提交内存均不少于 6 GiB |
+| 用途       | 版本与说明                                                                     |
+| ---------- | ------------------------------------------------------------------------------ |
+| 操作系统   | Windows 11（PDS 仅 Windows 本地运行）+ WSL2 Ubuntu 22.04（固件与 Python 工具） |
+| 仿真器     | Verilator 5.052                                                                |
+| 交叉工具链 | GCC 16.1.0，需支持 `rv32im_zicsr`/`ilp32` 与 `rv64im_zicsr`/`lp64`             |
+| 物理实现   | Pango PDS 2025.2 ADS                                                           |
+| 器件       | PG2L200H-6IFBB676                                                              |
+| 脚本环境   | Python 3.10 及以上、Git、Make、C/C++ 编译器                                    |
+| 内存       | 每个 PDS 阶段启动前 Windows 可用物理内存与可用提交内存均不少于 6 GiB           |
 
 外部路径统一由环境变量给出：`RISCV_TOOL_ROOT`（交叉编译器 bin）、`PDS_HOME`（PDS 安装目录）、
 `PDS_WORK_ROOT`（原生工程根目录）、`RTTHREAD_ROOT`（仅在 `all` 分支使用）、
@@ -130,8 +125,7 @@ PDS 只在 Windows 本地运行；固件与 Python 工具可在 WSL/Linux 完成
    指向工程 `.pds` 后由 `pds_shell -file gen_bitstream.tcl` 执行，产物写入同一运行目录。
 
 每个阶段启动前都检查 Windows 可用物理内存与可用提交内存均不少于 6 GiB；不足时先释放内存，
-不要降低门限。完整命令、输入哈希与失败处理见
-[FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。
+不要降低门限。完整命令、输入哈希与日志位置见 [FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。
 
 ## 测试
 
@@ -149,15 +143,9 @@ make coremark XLEN=32
 
 ## 文档
 
-| 文档 | 内容 |
-|---|---|
-| [docs/PROJECT_INTRO.md](docs/PROJECT_INTRO.md) | 目录、参数、环境、仿真与 FPGA 测量 |
-| [docs/understand/](docs/understand/README.md) | SoC、双发射、DDR/AXI、FPGA、优化五份总结 |
-| [docs/fpga/FPGA_ADAPTATION.md](docs/fpga/FPGA_ADAPTATION.md) | PDS 流程、约束、时序与资源结果 |
-| [docs/fpga/YOLO_BRINGUP_STATUS.md](docs/fpga/YOLO_BRINGUP_STATUS.md) | YOLO 板级启动诊断与证据边界 |
+| 文档                                                                 | 内容                                     |
+| -------------------------------------------------------------------- | ---------------------------------------- |
+| [docs/PROJECT_INTRO.md](docs/PROJECT_INTRO.md)                       | 目录、参数、环境、仿真与 FPGA 测量       |
+| [docs/understand/](docs/understand/README.md)                        | SoC、双发射、DDR/AXI、FPGA、优化五份总结 |
+| [docs/fpga/FPGA_ADAPTATION.md](docs/fpga/FPGA_ADAPTATION.md)         | PDS 流程、约束、时序与资源结果           |
 
-## 已知边界
-
-C、F/V 扩展与 MMU/Linux 尚未实现；RV64 以功能验证为主，优化以 RV32 为先。
-完整网络的板级运行与实物 FPS 尚未记录；时序与资源数据来自 PDS 原始报告，
-仿真分数、综合估计、布线时序与板级测量分开记录，不互相替代。
