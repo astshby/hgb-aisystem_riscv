@@ -187,3 +187,8 @@ soc-axi-test:
 
 soc-irq-cdc-test:
 	bash scripts/verilator/run_soc_irq_cdc.sh $(XLEN)
+
+# ROM双条接纳、依赖JALR与ITCM入口；不需要DDR或NPU模型。
+.PHONY: board-boot-test
+board-boot-test:
+	bash scripts/verilator/run_scoreboard.sh $(XLEN) boot_prefix

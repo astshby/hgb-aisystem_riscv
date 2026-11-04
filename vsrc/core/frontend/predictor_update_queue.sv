@@ -20,7 +20,7 @@ module predictor_update_queue #(
         update = entries_q[head_q];
         update.valid = !rst && count_q != 0;
         pop = update.valid;
-        capacity = int'(count_q) <= DEPTH - 2 ? 2'd2 : 2'd1;
+        capacity = (count_q <= COUNT_W'(DEPTH - 2)) ? 2'd2 : 2'd1;
         push_count = {1'b0, incoming[0].valid} + {1'b0, incoming[1].valid};
     end
     always_ff @(posedge clk) begin
