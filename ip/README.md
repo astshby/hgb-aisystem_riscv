@@ -1,6 +1,5 @@
 # IP 配置
 
-> 写作约束：见工作区根目录的 `skills/regulation.md`。
 
 Generated Zynq-7020 BRAM and clock IP belongs here. Generated project output stays in `vivado-workspace/`.
 

@@ -1,31 +1,31 @@
 # 文档入口
 
-> 写作约束：[skills/regulation.md](../../skills/regulation.md)。所有新增和修改的 Markdown 都按这份约束写。
-
 | 文档 | 内容 |
 |---|---|
-| [软件复现入口](../software/README.md) | 程序、模型、固定图片和可执行测试 |
-| [PROJECT_INTRO.md](PROJECT_INTRO.md) | 项目目录、参数、环境、仿真性能、FPGA 性能、功能、未来 |
-| [understand/README.md](understand/README.md) | 五块学习总结：SoC、双发射、DDR/AXI、FPGA、优化 |
-| [fpga/FPGA_ADAPTATION.md](fpga/FPGA_ADAPTATION.md) | PDS 流程、C6 最终布线、视频/驱动与完整 320 应用验证、历史 Fmax |
-| [fpga/YOLO_BRINGUP_STATUS.md](fpga/YOLO_BRINGUP_STATUS.md) | 当前 YOLO 启动诊断、原生时序、板测问题、整改及证据边界 |
+| [软件与复现入口](../software/README.md) | 程序、模型、固定图片和可执行测试 |
+| [PROJECT_INTRO.md](PROJECT_INTRO.md) | 项目目录、参数、环境、仿真性能、FPGA 性能、功能与边界 |
+| [understand/README.md](understand/README.md) | 五份学习总结：SoC、双发射、DDR/AXI、FPGA、优化 |
+| [fpga/FPGA_ADAPTATION.md](fpga/FPGA_ADAPTATION.md) | PDS 流程、时钟约束、时序与资源结果 |
+| [fpga/YOLO_BRINGUP_STATUS.md](fpga/YOLO_BRINGUP_STATUS.md) | YOLO 板级启动诊断与证据边界 |
 
-工作区根目录还有三份交接文档：
+## 阅读顺序
 
-- `ITERATIONS.md`：每次迭代的目的、优势、代价。
-- `OPTIMIZATION_PLAN.md`：逐步优化建议和分支顺序。
-- `HANDOVER.md`：当前代码位置、问题、环境、下一步。
-
-`docs/COMMIT.md` 不再存在。历史阶段记录已合并到上述文档，逐条提交用
-`git log`/`git show` 查。
+1. [项目配置与测量](PROJECT_INTRO.md)：核心参数、时钟档、仿真与物理结果。
+2. [系统结构](understand/SOC_SYSTEM.md) 与 [双发射](understand/DUAL_ISSUE.md)：微架构。
+3. [DDR/AXI](understand/DDR_AXI.md)：总线、存储与跨时钟域。
+4. [FPGA 适配](fpga/FPGA_ADAPTATION.md)：PDS 综合、布局布线、时序与位流。
+5. [优化](understand/OPTIMIZATION.md)：当前瓶颈、已做取舍与后续方向。
 
 ## 源码入口
 
 - `vsrc/core/`：Core。
 - `vsrc/soc/`：SoC。
-- `vsrc/cpu/`：FPGA wrapper 和 DDR 桥。
+- `vsrc/cpu/`：FPGA 顶层、PLL 与 DDR/视频桥。
+- `vsrc/sim_cpu/`：仿真存储模型。
 - `tb/`：测试。
-- `scripts/`：仿真、PDS、loader。
-- `benchmark/`：裸机 CoreMark；通用启动/runtime 在 `software/common/baremetal/`。
+- `scripts/`：仿真、PDS、固件与工具入口。
+- `software/`：裸机固件与上位机程序。
+- `benchmark/`：裸机 CoreMark。
 
-修改 RTL 前先看对应学习文档和测试；功能和性能边界以源码、正式契约和实测日志为准。
+修改 RTL 前先看对应学习文档与测试；功能和性能边界以源码、测试和实测日志为准。
+仿真分数、综合估计、布线时序与板上测量分开记录，不互相替代。

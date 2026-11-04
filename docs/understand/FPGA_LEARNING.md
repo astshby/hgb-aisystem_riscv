@@ -1,6 +1,5 @@
 # FPGA 学习
 
-> 写作约束：[skills/regulation.md](../../../skills/regulation.md)。本文记录频率、边界和 PDS 的经验，不把工具估计写成板上结果。
 
 当前为四域 SoC，选用加速器时增加第五域；详细当前配置见 FPGA_ADAPTATION.md。
 以下十三轮/P0 数值按原版本保存，所述单时钟和旧门槛属于历史配置。

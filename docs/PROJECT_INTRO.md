@@ -76,7 +76,7 @@ RV64新档driver/video复测交后续调试，本轮没有重复83层长仿真�
 日志 `logs/demo-software-20261030/yolo-entry-tests.log`；未提供资产时，6 项可选检查会打印 SKIP。
 原 `make yolo XLEN=32|64` 保留自动卷积和 DMA 重叠回归。
 
-PC 命令为 `scripts/yolo/host.py --port COM5 status|model|upload|read|detect|selftest`。
+PC 命令为 `scripts/yolo/host.py --port <串口> status|model|upload|read|detect|selftest`。
 图像使用 RGB888，每块最多 1024 B，逐包、整帧和模型均核对 CRC32。
 READY 的 DETECT/HDMI 位由模型发布、NPU 和显示状态决定；缺模型时仍报告 NOT_READY，
 已校验模型可执行 83 Conv/266 节点。`network.c` 处理原 BN、SiLU、池化、拼接、上采样、
@@ -152,9 +152,8 @@ background 加 DMA 和 Timer IRQ，NPU background 还执行、核对卷积。
 
 编译矩阵 78 PASS、0 SKIP，源提交 d5abd51；公共集成 edc2349 重放 O3 24 项周期一致。
 O3 提升 M0/TCM，但 DDR 略低；同表保留取舍。短仿真未满足正式十秒要求。
-完整记录在工作区 `2-coremark/record.md`，镜像及日志在本仓库忽略目录
-`build/four-branches/`、`logs/four-branches-20261027/`。记录包含命令、CRC、ELF/HEX/源码哈希。
-历史日志曾被维护者删除，旧摘要不能替代本轮原始报告。
+镜像及日志在本仓库忽略目录 `build/four-branches/`、`logs/four-branches-20261027/`。
+记录包含命令、CRC、ELF/HEX 与源码哈希。旧日志已清理，旧摘要不能替代本轮原始报告。
 
 Cache 容量实验保持 Core 与上述时钟比例，O3 64 次迭代共 18 项通过。
 I$16/D$4 KiB 的 cold、warm、DMA/IRQ performance 为 2.507487、2.508556、2.187186 CoreMark/MHz；

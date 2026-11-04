@@ -1,6 +1,5 @@
 # DDR 与 AXI 学习
 
-> 写作约束：[skills/regulation.md](../../../skills/regulation.md)。当前 scoreboard SoC 使用统一 AXI4；legacy 旧通路保留供回归。
 
 ## 1. 当前层次
 

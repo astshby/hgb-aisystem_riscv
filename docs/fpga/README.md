@@ -1,26 +1,43 @@
 # FPGA 与 PDS
 
-当前 YOLO C10 诊断已完成布线和短时上板，完整系统仍无启动服务；
-最新进度、过温与串口结论见 [YOLO_BRINGUP_STATUS.md](YOLO_BRINGUP_STATUS.md)。
-下列 C6/C7/C8 文字是早期阶段快照，不能替代该报告的最新状态。
+平台：Pango PDS 2025.2 ADS，器件 PG2L200H-6IFBB676。
 
-Windows PDS 2025.2 ADS、PG2L200H-6IFBB676。当前演示配置为：
+FPGA 适配已完成：完整 YOLO + HDMI 工程通过综合、布局、布线、时序分析与位流生成，
+C10 工作档六个时钟域均达到时序要求，布线无未布通网络。板级整网验收仍在进行，
+当前进度与证据边界见 [YOLO_BRINGUP_STATUS.md](YOLO_BRINGUP_STATUS.md)。
 
-| 用途 | 档位 | Core/SYS/DDR-user/外设/NPU，MHz | 视频 |
+## 时钟档
+
+| 档位 | 名称 | Core / SYS / DDR-user / 外设 / NPU（MHz） | 用途 |
 |---|---|---|---|
-| 无 NPU 完整系统 | C6 | 100/100/125/60/无 | 无 |
-| YOLO | C7 | 90/100/125/60/100 | PPLL 148.5 MHz |
-| YOLO 后备 | C8 | (900/11)/100/125/60/100 | PPLL 148.5 MHz |
+| C10 | yolo_sys | 83.806818 / 102.430556 / 125 / 65.848214 / 92.1875 | 工作档 |
+| C11 | yolo_half | 41.903409 / 51.215277 / 125 / 32.924107 / 46.09375 | 半速诊断 |
+| C12 | yolo_quarter | 20.951704 / 25.607638 / 125 / 16.462053 / 23.046875 | 四分之一速诊断 |
 
-2026-10-30，无 NPU C6 最终布线 Fmax 为 87.3057/98.2415/122.5490/72.2201 MHz，
-0 未布通，Core 未达到 100 MHz；该工程使用自动 CoreMark 固件。
-交互固件和新增视频/YOLO 组合尚未布线、未上板。
-系统仍用一颗 GPLL 分频，视频另用 27 MHz 输入 PPLL，DDR IP 内部时钟另计。
-完整结果、约束缺口、视频/驱动仿真证据与历史表见 [FPGA_ADAPTATION.md](FPGA_ADAPTATION.md)。
-完整 320 应用已通过电脑 C + 真实 UART/NPU/AXI/视频 RTL 联合仿真；DDR 为行为模型，
-未执行完整 RV32 整网，交互固件与显示通路仍没有布局布线或上板结果。
+视频由独立 PPLL 提供 148.5 MHz，DDR 用户时钟由 DDR IP 提供，两者不随上表变化。
+C11/C12 用于在更宽时序余量下定位板级问题，不作为性能数据。
 
-统一入口要求 8 线程，可用 `HGB_PDS_THREADS` 覆盖；place/route 使用 normal，
-不传 PDS 2025.2 不支持的 performance 模式或旧 router-thread 选项。
-生成 IP、工程、网表和原始报告放在 `$PDS_WORK_ROOT`，`reference` 子目录只读。
-每阶段检查至少 6 GiB 物理和提交余量，不自动修改分页文件或终止无关进程。
+## C10 实测
+
+| 时钟域 | Fmax |
+|---|---:|
+| clk_core | 85.9387 MHz |
+| clk_sys | 108.0885 MHz |
+| ddrphy_sysclk | 132.6612 MHz |
+| clk_periph | 72.8046 MHz |
+| clk_npu | 95.5526 MHz |
+| clk_video | 162.8928 MHz |
+
+六域 WNS 为正，slow/fast 全部内部 setup/hold、恢复、MPW、CDC/Gray 与 DDR PHY 检查通过，
+未布通网络 0。资源：LUT 94,202、FF 73,263、DRM 169 格、APM 86 单元。
+
+## 运行约定
+
+- 统一入口为 `scripts/pango/run_phase.ps1`，每个阶段启动前检查 Windows 可用物理内存
+  与可用提交内存均不少于 6 GiB 时才开始；不允许临时降低门限。
+- 默认 8 线程，可用 `HGB_PDS_THREADS` 覆盖；一次只运行一个 PDS 工程。
+- 布局与布线使用 `normal` 模式；`fast` 模式内存占用低但时序质量不足，只用于快速试跑。
+- 生成 IP、原生工程、网表与原始报告放在 `$PDS_WORK_ROOT`，`reference` 子目录只读。
+- 结果记录包含分支/提交、构建参数、固件身份、命令与日志位置；不把工具估计写成板上结果。
+
+完整命令、约束说明、历史阶段与失败处理见 [FPGA_ADAPTATION.md](FPGA_ADAPTATION.md)。
