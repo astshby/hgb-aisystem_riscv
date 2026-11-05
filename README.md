@@ -1,174 +1,114 @@
-# hgb-aisystem：RISC-V 双发射 SoC 与 YOLO 加速平台
+# hgb-aisystem_riscv
 
-## 分支获取与启动回归
+面向紫光 FPGA 的 RISC-V 双发射 SoC，集成片上存储、Cache、AXI 总线、DMA、DDR3 与外设，提供 CoreMark、YOLO、MiniMind 和 RT-Thread 软件。
 
-一次完整 `git clone` 会取回 main、yolo、minimind、all 的远端分支；默认只检出一个。
-`git branch -a` 查看全部分支，`git switch yolo` 切换到本应用。首次从唯一的
-origin 同名分支切换时，Git 会建立本地跟踪分支；不要使用 `--single-branch` 限制获取范围。
+## 项目功能
+
+| 模块 | 已实现功能 |
+|---|---|
+| 处理器 | RV32/RV64 IM+Zicsr，双取指、双发射、双退休，支持机器态异常和中断 |
+| 执行与提交 | Scoreboard 跟踪数据依赖，ROB 保存结果与程序顺序；整数、访存分队列，完成与退休分离；双 ALU、双 AGU |
+| 分支预测 | BTB、全局/局部预测与锦标赛选择；当前关闭 RAS 和有限整数乱序选项 |
+| 片上存储 | Boot ROM、64 KiB ITCM、64 KiB DTCM；TCM 使用双端口 BRAM，独立指令与数据 Cache |
+| 总线与外设 | AXI 仲裁与缓冲、DMA、UART、GPIO、Timer、PLIC、MMIO；异步 FIFO 传输跨域请求和响应 |
+| 外存 | DDR3 控制器适配、Cache 行传输、DMA 块搬运 |
+| CoreMark | 理想存储、真实 TCM、SoC+TCM、SoC+Cache+DDR 分层测量；UART 接收命令、返回周期和 CRC |
+| YOLO | 128-MAC INT8 卷积加速器、YOLOX-Tiny 网络调度、UART 图片收发、HDMI 显示链路 |
+| MiniMind | 整数算子加速器、原作者 C 程序、模型与分词器、常驻文本交互程序 |
+| RT-Thread | BSP、DDR 运行测试和独立串口终端应用，仅保存在 `all` |
+
+Core 常用配置为 ROB16、整数队列 8 项、访存队列 4 项、LQ4/SQ4，ALU/Load/DSP 路径分别为 8/10/10 级。RV32 用于性能优化，RV64 保留功能验证；未实现 C、F、V 扩展和 MMU。
+
+四个分支共用本说明，硬件与软件按用途分别保存：
+
+| 分支 | 硬件 | 软件与用途 |
+|---|---|---|
+| `main` | 无 NPU 的四域 SoC | 分层 CoreMark、串口 CoreMark 演示 |
+| `yolo` | SoC、YOLO NPU、HDMI | YOLO 程序、模型、测试图片与上位机工具 |
+| `minimind` | SoC、MiniMind 加速器 | 原作者软件、整数模型、文本交互程序 |
+| `all` | SoC 与两套加速器 | 全部软件、一份 RT-Thread，联合仿真 |
+
+## 项目结构与目录
+
+```text
+vsrc/core/       处理器流水线、队列、执行单元与退休逻辑
+vsrc/pkg/        指令、总线与控制类型
+vsrc/soc/        ROM、TCM、Cache、AXI、DMA、MMIO 与跨域接口
+vsrc/cpu/        FPGA 顶层、PLL、复位与 DDR 桥
+tb/             单元、CPU、SoC、ISA 适配与应用测试
+software/       启动代码、驱动、应用、模型与软件测试
+benchmark/      CoreMark 算法与仿真端口（main、all）
+third_party/    YOLO RTL、RT-Thread 等分支依赖
+scripts/        构建、仿真、串口工具与 PDS 脚本
+constr/         FPGA 约束说明
+ip/             厂商 IP 接口与生成说明
+docs/           项目配置、微架构与 FPGA 适配文档
+```
+
+应用目录随分支保留。`scripts/branch_profile.json` 列出当前应用，`scripts/hardware_profile.json` 保存公共参数；`make software-list` 和 `make help` 列出当前分支的执行入口。
 
 ```bash
+git clone git@github.com:astshby/hgb-aisystem_riscv.git
+cd hgb-aisystem_riscv
+git branch -a
+git switch yolo  # 也可选择 main、minimind、all
+```
+
+## 项目验证
+
+Linux/WSL 使用 Python 3.10 及以上、Make、C/C++ 编译器、Verilator 和裸机 RISC-V 工具链。已使用 GCC 16.1.0、Verilator 5.052；工具链需支持 `rv32im_zicsr/ilp32` 与 `rv64im_zicsr/lp64`。
+
+```bash
+export RISCV_TOOL_ROOT=/path/to/riscv/bin
 make boot-count-test XLEN=32
 make boot-count-test XLEN=64
-python3 -m unittest tb.scripts.test_scoreboard_runner
-```
-
-继承 main PR #33 的修复：显式检查 FIFO 深度 2/4/8、ROM→ITCM、ISS 双出双入、
-整数/访存 IQ、恢复与退休；每宽度九个用例。修正 PASS 后仍有致命错误时的判定、
-三处 SKIP 输出，以及独立 SoC 启动脚本在空构建目录中的输出目录创建。
-编译使用单线程，`logs/boot-count/` 保存命令与源/日志哈希。
-独立启动可通过 `P2_LOG_ROOT` 和 `P2_BUILD_ROOT` 分离日志和模型，避免不同分支互相覆盖。
-
-这组测试覆盖公共 Core/SoC 启动；本分支的专属程序、NPU 和模型验证使用下方原有入口。
-生产 RTL、原固件、模型及默认时钟保持本分支配置。后续 hgb 偶尔继续紫光适配，
-rhbyv 独立推进 Zynq-7020，逐项吸收已验证经验。
-
-
-本仓库是一套可综合、可布局布线的 RISC-V SoC 工程：自研双发射乱序执行核心、
-TCM/Cache/DMA/AXI 总线系统、128-MAC YOLO 卷积加速器、1080p HDMI 显示链路，
-以及配套的裸机固件、上位机工具与 PDS 物理实现流程。
-
-FPGA 适配已完成：Pango PDS 2025.2 的综合、布局、布线、时序分析与位流生成全部跑通，
-[Windows 下的 PDS 适配](#windows-下的-pds-适配)。
-
-## 系统组成
-
-| 部分   | 说明                                                                                           |
-| ------ | ---------------------------------------------------------------------------------------------- |
-| Core   | RV32/RV64 IM+Zicsr，双发射、按序双退休，ROB16、int8/mem4、LQ4/SQ4；ALU/Load/DSP 8/10/10 级     |
-| SoC    | ITCM/DTCM 各 64 KiB、I$ 16 KiB、D$ 8 KiB（bank XOR mask2）、AXI 互连、DMA、MMIO、跨时钟域 FIFO |
-| 加速器 | 128-MAC INT8 卷积阵列，完整 YOLOX-tiny 网络调度（83 层卷积 + 非卷积算子 + 解码/NMS）           |
-| 显示   | AXIL 视频通道，1080p HDMI 输出，独立 148.5 MHz 时钟域                                          |
-| 存储   | DDR3，用户时钟 125 MHz，由 DDR IP 提供；TCM/Cache 与 Core 同域                                 |
-
-## 时序与资源结果
-
-完整 YOLO + HDMI 工程在 C10 档（Core/SYS/DDR-user/外设/NPU/视频 =
-83.806818 / 102.430556 / 125 / 65.848214 / 92.1875 / 148.5 MHz）的实测：
-
-| 时钟域        |         Fmax |
-| ------------- | -----------: |
-| clk_core      |  85.9387 MHz |
-| clk_sys       | 108.0885 MHz |
-| ddrphy_sysclk | 132.6612 MHz |
-| clk_periph    |  72.8046 MHz |
-| clk_npu       |  95.5526 MHz |
-| clk_video     | 162.8928 MHz |
-
-六域 WNS 均为正，slow/fast 全部内部 setup/hold、恢复、MPW、CDC/Gray 与 DDR PHY 检查通过，
-布线全部完成。资源占用：LUT 94,202、FF 73,263、DRM 169 格、APM 86 单元。
-
-## 仓库结构
-
-```
-vsrc/core/     Core：取指、译码、发射、执行、访存、退休
-vsrc/soc/      SoC：TCM/Cache、AXI、DMA、MMIO、NPU、视频、DDR 适配
-vsrc/cpu/      FPGA 顶层、PLL、DDR/视频桥、启动观测
-third_party/   YOLO NPU RTL
-tb/            单元、核心、riscv-tests 适配与 PDS 工具测试
-software/      裸机固件、YOLO 应用、上位机串口工具
-scripts/       仿真、PDS、固件与测试入口
-docs/          项目介绍、学习总结与 FPGA 适配说明
-```
-
-## 分支
-
-| 分支       | 内容                                        |
-| ---------- | ------------------------------------------- |
-| `main`     | 无加速器的四域 SoC、分层 CoreMark           |
-| `yolo`     | 本分支：YOLO NPU、UART 图片服务、1080p HDMI |
-| `minimind` | MiniMind 原作者程序与整数模型               |
-| `all`      | 上述应用与一份独立 RT-Thread 应用           |
-
-## 软件与固件
-
-固件源码、模型与测试集均随仓库提交；`build/` 只保存编译产物，删除后可重新生成。
-仓库内置示例图片与模型：`tb/assets/yolo/`（`dog.jpg`、`dog-192x144/320/416.rgb`、
-`black-16x16/320/416.rgb`）与 `software/yolo/assets/`（`yolox-tiny-320.bin`、
-`yolox-tiny-416.bin`、权重哈希与模型锁文件）。
-
-```bash
-make software-list
-make yolo-demo-build XLEN=32 YOLO_OUT=build/yolo-board-rv32
-make yolo-demo-test
-python3 scripts/yolo/firmware.py verify --output build/yolo-board-rv32
-```
-
-生产固件保留真实名称 `program.elf`，`manifest.json` 记录源文件、配置、固件 ID 与
-ELF/HEX/TCM 哈希。RV32/RV64 发布镜像 ID 分别为 `6aff928ff969d57d`、`adcd70b68d805fcf`。
-上位机入口为 `scripts/yolo/host.py --port <串口> status|model|upload|detect|read|selftest`。
-详细说明见[软件复现](software/README.md)与[YOLO 命令](software/yolo/README.md)。
-
-## 环境要求
-
-| 用途       | 版本与说明                                                                     |
-| ---------- | ------------------------------------------------------------------------------ |
-| 操作系统   | Windows 11（PDS 仅 Windows 本地运行）+ WSL2 Ubuntu 22.04（固件与 Python 工具） |
-| 仿真器     | Verilator 5.052                                                                |
-| 交叉工具链 | GCC 16.1.0，需支持 `rv32im_zicsr`/`ilp32` 与 `rv64im_zicsr`/`lp64`             |
-| 物理实现   | Pango PDS 2025.2 ADS                                                           |
-| 器件       | PG2L200H-6IFBB676                                                              |
-| 脚本环境   | Python 3.10 及以上、Git、Make、C/C++ 编译器                                    |
-| 内存       | 每个 PDS 阶段启动前 Windows 可用物理内存与可用提交内存均不少于 6 GiB           |
-
-外部路径统一由环境变量给出：`RISCV_TOOL_ROOT`（交叉编译器 bin）、`PDS_HOME`（PDS 安装目录）、
-`PDS_WORK_ROOT`（原生工程根目录）、`RTTHREAD_ROOT`（仅在 `all` 分支使用）、
-`COREMARK_REPLAY_DIR`（仅在基准复现时使用）。
-
-## Windows 下的 PDS 适配
-
-PDS 只在 Windows 本地运行；固件与 Python 工具可在 WSL/Linux 完成。所有路径由环境变量给出，
-不使用固定盘符或用户目录。
-
-1. 设置环境变量：`PDS_HOME` 指向 PDS 安装目录，`PDS_WORK_ROOT` 指向原生工程根目录
-   （每次运行在其下新建一个目录），`RISCV_TOOL_ROOT` 指向交叉编译器 bin。
-2. 生成 DDR IP：`powershell -File scripts/pango/generate_ddr_ip.ps1`，产物目录作为
-   后续 `--ip-dir`。
-3. 构建固件：`make yolo-demo-build XLEN=32 YOLO_OUT=build/yolo-board-rv32`，
-   `--firmware-dir` 指向该输出目录。
-4. 暂存原生工程（输出目录必须为空）：
-
-   ```powershell
-   python scripts/pango/prepare_project.py --output "$env:PDS_WORK_ROOT\work\<run>" `
-     --ip-dir <生成IP目录> --firmware-dir build\yolo-board-rv32 `
-     --firmware-role yolo-interactive --xlen 32 --synthesis-strategy timing-v2 `
-     --icache-bytes 16384 --dcache-bytes 8192 --dcache-bank-xor-mask 2 `
-     --soc-profile full --core-backend scoreboard --retire-entries 16 `
-     --split-issue-queue 1 --limited-integer-ooo 0 --scheduler-forward-mode 3 `
-     --integer-queue-entries 8 --memory-queue-entries 4 --predictor-mode 1 --ras-enable 0 `
-     --board-clock-profile 10 --npu-enable --video-enable 1
-   ```
-
-5. 综合：`powershell -File scripts/pango/run_phase.ps1 -Project <run>.pds
-   -LogDirectory <run>\logs -Phase synthesis -PdsHome $env:PDS_HOME`。
-6. 原生 CDC 审计与绑定：按 [FPGA 适配](docs/fpga/FPGA_ADAPTATION.md) 中的
-   `prepare_cdc_audit.py` / `query_cdc.tcl` 流程生成 `cdc-scope-receipt.json`。
-7. 实现：`-Phase implementation -ImplementationScript implement_cdc.tcl`，
-   阶段顺序为 dev_map → place → route → route_optimize → report_timing。
-8. 生成位流：该步骤已随工程暂存为 `gen_bitstream.tcl`；设置 `HGB_PDS_PROJECT`
-   指向工程 `.pds` 后由 `pds_shell -file gen_bitstream.tcl` 执行，产物写入同一运行目录。
-
-每个阶段启动前都检查 Windows 可用物理内存与可用提交内存均不少于 6 GiB；不足时先释放内存，
-不要降低门限。完整命令、输入哈希与日志位置见 [FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。
-
-## 测试
-
-```bash
 make test XLEN=32
 make test XLEN=64
 make riscv-tests XLEN=32
 make riscv-tests XLEN=64
-make benchmark-smoke XLEN=32
-make coremark XLEN=32
 ```
 
-`make test` 不含 riscv-tests 与基准测试。测试台声明 `timeunit 1ns`、`timeprecision 1ps`，
-使用确定性的时钟沿激励并打印 `PASS`。
+`make test` 检查公共功能，ISA 测试单独运行。软件依赖、模型准备、固件构建与各应用仿真命令见[软件说明](software/README.md)。
 
-## 文档
+| 验证对象 | 已完成结果 |
+|---|---|
+| 四分支公共启动 | 各分支 RV32/RV64 计数与启动测试各 9 PASS；独立多域启动各 4 PASS |
+| main 功能与 ISA | RV32/RV64 功能测试各 82 PASS、2 SKIP；ISA 分别 58/78 PASS，各排除 2 项 |
+| CoreMark | RV32/RV64 的 performance、validation 与真实 SoC UART 命令循环通过；周期、CRC、DONE/READY 和电脑解析已检查 |
+| YOLO | 同一 C 程序在电脑执行调度，与真实 NPU、总线、UART、显示 RTL 联合仿真通过；另完成 RV32/RV64 驱动短测 |
+| MiniMind | 双宽单层算子与参考对照、DMA 并发通过；原生整数 C 程序完成八层推理与连续请求测试 |
+| all 与 RT-Thread | 双宽联合 SoC 地址、中断、仲裁和复位测试通过；RT-Thread 双宽 DDR 运行测试通过，独立终端完成构建与命令测试 |
 
-| 文档                                                                 | 内容                                     |
-| -------------------------------------------------------------------- | ---------------------------------------- |
-| [docs/PROJECT_INTRO.md](docs/PROJECT_INTRO.md)                       | 目录、参数、环境、仿真与 FPGA 测量       |
-| [docs/understand/](docs/understand/README.md)                        | SoC、双发射、DDR/AXI、FPGA、优化五份总结 |
-| [docs/fpga/FPGA_ADAPTATION.md](docs/fpga/FPGA_ADAPTATION.md)         | PDS 流程、约束、时序与资源结果           |
+CoreMark/MHz 按 `iterations × 1,000,000 / Core计时区周期` 计算。M0 使用测试台一周期存储；`core_tcm`、`soc_tcm`、`soc_ddr` 分别测量真实 TCM、SoC+TCM、SoC+Cache+DDR。其他域的等待计入 Core 周期，RT-Thread 独立测试。
 
+历史 O3、64 次迭代仿真中，M0 的 RV32 performance/validation 为 **3.590617/3.570731 CoreMark/MHz**，RV64 为 **3.145656/3.133377**；真实 Core+TCM 的 RV32 为 **3.095736/3.081770**。分层配置与实验数据见[优化总结](docs/understand/OPTIMIZATION.md)。正式 CoreMark 成绩还需计时至少十秒。
+
+完整板端 YOLO 推理与 HDMI 显示、MiniMind 全模型 RTL/板端运行尚未完成。MiniMind 多写 RAM 综合和模型装载仍需修正；启动计数修复后的网表与板上 READY 尚未重新测量。
+
+## FPGA 配置
+
+| 项目 | 配置 |
+|---|---|
+| 工具与器件 | Windows Pango PDS 2025.2 ADS，PG2L200H-6IFBB676 |
+| 完整系统顶层 | `vsrc/cpu/pango_200hp_top.sv`；`all` 使用联合仿真顶层 `soc_all_system` |
+| 存储参数 | ITCM/DTCM 各 64 KiB；已有完整系统测量选 I$16 KiB、D$8 KiB、32 B 行、D$ bank XOR mask2 |
+| Cache 参数传递 | 构建时显式传入 16/8 KiB 与 mask2；通用接口默认仍为 4/4 KiB、mask0 |
+| Core 域 | Core、TCM 与 Cache 命中逻辑 |
+| SYS 域 | 总线仲裁与 DMA；DDR 用户域、外设域分别跨域连接 |
+| 加速器与视频 | NPU 独立时钟；YOLO 视频使用独立 148.5 MHz PPLL |
+| 系统时钟 | 一颗系统 GPLL 产生 Core/SYS/外设/NPU 时钟；DDR 用户钟由 DDR IP 提供 |
+| 实现策略 | `timing-v2`：8 线程、fanout64、retiming 开、算术资源共享关、布局双输出 LUT 合并关、布线时序权重 80；normal 布局/布线，开启 recovery 与 route_optimize |
+| 运行内存 | 启动及 dev_map/place/route/route_optimize 阶段，Windows 可用物理内存、可用提交内存均至少 6 GiB |
+
+| 分支与时钟档 | Core / SYS / DDR-user / 外设 / NPU，MHz |
+|---|---|
+| main，C9 `main_margin2` | 88.75 / 98.611111 / 125 / 68.269231 / 无 |
+| yolo，C10 `yolo_sys` | 83.806818 / 102.430556 / 125 / 65.848214 / 92.1875 |
+| minimind，C1 `target` | 100 / 80 / 125 / 25 / 100 |
+| all | 按所选仿真时钟配置；两套加速器分别接入时钟与复位 |
+
+表中频率为配置值。历史 main C9 布线 Core Fmax 为 90.3702 MHz，YOLO C10 为 85.9387 MHz；两者均早于本次启动计数修复。各分支的诊断时钟、PLL 分频、完整 PDS 命令、时序与资源结果见 [FPGA 适配](docs/fpga/FPGA_ADAPTATION.md)。
+
+`PDS_HOME` 指定工具安装目录，`PDS_WORK_ROOT` 保存生成 IP、原生工程、网表与报告。固件和 IP 重新构建后，依次运行综合、CDC 绑定、布局布线与位流生成；执行脚本在 `scripts/pango/`。
+
+详细目录与配置见[项目介绍](docs/PROJECT_INTRO.md)，微架构见[设计文档](docs/understand/README.md)，其他文档见[文档索引](docs/README.md)。
