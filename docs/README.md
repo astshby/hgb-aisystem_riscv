@@ -1,29 +1,9 @@
-# 文档入口
-
-> 写作约束：[skills/regulation.md](../../skills/regulation.md)。所有新增和修改的 Markdown 都按这份约束写。
+# 文档索引
 
 | 文档 | 内容 |
 |---|---|
-| [软件复现入口](../software/README.md) | 作者程序、模型/分词器和可执行测试 |
-| [PROJECT_INTRO.md](PROJECT_INTRO.md) | 项目目录、参数、环境、仿真性能、FPGA 性能、功能、未来 |
-| [understand/README.md](understand/README.md) | 五块学习总结：SoC、双发射、DDR/AXI、FPGA、优化 |
-| [fpga/FPGA_ADAPTATION.md](fpga/FPGA_ADAPTATION.md) | PDS 流程、约束、十三轮 Fmax、当前结果和板级边界 |
-
-工作区根目录还有三份交接文档：
-
-- `ITERATIONS.md`：每次迭代的目的、优势、代价。
-- `OPTIMIZATION_PLAN.md`：逐步优化建议和分支顺序。
-- `HANDOVER.md`：当前代码位置、问题、环境、下一步。
-
-`docs/COMMIT.md` 不再存在。历史阶段记录已合并到上述文档，逐条提交用
-`git log`/`git show` 查。
-
-## 源码入口
-
-- `vsrc/core/`：Core。
-- `vsrc/soc/`：SoC。
-- `vsrc/cpu/`：FPGA wrapper 和 DDR 桥。
-- `tb/`：测试。
-- `scripts/`：仿真、PDS、loader。
-
-修改 RTL 前先看对应学习文档和测试；功能和性能边界以源码、正式契约和实测日志为准。
+| [项目说明](../README.md) | 项目功能、目录、验证与 FPGA 配置 |
+| [项目配置与测量](PROJECT_INTRO.md) | 参数、软件、仿真数据与 FPGA 测量 |
+| [微架构与系统设计](understand/README.md) | Core、SoC、DDR/AXI 与优化 |
+| [FPGA 适配](fpga/README.md) | PDS、时钟、约束与实现结果 |
+| [软件说明](../software/README.md) | 依赖、模型、固件构建与应用测试 |
